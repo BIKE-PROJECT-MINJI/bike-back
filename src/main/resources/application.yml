@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: bike-back
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
