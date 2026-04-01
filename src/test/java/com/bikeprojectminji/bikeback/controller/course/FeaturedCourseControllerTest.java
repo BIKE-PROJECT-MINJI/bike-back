@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseResponse;
 import com.bikeprojectminji.bikeback.service.course.CourseService;
+import com.bikeprojectminji.bikeback.service.ridepolicy.RidePolicyService;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +26,9 @@ class FeaturedCourseControllerTest {
 
     @MockitoBean
     private CourseService courseService;
+
+    @MockitoBean
+    private RidePolicyService ridePolicyService;
 
     @Test
     @DisplayName("추천 코스 API는 sortingMode와 코스 목록을 success 래퍼로 응답한다")
