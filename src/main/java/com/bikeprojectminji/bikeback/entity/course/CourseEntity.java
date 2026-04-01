@@ -29,6 +29,18 @@ public class CourseEntity {
     @Column(name = "display_order", nullable = false)
     private Integer displayOrder;
 
+    @Column(nullable = false)
+    private boolean curated;
+
+    @Column(name = "featured_rank")
+    private Integer featuredRank;
+
+    @Column(name = "start_latitude", precision = 10, scale = 7)
+    private BigDecimal startLatitude;
+
+    @Column(name = "start_longitude", precision = 10, scale = 7)
+    private BigDecimal startLongitude;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -39,10 +51,27 @@ public class CourseEntity {
     }
 
     public CourseEntity(String title, BigDecimal distanceKm, Integer estimatedDurationMin, Integer displayOrder) {
+        this(title, distanceKm, estimatedDurationMin, displayOrder, false, null, null, null);
+    }
+
+    public CourseEntity(
+            String title,
+            BigDecimal distanceKm,
+            Integer estimatedDurationMin,
+            Integer displayOrder,
+            boolean curated,
+            Integer featuredRank,
+            BigDecimal startLatitude,
+            BigDecimal startLongitude
+    ) {
         this.title = title;
         this.distanceKm = distanceKm;
         this.estimatedDurationMin = estimatedDurationMin;
         this.displayOrder = displayOrder;
+        this.curated = curated;
+        this.featuredRank = featuredRank;
+        this.startLatitude = startLatitude;
+        this.startLongitude = startLongitude;
     }
 
     public Long getId() {
@@ -63,6 +92,22 @@ public class CourseEntity {
 
     public Integer getDisplayOrder() {
         return displayOrder;
+    }
+
+    public boolean isCurated() {
+        return curated;
+    }
+
+    public Integer getFeaturedRank() {
+        return featuredRank;
+    }
+
+    public BigDecimal getStartLatitude() {
+        return startLatitude;
+    }
+
+    public BigDecimal getStartLongitude() {
+        return startLongitude;
     }
 
     public OffsetDateTime getCreatedAt() {
