@@ -2,9 +2,11 @@ package com.bikeprojectminji.bikeback.service.course;
 
 import com.bikeprojectminji.bikeback.dto.course.CourseListItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseResponse;
 import com.bikeprojectminji.bikeback.entity.course.CourseEntity;
+import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import java.math.RoundingMode;
 import com.bikeprojectminji.bikeback.repository.course.CourseRepository;
 import java.math.BigDecimal;
@@ -47,6 +49,18 @@ public class CourseService {
                 : null;
 
         return new CourseListResponse(items, hasNext, nextCursor);
+    }
+
+    public CourseDetailResponse getCourseDetail(Long courseId) {
+        CourseEntity course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new NotFoundException("코스를 찾을 수 없습니다."));
+
+        return new CourseDetailResponse(
+                course.getId(),
+                course.getTitle(),
+                course.getDistanceKm(),
+                course.getEstimatedDurationMin()
+        );
     }
 
     public FeaturedCourseResponse getFeaturedCourses(BigDecimal lat, BigDecimal lon) {

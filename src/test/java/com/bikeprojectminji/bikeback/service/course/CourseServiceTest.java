@@ -1,14 +1,18 @@
 package com.bikeprojectminji.bikeback.service.course;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
+import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
 import com.bikeprojectminji.bikeback.entity.course.CourseEntity;
+import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.repository.course.CourseRepository;
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,6 +29,36 @@ class CourseServiceTest {
 
     @InjectMocks
     private CourseService courseService;
+
+    @Test
+    @DisplayName("코스 상세 조회는 단건 상세를 응답한다")
+    void getCourseDetailReturnsSingleCourse() {
+        CourseEntity entity = new CourseEntity(
+                "아라뱃길 루트",
+                BigDecimal.valueOf(23.4),
+                95,
+                1
+        );
+        ReflectionTestUtils.setField(entity, "id", 7L);
+        given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
+
+        CourseDetailResponse response = courseService.getCourseDetail(7L);
+
+        assertThat(response.id()).isEqualTo(7L);
+        assertThat(response.title()).isEqualTo("아라뱃길 루트");
+        assertThat(response.distanceKm()).isEqualByComparingTo("23.4");
+        assertThat(response.estimatedDurationMin()).isEqualTo(95);
+    }
+
+    @Test
+    @DisplayName("코스 상세 조회는 없는 코스면 NotFoundException을 던진다")
+    void getCourseDetailThrowsWhenCourseDoesNotExist() {
+        given(courseRepository.findById(999L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> courseService.getCourseDetail(999L))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("코스를 찾을 수 없습니다.");
+    }
 
     @Test
     @DisplayName("코스가 없으면 빈 목록과 종료 상태를 응답한다")
