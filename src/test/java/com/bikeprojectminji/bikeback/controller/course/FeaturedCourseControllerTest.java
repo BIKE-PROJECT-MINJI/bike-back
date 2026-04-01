@@ -46,4 +46,25 @@ class FeaturedCourseControllerTest {
                 .andExpect(jsonPath("$.data.courses[0].distanceFromUserM").value(850))
                 .andExpect(jsonPath("$.data.courses[0].featuredRank").value(1));
     }
+
+    @Test
+    @DisplayName("lat만 전달되면 400을 응답한다")
+    void getFeaturedCoursesReturnsBadRequestWhenLocationPairIsBroken() throws Exception {
+        mockMvc.perform(get("/api/v1/courses/featured")
+                        .param("lat", "37.5"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("lat와 lon은 함께 전달되어야 합니다."));
+    }
+
+    @Test
+    @DisplayName("lat 범위를 벗어나면 400을 응답한다")
+    void getFeaturedCoursesReturnsBadRequestWhenLatOutOfRange() throws Exception {
+        mockMvc.perform(get("/api/v1/courses/featured")
+                        .param("lat", "91")
+                        .param("lon", "127.0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("lat는 -90 이상 90 이하여야 합니다."));
+    }
 }

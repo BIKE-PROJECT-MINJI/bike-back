@@ -10,12 +10,15 @@ import com.bikeprojectminji.bikeback.repository.course.CourseRepository;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Comparator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class CourseService {
 
     private static final int DEFAULT_LIMIT = 10;
+    private static final Logger log = LoggerFactory.getLogger(CourseService.class);
 
     private final CourseRepository courseRepository;
 
@@ -49,10 +52,14 @@ public class CourseService {
     public FeaturedCourseResponse getFeaturedCourses(BigDecimal lat, BigDecimal lon) {
         List<CourseEntity> featuredCourses = courseRepository.findFeaturedCourses();
         if (featuredCourses.isEmpty()) {
+            log.info("featured courses fallback: no curated courses available");
             return new FeaturedCourseResponse("fallback", List.of());
         }
 
         boolean distanceMode = lat != null && lon != null;
+        if (!distanceMode) {
+            log.info("featured courses fallback: request without location parameters");
+        }
         List<FeaturedCourseItemResponse> items = (distanceMode ? featuredCourses.stream()
                 .map(course -> toFeaturedResponse(course, lat, lon))
                 .sorted(Comparator
