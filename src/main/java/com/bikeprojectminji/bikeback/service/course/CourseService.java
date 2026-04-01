@@ -3,12 +3,16 @@ package com.bikeprojectminji.bikeback.service.course;
 import com.bikeprojectminji.bikeback.dto.course.CourseListItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointsResponse;
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseResponse;
 import com.bikeprojectminji.bikeback.entity.course.CourseEntity;
+import com.bikeprojectminji.bikeback.entity.course.CourseRoutePointEntity;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import java.math.RoundingMode;
 import com.bikeprojectminji.bikeback.repository.course.CourseRepository;
+import com.bikeprojectminji.bikeback.repository.course.CourseRoutePointRepository;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Comparator;
@@ -23,9 +27,11 @@ public class CourseService {
     private static final Logger log = LoggerFactory.getLogger(CourseService.class);
 
     private final CourseRepository courseRepository;
+    private final CourseRoutePointRepository courseRoutePointRepository;
 
-    public CourseService(CourseRepository courseRepository) {
+    public CourseService(CourseRepository courseRepository, CourseRoutePointRepository courseRoutePointRepository) {
         this.courseRepository = courseRepository;
+        this.courseRoutePointRepository = courseRoutePointRepository;
     }
 
     public CourseListResponse getCourses(Long cursor, Integer limit) {
@@ -61,6 +67,22 @@ public class CourseService {
                 course.getDistanceKm(),
                 course.getEstimatedDurationMin()
         );
+    }
+
+    public CourseRoutePointsResponse getCourseRoutePoints(Long courseId) {
+        if (!courseRepository.existsById(courseId)) {
+            throw new NotFoundException("코스를 찾을 수 없습니다.");
+        }
+
+        List<CourseRoutePointResponse> points = courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId).stream()
+                .map(routePoint -> new CourseRoutePointResponse(
+                        routePoint.getPointOrder(),
+                        routePoint.getLatitude(),
+                        routePoint.getLongitude()
+                ))
+                .toList();
+
+        return new CourseRoutePointsResponse(courseId, points);
     }
 
     public FeaturedCourseResponse getFeaturedCourses(BigDecimal lat, BigDecimal lon) {

@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointsResponse;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.service.course.CourseService;
 import com.bikeprojectminji.bikeback.service.ridepolicy.RidePolicyService;
@@ -61,6 +63,39 @@ class CourseControllerTest {
                 .given(courseService).getCourseDetail(999L);
 
         mockMvc.perform(get("/api/v1/courses/999"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.message").value("코스를 찾을 수 없습니다."));
+    }
+
+    @Test
+    @DisplayName("코스 경로 API는 success 래퍼로 응답한다")
+    void getCourseRoutePointsReturnsWrappedResponse() throws Exception {
+        CourseRoutePointsResponse response = new CourseRoutePointsResponse(
+                7L,
+                List.of(
+                        new CourseRoutePointResponse(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                        new CourseRoutePointResponse(2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
+                )
+        );
+        given(courseService.getCourseRoutePoints(7L)).willReturn(response);
+
+        mockMvc.perform(get("/api/v1/courses/7/route-points"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.message").value("success"))
+                .andExpect(jsonPath("$.data.courseId").value(7))
+                .andExpect(jsonPath("$.data.points[0].pointOrder").value(1))
+                .andExpect(jsonPath("$.data.points[1].pointOrder").value(2));
+    }
+
+    @Test
+    @DisplayName("코스 경로 API는 없는 코스면 404를 응답한다")
+    void getCourseRoutePointsReturnsNotFoundWhenCourseDoesNotExist() throws Exception {
+        willThrow(new NotFoundException("코스를 찾을 수 없습니다."))
+                .given(courseService).getCourseRoutePoints(999L);
+
+        mockMvc.perform(get("/api/v1/courses/999/route-points"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404))
                 .andExpect(jsonPath("$.message").value("코스를 찾을 수 없습니다."));

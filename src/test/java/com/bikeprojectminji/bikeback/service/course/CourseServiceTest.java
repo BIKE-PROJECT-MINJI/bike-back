@@ -6,9 +6,12 @@ import static org.mockito.BDDMockito.given;
 
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointsResponse;
 import com.bikeprojectminji.bikeback.entity.course.CourseEntity;
+import com.bikeprojectminji.bikeback.entity.course.CourseRoutePointEntity;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.repository.course.CourseRepository;
+import com.bikeprojectminji.bikeback.repository.course.CourseRoutePointRepository;
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
@@ -26,6 +29,9 @@ class CourseServiceTest {
 
     @Mock
     private CourseRepository courseRepository;
+
+    @Mock
+    private CourseRoutePointRepository courseRoutePointRepository;
 
     @InjectMocks
     private CourseService courseService;
@@ -56,6 +62,33 @@ class CourseServiceTest {
         given(courseRepository.findById(999L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> courseService.getCourseDetail(999L))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("코스를 찾을 수 없습니다.");
+    }
+
+    @Test
+    @DisplayName("코스 경로 조회는 pointOrder 오름차순 좌표 목록을 응답한다")
+    void getCourseRoutePointsReturnsOrderedPoints() {
+        given(courseRepository.existsById(7L)).willReturn(true);
+        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(7L)).willReturn(List.of(
+                new CourseRoutePointEntity(7L, 1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                new CourseRoutePointEntity(7L, 2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
+        ));
+
+        CourseRoutePointsResponse response = courseService.getCourseRoutePoints(7L);
+
+        assertThat(response.courseId()).isEqualTo(7L);
+        assertThat(response.points()).hasSize(2);
+        assertThat(response.points().get(0).pointOrder()).isEqualTo(1);
+        assertThat(response.points().get(1).pointOrder()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("코스 경로 조회는 없는 코스면 NotFoundException을 던진다")
+    void getCourseRoutePointsThrowsWhenCourseDoesNotExist() {
+        given(courseRepository.existsById(999L)).willReturn(false);
+
+        assertThatThrownBy(() -> courseService.getCourseRoutePoints(999L))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("코스를 찾을 수 없습니다.");
     }
