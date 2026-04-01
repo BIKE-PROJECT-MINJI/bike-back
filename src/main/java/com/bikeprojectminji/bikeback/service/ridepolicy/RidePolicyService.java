@@ -14,7 +14,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.OffsetDateTime;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -176,16 +175,70 @@ public class RidePolicyService {
         if (routePoints.isEmpty()) {
             return false;
         }
-        return routePoints.stream()
-                .map(point -> distanceMeters(
-                        location.lat().doubleValue(),
-                        location.lon().doubleValue(),
-                        point.getLatitude().doubleValue(),
-                        point.getLongitude().doubleValue()
-                ))
-                .min(BigDecimal::compareTo)
-                .map(distance -> distance.compareTo(thresholdMeters) <= 0)
-                .orElse(false);
+        return minimumRouteDistanceMeters(routePoints, location).compareTo(thresholdMeters) <= 0;
+    }
+
+    private BigDecimal minimumRouteDistanceMeters(List<CourseRoutePointEntity> routePoints, RideLocationRequest location) {
+        if (routePoints.size() == 1) {
+            CourseRoutePointEntity point = routePoints.get(0);
+            return distanceMeters(
+                    location.lat().doubleValue(),
+                    location.lon().doubleValue(),
+                    point.getLatitude().doubleValue(),
+                    point.getLongitude().doubleValue()
+            );
+        }
+
+        double minDistance = Double.MAX_VALUE;
+        for (int i = 0; i < routePoints.size() - 1; i++) {
+            CourseRoutePointEntity start = routePoints.get(i);
+            CourseRoutePointEntity end = routePoints.get(i + 1);
+            minDistance = Math.min(
+                    minDistance,
+                    segmentDistanceMeters(
+                            location.lat().doubleValue(),
+                            location.lon().doubleValue(),
+                            start.getLatitude().doubleValue(),
+                            start.getLongitude().doubleValue(),
+                            end.getLatitude().doubleValue(),
+                            end.getLongitude().doubleValue()
+                    )
+            );
+        }
+        return BigDecimal.valueOf(minDistance).setScale(0, RoundingMode.HALF_UP);
+    }
+
+    private double segmentDistanceMeters(
+            double pointLat,
+            double pointLon,
+            double startLat,
+            double startLon,
+            double endLat,
+            double endLon
+    ) {
+        double referenceLat = Math.toRadians((startLat + endLat + pointLat) / 3.0);
+        double meterPerDegLat = 111_320d;
+        double meterPerDegLon = Math.cos(referenceLat) * 111_320d;
+
+        double px = pointLon * meterPerDegLon;
+        double py = pointLat * meterPerDegLat;
+        double x1 = startLon * meterPerDegLon;
+        double y1 = startLat * meterPerDegLat;
+        double x2 = endLon * meterPerDegLon;
+        double y2 = endLat * meterPerDegLat;
+
+        double dx = x2 - x1;
+        double dy = y2 - y1;
+        if (dx == 0d && dy == 0d) {
+            return Math.hypot(px - x1, py - y1);
+        }
+
+        double t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+        t = Math.max(0d, Math.min(1d, t));
+
+        double closestX = x1 + t * dx;
+        double closestY = y1 + t * dy;
+        return Math.hypot(px - closestX, py - closestY);
     }
 
     private BigDecimal distanceMeters(double lat1, double lon1, double lat2, double lon2) {

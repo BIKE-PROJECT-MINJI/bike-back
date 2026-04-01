@@ -52,12 +52,31 @@ class RidePolicyServiceTest {
     void evaluateReturnsEligibleAtPreStart() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(routePoint(courseId, 1, 37.5665, 126.9780)));
+        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(
+                routePoint(courseId, 1, 37.5660, 126.9770),
+                routePoint(courseId, 2, 37.5670, 126.9790)
+        ));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("PRE_START", 37.5665, 126.9780, 18.5, "2026-03-29T10:15:19+09:00"));
 
         assertThat(response.startGate().status()).isEqualTo("ELIGIBLE");
         assertThat(response.offRoute().reasonCode()).isEqualTo("NOT_ACTIVE_YET");
+        assertThat(response.overallState()).isEqualTo("PRE_START_ELIGIBLE");
+    }
+
+    @Test
+    @DisplayName("시작점에서 멀어도 경로 선분 50m 이내면 PRE_START에서 시작 가능 판정을 응답한다")
+    void evaluateReturnsEligibleWhenNearRouteSegment() {
+        Long courseId = 1L;
+        given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5900, 126.9900)));
+        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(
+                routePoint(courseId, 1, 37.5660, 126.9770),
+                routePoint(courseId, 2, 37.5670, 126.9790)
+        ));
+
+        RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("PRE_START", 37.5665, 126.9780, 18.5, "2026-03-29T10:15:19+09:00"));
+
+        assertThat(response.startGate().status()).isEqualTo("ELIGIBLE");
         assertThat(response.overallState()).isEqualTo("PRE_START_ELIGIBLE");
     }
 
