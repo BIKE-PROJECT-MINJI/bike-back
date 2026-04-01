@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.controller.course;
 import com.bikeprojectminji.bikeback.dto.ridepolicy.RidePolicyEvaluationRequest;
 import com.bikeprojectminji.bikeback.dto.ridepolicy.RidePolicyEvaluationResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointsResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseResponse;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
@@ -41,6 +42,11 @@ public class CourseController {
     @GetMapping("/{courseId}")
     public ApiResponse<CourseDetailResponse> getCourseDetail(@PathVariable Long courseId) {
         return ApiResponse.success(courseService.getCourseDetail(courseId));
+    }
+
+    @GetMapping("/{courseId}/route-points")
+    public ApiResponse<CourseRoutePointsResponse> getCourseRoutePoints(@PathVariable Long courseId) {
+        return ApiResponse.success(courseService.getCourseRoutePoints(courseId));
     }
 
     @GetMapping("/featured")
