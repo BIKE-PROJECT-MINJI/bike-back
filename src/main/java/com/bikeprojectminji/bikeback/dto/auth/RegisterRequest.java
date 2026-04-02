@@ -1,10 +1,9 @@
 package com.bikeprojectminji.bikeback.dto.auth;
 
-public record AuthMeResponse(
-        Long userId,
+public record RegisterRequest(
         String email,
+        String password,
         String displayName,
-        boolean authenticated,
-        String role
+        String profileImageUrl
 ) {
 }
