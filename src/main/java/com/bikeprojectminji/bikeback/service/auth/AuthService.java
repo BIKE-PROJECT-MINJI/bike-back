@@ -73,15 +73,14 @@ public class AuthService {
     }
 
     public UserEntity findUserBySubject(String subject) {
-        Long userId;
         try {
-            userId = Long.valueOf(subject);
+            Long userId = Long.valueOf(subject);
+            return userRepository.findById(userId)
+                    .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다."));
         } catch (NumberFormatException exception) {
-            throw new UnauthorizedException("로그인 정보가 필요합니다.");
+            return userRepository.findByExternalId(subject)
+                    .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다."));
         }
-
-        return userRepository.findById(userId)
-                .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다."));
     }
 
     private String issueToken(UserEntity user) {
