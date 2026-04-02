@@ -7,4 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface CourseRoutePointRepository extends JpaRepository<CourseRoutePointEntity, Long> {
 
     List<CourseRoutePointEntity> findByCourseIdOrderByPointOrderAsc(Long courseId);
+
+    void deleteByCourseId(Long courseId);
 }
