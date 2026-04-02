@@ -182,7 +182,7 @@ class CourseServiceTest {
         ReflectionTestUtils.setField(entity, "id", 7L);
         ReflectionTestUtils.setField(entity, "visibility", CourseVisibility.PRIVATE);
         ReflectionTestUtils.setField(entity, "ownerUserId", 1L);
-        UserEntity user = new UserEntity("device-1", "bikeoasis", null);
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
         ReflectionTestUtils.setField(user, "id", 1L);
         given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
         given(authService.findUserBySubject("1")).willReturn(user);
@@ -195,7 +195,7 @@ class CourseServiceTest {
     @Test
     @DisplayName("기록 기반 코스 생성은 소유자의 자유 주행 기록으로 코스를 만든다")
     void createCourseFromRideRecordCreatesOwnedCourse() {
-        UserEntity user = new UserEntity("device-1", "bikeoasis", null);
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
         ReflectionTestUtils.setField(user, "id", 1L);
         RideRecordEntity rideRecord = new RideRecordEntity(1L, java.time.OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), java.time.OffsetDateTime.parse("2026-03-29T11:00:00+09:00"), 18250, 3600);
         ReflectionTestUtils.setField(rideRecord, "id", 1001L);
@@ -221,7 +221,7 @@ class CourseServiceTest {
     @Test
     @DisplayName("공개 범위 변경은 소유자가 아니면 ForbiddenException을 던진다")
     void updateCourseVisibilityThrowsWhenUserIsNotOwner() {
-        UserEntity user = new UserEntity("device-1", "bikeoasis", null);
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
         ReflectionTestUtils.setField(user, "id", 1L);
         CourseEntity course = new CourseEntity("한강 코스", "설명", BigDecimal.valueOf(18.3), 10, 1, false, null, null, null, 999L, CourseVisibility.PRIVATE);
         ReflectionTestUtils.setField(course, "id", 2001L);
@@ -283,7 +283,7 @@ class CourseServiceTest {
     @Test
     @DisplayName("공유 정보 조회는 owner에게 share token과 url을 응답한다")
     void getCourseShareInfoReturnsGeneratedShareInfo() {
-        UserEntity user = new UserEntity("device-1", "bikeoasis", null);
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
         ReflectionTestUtils.setField(user, "id", 1L);
         CourseEntity entity = new CourseEntity("공유 코스", BigDecimal.valueOf(23.4), 95, 1);
         ReflectionTestUtils.setField(entity, "id", 7L);
