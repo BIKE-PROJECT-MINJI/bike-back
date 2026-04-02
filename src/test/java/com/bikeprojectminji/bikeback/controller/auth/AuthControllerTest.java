@@ -26,7 +26,9 @@ import org.springframework.test.web.servlet.MockMvc;
 @TestPropertySource(properties = {
         "auth.jwt.secret=01234567890123456789012345678901",
         "auth.jwt.issuer=bike-back-test",
-        "auth.jwt.token-validity-sec=3600"
+        "auth.jwt.token-validity-sec=3600",
+        "auth.login.dev-enabled=true",
+        "auth.login.dev-secret=dev-login-secret"
 })
 class AuthControllerTest {
 
@@ -43,6 +45,7 @@ class AuthControllerTest {
                 .willReturn(new LoginResponse("Bearer", "jwt-token", 3600, 1L, "bikeoasis"));
 
         mockMvc.perform(post("/api/v1/auth/login")
+                        .header("X-Dev-Login-Secret", "dev-login-secret")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -56,6 +59,23 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.data.tokenType").value("Bearer"))
                 .andExpect(jsonPath("$.data.accessToken").value("jwt-token"))
                 .andExpect(jsonPath("$.data.userId").value(1));
+    }
+
+    @Test
+    @DisplayName("로그인 API는 dev secret이 없으면 403을 반환한다")
+    void loginReturnsForbiddenWithoutDevSecret() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "externalId": "device-1",
+                                  "displayName": "bikeoasis",
+                                  "profileImageUrl": null
+                                }
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403))
+                .andExpect(jsonPath("$.message").value("로그인 API 접근이 허용되지 않았습니다."));
     }
 
     @Test
