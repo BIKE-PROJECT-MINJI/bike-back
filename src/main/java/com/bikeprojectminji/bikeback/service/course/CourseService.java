@@ -65,7 +65,7 @@ public class CourseService {
 
     public CourseListResponse getCourses(Long cursor, Integer limit) {
         int pageSize = resolveLimit(limit);
-        List<CourseEntity> queriedCourses = courseRepository.findPageAfter(cursor, pageSize + 1);
+        List<CourseEntity> queriedCourses = courseRepository.findPublicPageAfter(cursor, pageSize + 1);
 
         boolean hasNext = queriedCourses.size() > pageSize;
         List<CourseEntity> pageCourses = hasNext ? queriedCourses.subList(0, pageSize) : queriedCourses;
@@ -86,9 +86,8 @@ public class CourseService {
         return new CourseListResponse(items, hasNext, nextCursor);
     }
 
-    public CourseDetailResponse getCourseDetail(Long courseId) {
-        CourseEntity course = courseRepository.findById(courseId)
-                .orElseThrow(() -> new NotFoundException("코스를 찾을 수 없습니다."));
+    public CourseDetailResponse getCourseDetail(Long courseId, String subject) {
+        CourseEntity course = findReadableCourse(courseId, subject);
 
         return new CourseDetailResponse(
                 course.getId(),
@@ -98,12 +97,10 @@ public class CourseService {
         );
     }
 
-    public CourseRoutePointsResponse getCourseRoutePoints(Long courseId) {
-        if (!courseRepository.existsById(courseId)) {
-            throw new NotFoundException("코스를 찾을 수 없습니다.");
-        }
+    public CourseRoutePointsResponse getCourseRoutePoints(Long courseId, String subject) {
+        CourseEntity course = findReadableCourse(courseId, subject);
 
-        List<CourseRoutePointResponse> points = courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId).stream()
+        List<CourseRoutePointResponse> points = courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(course.getId()).stream()
                 .map(routePoint -> new CourseRoutePointResponse(
                         routePoint.getPointOrder(),
                         routePoint.getLatitude(),
@@ -111,7 +108,7 @@ public class CourseService {
                 ))
                 .toList();
 
-        return new CourseRoutePointsResponse(courseId, points);
+        return new CourseRoutePointsResponse(course.getId(), points);
     }
 
     public FeaturedCourseResponse getFeaturedCourses(BigDecimal lat, BigDecimal lon) {
@@ -275,6 +272,25 @@ public class CourseService {
         if (course.getOwnerUserId() == null || !course.getOwnerUserId().equals(ownerUserId)) {
             throw new ForbiddenException("이 코스를 수정할 권한이 없습니다.");
         }
+        return course;
+    }
+
+    private CourseEntity findReadableCourse(Long courseId, String subject) {
+        CourseEntity course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new NotFoundException("코스를 찾을 수 없습니다."));
+
+        if (course.getVisibility() == CourseVisibility.PUBLIC || course.getVisibility() == CourseVisibility.UNLISTED) {
+            return course;
+        }
+        if (subject == null || subject.isBlank()) {
+            throw new ForbiddenException("이 코스는 공개되지 않았습니다.");
+        }
+
+        UserEntity user = authService.findUserBySubject(subject);
+        if (course.getOwnerUserId() == null || !course.getOwnerUserId().equals(user.getId())) {
+            throw new ForbiddenException("이 코스는 공개되지 않았습니다.");
+        }
+
         return course;
     }
 

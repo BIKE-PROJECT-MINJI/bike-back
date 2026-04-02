@@ -5,5 +5,5 @@ import java.util.List;
 
 public interface CourseRepositoryCustom {
 
-    List<CourseEntity> findPageAfter(Long cursorId, int limitPlusOne);
+    List<CourseEntity> findPublicPageAfter(Long cursorId, int limitPlusOne);
 }

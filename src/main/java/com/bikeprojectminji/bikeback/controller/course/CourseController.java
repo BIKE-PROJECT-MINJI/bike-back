@@ -48,13 +48,19 @@ public class CourseController {
     }
 
     @GetMapping("/{courseId}")
-    public ApiResponse<CourseDetailResponse> getCourseDetail(@PathVariable Long courseId) {
-        return ApiResponse.success(courseService.getCourseDetail(courseId));
+    public ApiResponse<CourseDetailResponse> getCourseDetail(
+            @PathVariable Long courseId,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        return ApiResponse.success(courseService.getCourseDetail(courseId, jwt != null ? jwt.getSubject() : null));
     }
 
     @GetMapping("/{courseId}/route-points")
-    public ApiResponse<CourseRoutePointsResponse> getCourseRoutePoints(@PathVariable Long courseId) {
-        return ApiResponse.success(courseService.getCourseRoutePoints(courseId));
+    public ApiResponse<CourseRoutePointsResponse> getCourseRoutePoints(
+            @PathVariable Long courseId,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        return ApiResponse.success(courseService.getCourseRoutePoints(courseId, jwt != null ? jwt.getSubject() : null));
     }
 
     @GetMapping("/featured")
