@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.repository.course;
 
 import com.bikeprojectminji.bikeback.entity.course.CourseEntity;
+import com.bikeprojectminji.bikeback.entity.course.CourseVisibility;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 import java.util.Collections;
@@ -18,12 +19,13 @@ public class CourseRepositoryImpl implements CourseRepositoryCustom {
     }
 
     @Override
-    public List<CourseEntity> findPageAfter(Long cursorId, int limitPlusOne) {
+    public List<CourseEntity> findPublicPageAfter(Long cursorId, int limitPlusOne) {
         if (cursorId == null) {
             TypedQuery<CourseEntity> query = entityManager.createQuery(
-                    "select c from CourseEntity c order by c.displayOrder asc, c.id asc",
+                    "select c from CourseEntity c where c.visibility = :visibility order by c.displayOrder asc, c.id asc",
                     CourseEntity.class
             );
+            query.setParameter("visibility", CourseVisibility.PUBLIC);
             query.setMaxResults(limitPlusOne);
             return query.getResultList();
         }
@@ -35,11 +37,12 @@ public class CourseRepositoryImpl implements CourseRepositoryCustom {
 
         TypedQuery<CourseEntity> query = entityManager.createQuery(
                 "select c from CourseEntity c " +
-                        "where c.displayOrder > :displayOrder " +
-                        "or (c.displayOrder = :displayOrder and c.id > :id) " +
+                        "where c.visibility = :visibility and (c.displayOrder > :displayOrder " +
+                        "or (c.displayOrder = :displayOrder and c.id > :id)) " +
                         "order by c.displayOrder asc, c.id asc",
                 CourseEntity.class
         );
+        query.setParameter("visibility", CourseVisibility.PUBLIC);
         query.setParameter("displayOrder", anchor.get().getDisplayOrder());
         query.setParameter("id", anchor.get().getId());
         query.setMaxResults(limitPlusOne);

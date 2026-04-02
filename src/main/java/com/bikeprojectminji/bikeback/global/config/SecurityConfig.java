@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -31,6 +32,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/api/v1/auth/login").permitAll()
                         .requestMatchers("/api/v1/auth/me", "/api/v1/profile/me").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ride-records").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/courses").authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/courses/*").authenticated()
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/courses/*/visibility").authenticated()
                         .anyRequest().permitAll()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
