@@ -41,6 +41,9 @@ public class CourseEntity {
     @Column(name = "start_longitude", precision = 10, scale = 7)
     private BigDecimal startLongitude;
 
+    @Column(name = "owner_user_id")
+    private Long ownerUserId;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -62,7 +65,8 @@ public class CourseEntity {
             boolean curated,
             Integer featuredRank,
             BigDecimal startLatitude,
-            BigDecimal startLongitude
+            BigDecimal startLongitude,
+            Long ownerUserId
     ) {
         this.title = title;
         this.distanceKm = distanceKm;
@@ -72,6 +76,20 @@ public class CourseEntity {
         this.featuredRank = featuredRank;
         this.startLatitude = startLatitude;
         this.startLongitude = startLongitude;
+        this.ownerUserId = ownerUserId;
+    }
+
+    public CourseEntity(
+            String title,
+            BigDecimal distanceKm,
+            Integer estimatedDurationMin,
+            Integer displayOrder,
+            boolean curated,
+            Integer featuredRank,
+            BigDecimal startLatitude,
+            BigDecimal startLongitude
+    ) {
+        this(title, distanceKm, estimatedDurationMin, displayOrder, curated, featuredRank, startLatitude, startLongitude, null);
     }
 
     public Long getId() {
@@ -116,5 +134,9 @@ public class CourseEntity {
 
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;
+    }
+
+    public Long getOwnerUserId() {
+        return ownerUserId;
     }
 }
