@@ -6,6 +6,8 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.ArgumentMatchers.any;
 
 import com.bikeprojectminji.bikeback.dto.course.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseShareResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseDownloadResponse;
 import com.bikeprojectminji.bikeback.dto.course.CreateCourseFromRideRecordRequest;
 import com.bikeprojectminji.bikeback.dto.course.UpdateCourseVisibilityRequest;
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
@@ -70,7 +72,7 @@ class CourseServiceTest {
         ReflectionTestUtils.setField(entity, "visibility", CourseVisibility.PUBLIC);
         given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
 
-        CourseDetailResponse response = courseService.getCourseDetail(7L, null);
+        CourseDetailResponse response = courseService.getCourseDetail(7L, null, null);
 
         assertThat(response.id()).isEqualTo(7L);
         assertThat(response.title()).isEqualTo("아라뱃길 루트");
@@ -83,7 +85,7 @@ class CourseServiceTest {
     void getCourseDetailThrowsWhenCourseDoesNotExist() {
         given(courseRepository.findById(999L)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> courseService.getCourseDetail(999L, null))
+        assertThatThrownBy(() -> courseService.getCourseDetail(999L, null, null))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("코스를 찾을 수 없습니다.");
     }
@@ -100,7 +102,7 @@ class CourseServiceTest {
                 new CourseRoutePointEntity(7L, 2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
         ));
 
-        CourseRoutePointsResponse response = courseService.getCourseRoutePoints(7L, null);
+        CourseRoutePointsResponse response = courseService.getCourseRoutePoints(7L, null, null);
 
         assertThat(response.courseId()).isEqualTo(7L);
         assertThat(response.points()).hasSize(2);
@@ -113,7 +115,7 @@ class CourseServiceTest {
     void getCourseRoutePointsThrowsWhenCourseDoesNotExist() {
         given(courseRepository.findById(999L)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> courseService.getCourseRoutePoints(999L, null))
+        assertThatThrownBy(() -> courseService.getCourseRoutePoints(999L, null, null))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("코스를 찾을 수 없습니다.");
     }
@@ -168,7 +170,7 @@ class CourseServiceTest {
         ReflectionTestUtils.setField(entity, "ownerUserId", 9L);
         given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
 
-        assertThatThrownBy(() -> courseService.getCourseDetail(7L, null))
+        assertThatThrownBy(() -> courseService.getCourseDetail(7L, null, null))
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("이 코스는 공개되지 않았습니다.");
     }
@@ -185,7 +187,7 @@ class CourseServiceTest {
         given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
         given(authService.findUserBySubject("1")).willReturn(user);
 
-        CourseDetailResponse response = courseService.getCourseDetail(7L, "1");
+        CourseDetailResponse response = courseService.getCourseDetail(7L, "1", null);
 
         assertThat(response.id()).isEqualTo(7L);
     }
@@ -230,5 +232,71 @@ class CourseServiceTest {
         assertThatThrownBy(() -> courseService.updateCourseVisibility("1", 2001L, new UpdateCourseVisibilityRequest("PUBLIC")))
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("이 코스를 수정할 권한이 없습니다.");
+    }
+
+    @Test
+    @DisplayName("공개 코스 검색은 PUBLIC 코스만 latest 기준으로 응답한다")
+    void searchPublicCoursesReturnsPublicOnlyItems() {
+        List<CourseEntity> courses = createCourses(2);
+        given(courseRepository.findTop20ByVisibilityAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility.PUBLIC, "한강"))
+                .willReturn(courses);
+
+        CourseListResponse response = courseService.searchPublicCourses("한강", "latest");
+
+        assertThat(response.items()).hasSize(2);
+        assertThat(response.hasNext()).isFalse();
+    }
+
+    @Test
+    @DisplayName("UNLISTED 코스 다운로드는 share token이 맞으면 허용한다")
+    void downloadCourseReturnsPayloadForUnlistedWithShareToken() {
+        CourseEntity entity = new CourseEntity("공유 코스", BigDecimal.valueOf(23.4), 95, 1);
+        ReflectionTestUtils.setField(entity, "id", 7L);
+        ReflectionTestUtils.setField(entity, "visibility", CourseVisibility.UNLISTED);
+        ReflectionTestUtils.setField(entity, "shareToken", "share-token");
+        given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
+        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(7L)).willReturn(List.of(
+                new CourseRoutePointEntity(7L, 1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780))
+        ));
+
+        CourseDownloadResponse response = courseService.downloadCourse(7L, null, "share-token");
+
+        assertThat(response.courseId()).isEqualTo(7L);
+        assertThat(response.visibility()).isEqualTo("UNLISTED");
+        assertThat(response.routePoints()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("UNLISTED 코스 다운로드는 share token이 없으면 ForbiddenException을 던진다")
+    void downloadCourseThrowsWhenUnlistedShareTokenMissing() {
+        CourseEntity entity = new CourseEntity("공유 코스", BigDecimal.valueOf(23.4), 95, 1);
+        ReflectionTestUtils.setField(entity, "id", 7L);
+        ReflectionTestUtils.setField(entity, "visibility", CourseVisibility.UNLISTED);
+        ReflectionTestUtils.setField(entity, "shareToken", "share-token");
+        given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
+
+        assertThatThrownBy(() -> courseService.downloadCourse(7L, null, null))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("이 코스에 접근할 권한이 없습니다.");
+    }
+
+    @Test
+    @DisplayName("공유 정보 조회는 owner에게 share token과 url을 응답한다")
+    void getCourseShareInfoReturnsGeneratedShareInfo() {
+        UserEntity user = new UserEntity("device-1", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        CourseEntity entity = new CourseEntity("공유 코스", BigDecimal.valueOf(23.4), 95, 1);
+        ReflectionTestUtils.setField(entity, "id", 7L);
+        ReflectionTestUtils.setField(entity, "ownerUserId", 1L);
+        ReflectionTestUtils.setField(entity, "visibility", CourseVisibility.UNLISTED);
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
+        given(courseRepository.save(any(CourseEntity.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+        CourseShareResponse response = courseService.getCourseShareInfo("1", 7L);
+
+        assertThat(response.shareType()).isEqualTo("UNLISTED_LINK");
+        assertThat(response.shareToken()).isNotBlank();
+        assertThat(response.shareUrl()).contains("shareToken=");
     }
 }
