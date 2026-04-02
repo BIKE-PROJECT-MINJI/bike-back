@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseResponse;
+import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.service.course.CourseService;
 import com.bikeprojectminji.bikeback.service.ridepolicy.RidePolicyService;
 import java.math.BigDecimal;
@@ -15,10 +16,18 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(CourseController.class)
+@Import(SecurityConfig.class)
+@TestPropertySource(properties = {
+        "auth.jwt.secret=01234567890123456789012345678901",
+        "auth.jwt.issuer=bike-back-test",
+        "auth.jwt.token-validity-sec=3600"
+})
 class FeaturedCourseControllerTest {
 
     @Autowired
