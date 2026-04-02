@@ -50,13 +50,7 @@ public class AuthService {
             throw new BadRequestException("이미 사용 중인 이메일입니다.");
         }
 
-        UserEntity savedUser = userRepository.save(new UserEntity(
-                null,
-                request.email(),
-                passwordEncoder.encode(request.password()),
-                request.displayName(),
-                request.profileImageUrl()
-        ));
+        UserEntity savedUser = userRepository.save(resolveRegisterUser(request));
         String accessToken = issueToken(savedUser);
         return new LoginResponse("Bearer", accessToken, tokenValiditySec, savedUser.getId(), savedUser.getDisplayName());
     }
@@ -108,5 +102,20 @@ public class AuthService {
                 .build();
 
         return jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
+    private UserEntity resolveRegisterUser(RegisterRequest request) {
+        String passwordHash = passwordEncoder.encode(request.password());
+        if (request.legacyExternalId() == null || request.legacyExternalId().isBlank()) {
+            return new UserEntity(null, request.email(), passwordHash, request.displayName(), request.profileImageUrl());
+        }
+
+        UserEntity legacyUser = userRepository.findByExternalId(request.legacyExternalId())
+                .orElseThrow(() -> new BadRequestException("이전 계정 정보를 찾을 수 없습니다."));
+        if (legacyUser.getEmail() != null && !legacyUser.getEmail().isBlank()) {
+            throw new BadRequestException("이미 실제 계정으로 전환된 사용자입니다.");
+        }
+        legacyUser.claimLocalAccount(request.email(), passwordHash, request.displayName(), request.profileImageUrl());
+        return legacyUser;
     }
 }

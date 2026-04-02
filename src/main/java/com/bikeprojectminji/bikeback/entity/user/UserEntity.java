@@ -53,6 +53,13 @@ public class UserEntity {
         this.profileImageUrl = profileImageUrl;
     }
 
+    public void claimLocalAccount(String email, String passwordHash, String displayName, String profileImageUrl) {
+        this.email = email;
+        this.passwordHash = passwordHash;
+        this.displayName = displayName;
+        this.profileImageUrl = profileImageUrl;
+    }
+
     public Long getId() {
         return id;
     }

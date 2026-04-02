@@ -44,7 +44,7 @@ class AuthServiceTest {
     @DisplayName("회원가입은 사용자를 저장하고 JWT를 발급한다")
     void registerReturnsIssuedJwt() {
         AuthService authService = new AuthService(userRepository, jwtEncoder, passwordEncoder, clock, "bike-back-test", 3600L);
-        RegisterRequest request = new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null);
+        RegisterRequest request = new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null);
         UserEntity savedUser = new UserEntity(null, "bikeoasis@example.com", passwordEncoder.encode("example-password"), "bikeoasis", null);
         ReflectionTestUtils.setField(savedUser, "id", 1L);
 
@@ -97,9 +97,34 @@ class AuthServiceTest {
         AuthService authService = new AuthService(userRepository, jwtEncoder, passwordEncoder, clock, "bike-back-test", 3600L);
         given(userRepository.existsByEmail("bikeoasis@example.com")).willReturn(true);
 
-        assertThatThrownBy(() -> authService.register(new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null)))
+        assertThatThrownBy(() -> authService.register(new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null)))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("이미 사용 중인 이메일입니다.");
+    }
+
+    @Test
+    @DisplayName("legacy externalId를 주면 기존 사용자 레코드에 실제 계정을 연결한다")
+    void registerClaimsLegacyUserWhenExternalIdProvided() {
+        AuthService authService = new AuthService(userRepository, jwtEncoder, passwordEncoder, clock, "bike-back-test", 3600L);
+        UserEntity legacyUser = new UserEntity("legacy-device-1", null, null, "old-name", null);
+        ReflectionTestUtils.setField(legacyUser, "id", 1L);
+        given(userRepository.existsByEmail("bikeoasis@example.com")).willReturn(false);
+        given(userRepository.findByExternalId("legacy-device-1")).willReturn(Optional.of(legacyUser));
+        given(userRepository.save(any(UserEntity.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(jwtEncoder.encode(any(JwtEncoderParameters.class))).willReturn(
+                Jwt.withTokenValue("jwt-token")
+                        .header("alg", "HS256")
+                        .subject("1")
+                        .issuedAt(clock.instant())
+                        .expiresAt(clock.instant().plusSeconds(3600))
+                        .build()
+        );
+
+        LoginResponse response = authService.register(new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, "legacy-device-1"));
+
+        assertThat(response.userId()).isEqualTo(1L);
+        assertThat(legacyUser.getEmail()).isEqualTo("bikeoasis@example.com");
+        assertThat(legacyUser.getPasswordHash()).isNotBlank();
     }
 
     @Test

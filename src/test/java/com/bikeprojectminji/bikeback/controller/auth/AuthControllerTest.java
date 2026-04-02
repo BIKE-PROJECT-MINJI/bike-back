@@ -41,7 +41,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("회원가입 API는 success 래퍼로 JWT 응답을 반환한다")
     void registerReturnsWrappedResponse() throws Exception {
-        RegisterRequest request = new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null);
+        RegisterRequest request = new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null);
         given(authService.register(request))
                 .willReturn(new LoginResponse("Bearer", "jwt-token", 3600, 1L, "bikeoasis"));
 
@@ -52,7 +52,8 @@ class AuthControllerTest {
                                   "email": "bikeoasis@example.com",
                                   "password": "example-password",
                                   "displayName": "bikeoasis",
-                                  "profileImageUrl": null
+                                  "profileImageUrl": null,
+                                  "legacyExternalId": null
                                 }
                                 """))
                 .andExpect(status().isOk())
