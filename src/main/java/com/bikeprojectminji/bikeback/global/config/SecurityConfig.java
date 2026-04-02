@@ -34,6 +34,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/me", "/api/v1/profile/me").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/ride-records").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/courses/*/share").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/courses/*").authenticated()
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/courses/*/visibility").authenticated()
                         .anyRequest().permitAll()

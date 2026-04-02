@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.bikeprojectminji.bikeback.dto.course.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseShareResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseDownloadResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
@@ -60,7 +62,7 @@ class CourseControllerTest {
                 BigDecimal.valueOf(23.4),
                 95
         );
-        given(courseService.getCourseDetail(7L, null)).willReturn(response);
+        given(courseService.getCourseDetail(7L, null, null)).willReturn(response);
 
         mockMvc.perform(get("/api/v1/courses/7"))
                 .andExpect(status().isOk())
@@ -76,7 +78,7 @@ class CourseControllerTest {
     @DisplayName("코스 상세 API는 없는 코스면 404를 응답한다")
     void getCourseDetailReturnsNotFoundWhenCourseDoesNotExist() throws Exception {
         willThrow(new NotFoundException("코스를 찾을 수 없습니다."))
-                .given(courseService).getCourseDetail(999L, null);
+                .given(courseService).getCourseDetail(999L, null, null);
 
         mockMvc.perform(get("/api/v1/courses/999"))
                 .andExpect(status().isNotFound())
@@ -94,7 +96,7 @@ class CourseControllerTest {
                         new CourseRoutePointResponse(2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
                 )
         );
-        given(courseService.getCourseRoutePoints(7L, null)).willReturn(response);
+        given(courseService.getCourseRoutePoints(7L, null, null)).willReturn(response);
 
         mockMvc.perform(get("/api/v1/courses/7/route-points"))
                 .andExpect(status().isOk())
@@ -109,7 +111,7 @@ class CourseControllerTest {
     @DisplayName("코스 경로 API는 없는 코스면 404를 응답한다")
     void getCourseRoutePointsReturnsNotFoundWhenCourseDoesNotExist() throws Exception {
         willThrow(new NotFoundException("코스를 찾을 수 없습니다."))
-                .given(courseService).getCourseRoutePoints(999L, null);
+                .given(courseService).getCourseRoutePoints(999L, null, null);
 
         mockMvc.perform(get("/api/v1/courses/999/route-points"))
                 .andExpect(status().isNotFound())
@@ -204,7 +206,7 @@ class CourseControllerTest {
     @DisplayName("비공개 코스 상세 API는 비로그인 요청이면 403을 응답한다")
     void getPrivateCourseDetailReturnsForbiddenWithoutToken() throws Exception {
         willThrow(new ForbiddenException("이 코스는 공개되지 않았습니다."))
-                .given(courseService).getCourseDetail(2001L, null);
+                .given(courseService).getCourseDetail(2001L, null, null);
 
         mockMvc.perform(get("/api/v1/courses/2001"))
                 .andExpect(status().isForbidden())
@@ -214,10 +216,56 @@ class CourseControllerTest {
     @Test
     @DisplayName("비공개 코스 상세 API는 owner 토큰이면 응답한다")
     void getPrivateCourseDetailReturnsResponseForOwner() throws Exception {
-        given(courseService.getCourseDetail(2001L, "1")).willReturn(new CourseDetailResponse(2001L, "내 코스", BigDecimal.valueOf(18.3), 60));
+        given(courseService.getCourseDetail(2001L, "1", null)).willReturn(new CourseDetailResponse(2001L, "내 코스", BigDecimal.valueOf(18.3), 60));
 
         mockMvc.perform(get("/api/v1/courses/2001").with(jwt().jwt(jwt -> jwt.subject("1"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(2001));
+    }
+
+    @Test
+    @DisplayName("공개 코스 검색 API는 success 래퍼로 응답한다")
+    void searchCoursesReturnsWrappedResponse() throws Exception {
+        CourseListResponse response = new CourseListResponse(
+                List.of(new CourseListItemResponse(2001L, "한강 코스", BigDecimal.valueOf(18.3), 60)),
+                false,
+                null
+        );
+        given(courseService.searchPublicCourses("한강", "latest")).willReturn(response);
+
+        mockMvc.perform(get("/api/v1/courses/search").param("q", "한강").param("sort", "latest"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].id").value(2001))
+                .andExpect(jsonPath("$.data.items[0].title").value("한강 코스"));
+    }
+
+    @Test
+    @DisplayName("공유 정보 API는 owner 인증이 있으면 success 래퍼로 응답한다")
+    void getCourseShareInfoReturnsWrappedResponse() throws Exception {
+        given(courseService.getCourseShareInfo("1", 2001L))
+                .willReturn(new CourseShareResponse("UNLISTED_LINK", "UNLISTED", "/api/v1/courses/2001?shareToken=share-token", "share-token"));
+
+        mockMvc.perform(post("/api/v1/courses/2001/share").with(jwt().jwt(jwt -> jwt.subject("1"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.shareType").value("UNLISTED_LINK"))
+                .andExpect(jsonPath("$.data.shareToken").value("share-token"));
+    }
+
+    @Test
+    @DisplayName("코스 다운로드 API는 share token 기반 응답을 반환한다")
+    void downloadCourseReturnsWrappedResponse() throws Exception {
+        given(courseService.downloadCourse(2001L, null, "share-token"))
+                .willReturn(new CourseDownloadResponse(
+                        2001L,
+                        "한강 코스",
+                        "UNLISTED",
+                        List.of(new CourseRoutePointResponse(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)))
+                ));
+
+        mockMvc.perform(get("/api/v1/courses/2001/download").param("shareToken", "share-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.courseId").value(2001))
+                .andExpect(jsonPath("$.data.visibility").value("UNLISTED"))
+                .andExpect(jsonPath("$.data.routePoints[0].pointOrder").value(1));
     }
 }
