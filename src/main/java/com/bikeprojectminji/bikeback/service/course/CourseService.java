@@ -2,23 +2,40 @@ package com.bikeprojectminji.bikeback.service.course;
 
 import com.bikeprojectminji.bikeback.dto.course.CourseListItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointRequest;
+import com.bikeprojectminji.bikeback.dto.course.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.dto.course.CreateCourseFromRideRecordRequest;
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointsResponse;
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.FeaturedCourseResponse;
+import com.bikeprojectminji.bikeback.dto.course.UpdateCourseRequest;
+import com.bikeprojectminji.bikeback.dto.course.UpdateCourseVisibilityRequest;
 import com.bikeprojectminji.bikeback.entity.course.CourseEntity;
 import com.bikeprojectminji.bikeback.entity.course.CourseRoutePointEntity;
+import com.bikeprojectminji.bikeback.entity.course.CourseVisibility;
+import com.bikeprojectminji.bikeback.entity.ride.RideRecordEntity;
+import com.bikeprojectminji.bikeback.entity.ride.RideRecordPointEntity;
+import com.bikeprojectminji.bikeback.entity.user.UserEntity;
+import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import java.math.RoundingMode;
 import com.bikeprojectminji.bikeback.repository.course.CourseRepository;
 import com.bikeprojectminji.bikeback.repository.course.CourseRoutePointRepository;
+import com.bikeprojectminji.bikeback.repository.ride.RideRecordPointRepository;
+import com.bikeprojectminji.bikeback.repository.ride.RideRecordRepository;
+import com.bikeprojectminji.bikeback.service.auth.AuthService;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class CourseService {
@@ -28,10 +45,22 @@ public class CourseService {
 
     private final CourseRepository courseRepository;
     private final CourseRoutePointRepository courseRoutePointRepository;
+    private final RideRecordRepository rideRecordRepository;
+    private final RideRecordPointRepository rideRecordPointRepository;
+    private final AuthService authService;
 
-    public CourseService(CourseRepository courseRepository, CourseRoutePointRepository courseRoutePointRepository) {
+    public CourseService(
+            CourseRepository courseRepository,
+            CourseRoutePointRepository courseRoutePointRepository,
+            RideRecordRepository rideRecordRepository,
+            RideRecordPointRepository rideRecordPointRepository,
+            AuthService authService
+    ) {
         this.courseRepository = courseRepository;
         this.courseRoutePointRepository = courseRoutePointRepository;
+        this.rideRecordRepository = rideRecordRepository;
+        this.rideRecordPointRepository = rideRecordPointRepository;
+        this.authService = authService;
     }
 
     public CourseListResponse getCourses(Long cursor, Integer limit) {
@@ -111,6 +140,72 @@ public class CourseService {
         return new FeaturedCourseResponse(distanceMode ? "distance" : "fallback", items);
     }
 
+    @Transactional
+    public CourseWriteResponse createCourseFromRideRecord(String subject, CreateCourseFromRideRecordRequest request) {
+        validateCreateRequest(request);
+        UserEntity user = authService.findUserBySubject(subject);
+        RideRecordEntity rideRecord = rideRecordRepository.findByIdAndOwnerUserId(request.sourceRideRecordId(), user.getId())
+                .orElseThrow(() -> new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
+        List<RideRecordPointEntity> rideRecordPoints = rideRecordPointRepository.findByRideRecordIdOrderByPointOrderAsc(rideRecord.getId());
+        if (rideRecordPoints.isEmpty()) {
+            throw new BadRequestException("기록 경로가 비어 있어 코스를 생성할 수 없습니다.");
+        }
+
+        CourseVisibility visibility = parseVisibility(request.visibility());
+        CourseEntity course = new CourseEntity(
+                request.name(),
+                request.description(),
+                toDistanceKm(rideRecord.getDistanceM()),
+                toDurationMin(rideRecord.getDurationSec()),
+                resolveNextDisplayOrder(),
+                false,
+                null,
+                rideRecordPoints.get(0).getLatitude(),
+                rideRecordPoints.get(0).getLongitude(),
+                user.getId(),
+                visibility
+        );
+        CourseEntity savedCourse = courseRepository.save(course);
+
+        List<CourseRoutePointEntity> courseRoutePoints = rideRecordPoints.stream()
+                .map(point -> new CourseRoutePointEntity(savedCourse.getId(), point.getPointOrder(), point.getLatitude(), point.getLongitude()))
+                .toList();
+        courseRoutePointRepository.saveAll(courseRoutePoints);
+
+        return toCourseWriteResponse(savedCourse);
+    }
+
+    @Transactional
+    public CourseWriteResponse updateCourse(String subject, Long courseId, UpdateCourseRequest request) {
+        validateUpdateRequest(request);
+        UserEntity user = authService.findUserBySubject(subject);
+        CourseEntity course = findOwnedCourse(courseId, user.getId());
+        CourseVisibility visibility = parseVisibility(request.visibility());
+        course.updateMetadata(request.name(), request.description(), visibility);
+
+        if (request.routePoints() != null) {
+            List<CourseRoutePointRequest> routePoints = normalizeRoutePoints(request.routePoints());
+            courseRoutePointRepository.deleteByCourseId(courseId);
+            courseRoutePointRepository.saveAll(routePoints.stream()
+                    .map(point -> new CourseRoutePointEntity(courseId, point.pointOrder(), point.latitude(), point.longitude()))
+                    .toList());
+            course.updateStartCoordinates(routePoints.get(0).latitude(), routePoints.get(0).longitude());
+        }
+
+        return toCourseWriteResponse(courseRepository.save(course));
+    }
+
+    @Transactional
+    public CourseWriteResponse updateCourseVisibility(String subject, Long courseId, UpdateCourseVisibilityRequest request) {
+        if (request == null || request.visibility() == null || request.visibility().isBlank()) {
+            throw new BadRequestException("visibility는 비어 있을 수 없습니다.");
+        }
+        UserEntity user = authService.findUserBySubject(subject);
+        CourseEntity course = findOwnedCourse(courseId, user.getId());
+        course.updateMetadata(course.getTitle(), course.getDescription(), parseVisibility(request.visibility()));
+        return toCourseWriteResponse(courseRepository.save(course));
+    }
+
     private int resolveLimit(Integer limit) {
         if (limit == null || limit < 1) {
             return DEFAULT_LIMIT;
@@ -142,6 +237,95 @@ public class CourseService {
                 course.getStartLongitude().doubleValue()
         );
         return BigDecimal.valueOf(distanceMeters).setScale(0, RoundingMode.HALF_UP).intValue();
+    }
+
+    private void validateCreateRequest(CreateCourseFromRideRecordRequest request) {
+        if (request == null) {
+            throw new BadRequestException("코스 생성 요청 본문이 필요합니다.");
+        }
+        if (request.sourceRideRecordId() == null) {
+            throw new BadRequestException("sourceRideRecordId는 비어 있을 수 없습니다.");
+        }
+        if (request.name() == null || request.name().isBlank()) {
+            throw new BadRequestException("name은 비어 있을 수 없습니다.");
+        }
+        if (request.visibility() == null || request.visibility().isBlank()) {
+            throw new BadRequestException("visibility는 비어 있을 수 없습니다.");
+        }
+    }
+
+    private void validateUpdateRequest(UpdateCourseRequest request) {
+        if (request == null) {
+            throw new BadRequestException("코스 저장 요청 본문이 필요합니다.");
+        }
+        if (request.name() == null || request.name().isBlank()) {
+            throw new BadRequestException("name은 비어 있을 수 없습니다.");
+        }
+        if (request.visibility() == null || request.visibility().isBlank()) {
+            throw new BadRequestException("visibility는 비어 있을 수 없습니다.");
+        }
+        if (request.routePoints() != null) {
+            normalizeRoutePoints(request.routePoints());
+        }
+    }
+
+    private CourseEntity findOwnedCourse(Long courseId, Long ownerUserId) {
+        CourseEntity course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new NotFoundException("코스를 찾을 수 없습니다."));
+        if (course.getOwnerUserId() == null || !course.getOwnerUserId().equals(ownerUserId)) {
+            throw new ForbiddenException("이 코스를 수정할 권한이 없습니다.");
+        }
+        return course;
+    }
+
+    private CourseVisibility parseVisibility(String rawVisibility) {
+        try {
+            return CourseVisibility.valueOf(rawVisibility.toUpperCase());
+        } catch (IllegalArgumentException exception) {
+            throw new BadRequestException("visibility는 PRIVATE, UNLISTED, PUBLIC 중 하나여야 합니다.");
+        }
+    }
+
+    private int resolveNextDisplayOrder() {
+        return courseRepository.findTopByOrderByDisplayOrderDescIdDesc()
+                .map(course -> course.getDisplayOrder() + 1)
+                .orElse(1);
+    }
+
+    private BigDecimal toDistanceKm(Integer distanceM) {
+        return BigDecimal.valueOf(distanceM)
+                .divide(BigDecimal.valueOf(1000), 1, RoundingMode.HALF_UP);
+    }
+
+    private Integer toDurationMin(Integer durationSec) {
+        return BigDecimal.valueOf(durationSec)
+                .divide(BigDecimal.valueOf(60), 0, RoundingMode.HALF_UP)
+                .intValue();
+    }
+
+    private List<CourseRoutePointRequest> normalizeRoutePoints(List<CourseRoutePointRequest> routePoints) {
+        if (routePoints.isEmpty()) {
+            throw new BadRequestException("routePoints는 비어 있을 수 없습니다.");
+        }
+        Set<Integer> pointOrders = new HashSet<>();
+        for (CourseRoutePointRequest routePoint : routePoints) {
+            if (routePoint.pointOrder() == null || routePoint.pointOrder() < 1) {
+                throw new BadRequestException("pointOrder는 1 이상이어야 합니다.");
+            }
+            if (routePoint.latitude() == null || routePoint.longitude() == null) {
+                throw new BadRequestException("routePoints의 latitude와 longitude는 비어 있을 수 없습니다.");
+            }
+            if (!pointOrders.add(routePoint.pointOrder())) {
+                throw new BadRequestException("routePoints의 pointOrder는 중복될 수 없습니다.");
+            }
+        }
+        return routePoints.stream()
+                .sorted(Comparator.comparing(CourseRoutePointRequest::pointOrder))
+                .toList();
+    }
+
+    private CourseWriteResponse toCourseWriteResponse(CourseEntity course) {
+        return new CourseWriteResponse(course.getId(), course.getOwnerUserId(), course.getVisibility().name(), course.getTitle());
     }
 
     private double haversineMeters(double lat1, double lon1, double lat2, double lon2) {

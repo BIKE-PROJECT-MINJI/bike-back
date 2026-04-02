@@ -3,15 +3,27 @@ package com.bikeprojectminji.bikeback.service.course;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.ArgumentMatchers.any;
 
+import com.bikeprojectminji.bikeback.dto.course.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.dto.course.CreateCourseFromRideRecordRequest;
+import com.bikeprojectminji.bikeback.dto.course.UpdateCourseVisibilityRequest;
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointsResponse;
 import com.bikeprojectminji.bikeback.entity.course.CourseEntity;
 import com.bikeprojectminji.bikeback.entity.course.CourseRoutePointEntity;
+import com.bikeprojectminji.bikeback.entity.course.CourseVisibility;
+import com.bikeprojectminji.bikeback.entity.ride.RideRecordEntity;
+import com.bikeprojectminji.bikeback.entity.ride.RideRecordPointEntity;
+import com.bikeprojectminji.bikeback.entity.user.UserEntity;
+import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.repository.course.CourseRepository;
 import com.bikeprojectminji.bikeback.repository.course.CourseRoutePointRepository;
+import com.bikeprojectminji.bikeback.repository.ride.RideRecordPointRepository;
+import com.bikeprojectminji.bikeback.repository.ride.RideRecordRepository;
+import com.bikeprojectminji.bikeback.service.auth.AuthService;
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
@@ -32,6 +44,15 @@ class CourseServiceTest {
 
     @Mock
     private CourseRoutePointRepository courseRoutePointRepository;
+
+    @Mock
+    private RideRecordRepository rideRecordRepository;
+
+    @Mock
+    private RideRecordPointRepository rideRecordPointRepository;
+
+    @Mock
+    private AuthService authService;
 
     @InjectMocks
     private CourseService courseService;
@@ -131,5 +152,47 @@ class CourseServiceTest {
                     return entity;
                 })
                 .toList();
+    }
+
+    @Test
+    @DisplayName("기록 기반 코스 생성은 소유자의 자유 주행 기록으로 코스를 만든다")
+    void createCourseFromRideRecordCreatesOwnedCourse() {
+        UserEntity user = new UserEntity("device-1", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity rideRecord = new RideRecordEntity(1L, java.time.OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), java.time.OffsetDateTime.parse("2026-03-29T11:00:00+09:00"), 18250, 3600);
+        ReflectionTestUtils.setField(rideRecord, "id", 1001L);
+        CourseEntity savedCourse = new CourseEntity("한강 코스", "설명", BigDecimal.valueOf(18.3), 60, 11, false, null, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780), 1L, CourseVisibility.PRIVATE);
+        ReflectionTestUtils.setField(savedCourse, "id", 2001L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(1001L, 1L)).willReturn(Optional.of(rideRecord));
+        given(rideRecordPointRepository.findByRideRecordIdOrderByPointOrderAsc(1001L)).willReturn(List.of(
+                new RideRecordPointEntity(1001L, 1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                new RideRecordPointEntity(1001L, 2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
+        ));
+        given(courseRepository.findTopByOrderByDisplayOrderDescIdDesc()).willReturn(Optional.of(createCourses(10).get(9)));
+        given(courseRepository.save(any(CourseEntity.class))).willReturn(savedCourse);
+
+        CourseWriteResponse response = courseService.createCourseFromRideRecord("1", new CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE"));
+
+        assertThat(response.courseId()).isEqualTo(2001L);
+        assertThat(response.ownerUserId()).isEqualTo(1L);
+        assertThat(response.visibility()).isEqualTo("PRIVATE");
+    }
+
+    @Test
+    @DisplayName("공개 범위 변경은 소유자가 아니면 ForbiddenException을 던진다")
+    void updateCourseVisibilityThrowsWhenUserIsNotOwner() {
+        UserEntity user = new UserEntity("device-1", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        CourseEntity course = new CourseEntity("한강 코스", "설명", BigDecimal.valueOf(18.3), 10, 1, false, null, null, null, 999L, CourseVisibility.PRIVATE);
+        ReflectionTestUtils.setField(course, "id", 2001L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(courseRepository.findById(2001L)).willReturn(Optional.of(course));
+
+        assertThatThrownBy(() -> courseService.updateCourseVisibility("1", 2001L, new UpdateCourseVisibilityRequest("PUBLIC")))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("이 코스를 수정할 권한이 없습니다.");
     }
 }

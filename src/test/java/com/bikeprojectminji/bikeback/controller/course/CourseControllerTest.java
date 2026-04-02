@@ -3,9 +3,14 @@ package com.bikeprojectminji.bikeback.controller.course;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.bikeprojectminji.bikeback.dto.course.CourseWriteResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
@@ -22,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -128,5 +134,68 @@ class CourseControllerTest {
                 .andExpect(jsonPath("$.data.items[0].title").value("북한강 초입 코스"))
                 .andExpect(jsonPath("$.data.hasNext").value(true))
                 .andExpect(jsonPath("$.data.nextCursor").value("12"));
+    }
+
+    @Test
+    @DisplayName("기록 기반 코스 생성 API는 인증된 사용자의 코스 생성 결과를 응답한다")
+    void createCourseFromRideRecordReturnsWrappedResponse() throws Exception {
+        given(courseService.createCourseFromRideRecord("1", new com.bikeprojectminji.bikeback.dto.course.CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE")))
+                .willReturn(new CourseWriteResponse(2001L, 1L, "PRIVATE", "한강 코스"));
+
+        mockMvc.perform(post("/api/v1/courses")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sourceRideRecordId": 1001,
+                                  "name": "한강 코스",
+                                  "description": "설명",
+                                  "visibility": "PRIVATE"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.courseId").value(2001))
+                .andExpect(jsonPath("$.data.visibility").value("PRIVATE"));
+    }
+
+    @Test
+    @DisplayName("코스 저장 API는 인증된 사용자의 수정 결과를 응답한다")
+    void updateCourseReturnsWrappedResponse() throws Exception {
+        given(courseService.updateCourse("1", 2001L, new com.bikeprojectminji.bikeback.dto.course.UpdateCourseRequest("수정 코스", "수정 설명", "UNLISTED", null)))
+                .willReturn(new CourseWriteResponse(2001L, 1L, "UNLISTED", "수정 코스"));
+
+        mockMvc.perform(put("/api/v1/courses/2001")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "수정 코스",
+                                  "description": "수정 설명",
+                                  "visibility": "UNLISTED",
+                                  "routePoints": null
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.courseId").value(2001))
+                .andExpect(jsonPath("$.data.visibility").value("UNLISTED"));
+    }
+
+    @Test
+    @DisplayName("공개 범위 변경 API는 인증된 사용자의 visibility 변경 결과를 응답한다")
+    void updateCourseVisibilityReturnsWrappedResponse() throws Exception {
+        given(courseService.updateCourseVisibility("1", 2001L, new com.bikeprojectminji.bikeback.dto.course.UpdateCourseVisibilityRequest("PUBLIC")))
+                .willReturn(new CourseWriteResponse(2001L, 1L, "PUBLIC", "한강 코스"));
+
+        mockMvc.perform(patch("/api/v1/courses/2001/visibility")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "visibility": "PUBLIC"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.visibility").value("PUBLIC"));
     }
 }
