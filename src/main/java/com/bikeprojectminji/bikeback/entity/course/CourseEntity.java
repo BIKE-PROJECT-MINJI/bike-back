@@ -53,6 +53,9 @@ public class CourseEntity {
     @Column(nullable = false, length = 20)
     private CourseVisibility visibility;
 
+    @Column(name = "share_token", length = 64)
+    private String shareToken;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -130,6 +133,10 @@ public class CourseEntity {
         this.startLongitude = startLongitude;
     }
 
+    public void updateShareToken(String shareToken) {
+        this.shareToken = shareToken;
+    }
+
     public Long getId() {
         return id;
     }
@@ -184,5 +191,9 @@ public class CourseEntity {
 
     public CourseVisibility getVisibility() {
         return visibility;
+    }
+
+    public String getShareToken() {
+        return shareToken;
     }
 }
