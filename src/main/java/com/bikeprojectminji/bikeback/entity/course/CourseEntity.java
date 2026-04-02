@@ -2,6 +2,8 @@ package com.bikeprojectminji.bikeback.entity.course;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -19,6 +21,9 @@ public class CourseEntity {
 
     @Column(nullable = false, length = 120)
     private String title;
+
+    @Column(length = 1000)
+    private String description;
 
     @Column(name = "distance_km", nullable = false, precision = 5, scale = 1)
     private BigDecimal distanceKm;
@@ -44,6 +49,10 @@ public class CourseEntity {
     @Column(name = "owner_user_id")
     private Long ownerUserId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private CourseVisibility visibility;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -54,7 +63,7 @@ public class CourseEntity {
     }
 
     public CourseEntity(String title, BigDecimal distanceKm, Integer estimatedDurationMin, Integer displayOrder) {
-        this(title, distanceKm, estimatedDurationMin, displayOrder, false, null, null, null);
+        this(title, null, distanceKm, estimatedDurationMin, displayOrder, false, null, null, null, null, CourseVisibility.PUBLIC);
     }
 
     public CourseEntity(
@@ -68,7 +77,24 @@ public class CourseEntity {
             BigDecimal startLongitude,
             Long ownerUserId
     ) {
+        this(title, null, distanceKm, estimatedDurationMin, displayOrder, curated, featuredRank, startLatitude, startLongitude, ownerUserId, CourseVisibility.PUBLIC);
+    }
+
+    public CourseEntity(
+            String title,
+            String description,
+            BigDecimal distanceKm,
+            Integer estimatedDurationMin,
+            Integer displayOrder,
+            boolean curated,
+            Integer featuredRank,
+            BigDecimal startLatitude,
+            BigDecimal startLongitude,
+            Long ownerUserId,
+            CourseVisibility visibility
+    ) {
         this.title = title;
+        this.description = description;
         this.distanceKm = distanceKm;
         this.estimatedDurationMin = estimatedDurationMin;
         this.displayOrder = displayOrder;
@@ -77,6 +103,7 @@ public class CourseEntity {
         this.startLatitude = startLatitude;
         this.startLongitude = startLongitude;
         this.ownerUserId = ownerUserId;
+        this.visibility = visibility;
     }
 
     public CourseEntity(
@@ -89,7 +116,18 @@ public class CourseEntity {
             BigDecimal startLatitude,
             BigDecimal startLongitude
     ) {
-        this(title, distanceKm, estimatedDurationMin, displayOrder, curated, featuredRank, startLatitude, startLongitude, null);
+        this(title, null, distanceKm, estimatedDurationMin, displayOrder, curated, featuredRank, startLatitude, startLongitude, null, CourseVisibility.PUBLIC);
+    }
+
+    public void updateMetadata(String title, String description, CourseVisibility visibility) {
+        this.title = title;
+        this.description = description;
+        this.visibility = visibility;
+    }
+
+    public void updateStartCoordinates(BigDecimal startLatitude, BigDecimal startLongitude) {
+        this.startLatitude = startLatitude;
+        this.startLongitude = startLongitude;
     }
 
     public Long getId() {
@@ -102,6 +140,10 @@ public class CourseEntity {
 
     public BigDecimal getDistanceKm() {
         return distanceKm;
+    }
+
+    public String getDescription() {
+        return description;
     }
 
     public Integer getEstimatedDurationMin() {
@@ -138,5 +180,9 @@ public class CourseEntity {
 
     public Long getOwnerUserId() {
         return ownerUserId;
+    }
+
+    public CourseVisibility getVisibility() {
+        return visibility;
     }
 }
