@@ -23,9 +23,9 @@ import org.springframework.stereotype.Service;
 public class RidePolicyService {
 
     private static final Logger log = LoggerFactory.getLogger(RidePolicyService.class);
-    private static final BigDecimal START_DISTANCE_THRESHOLD_M = BigDecimal.valueOf(50);
-    private static final BigDecimal ACCURACY_THRESHOLD_M = BigDecimal.valueOf(50);
-    private static final long STALE_THRESHOLD_SECONDS = 15L;
+    private static final BigDecimal START_DISTANCE_THRESHOLD_M = BigDecimal.valueOf(150);
+    private static final BigDecimal ACCURACY_THRESHOLD_M = BigDecimal.valueOf(120);
+    private static final long STALE_THRESHOLD_SECONDS = 60L;
     private static final BigDecimal OFF_ROUTE_THRESHOLD_M = BigDecimal.valueOf(100);
 
     private final CourseRepository courseRepository;
