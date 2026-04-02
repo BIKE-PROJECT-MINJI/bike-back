@@ -8,5 +8,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email
     ON users (email ASC)
     WHERE email IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS idx_users_email
+    ON users (email ASC);
+
 ALTER TABLE users
     ALTER COLUMN external_id DROP NOT NULL;
