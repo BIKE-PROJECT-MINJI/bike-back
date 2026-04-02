@@ -9,15 +9,24 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.bikeprojectminji.bikeback.dto.weather.CurrentWeatherResponse;
 import com.bikeprojectminji.bikeback.dto.weather.WeatherData;
 import com.bikeprojectminji.bikeback.dto.weather.WindData;
+import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.service.weather.WeatherService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(WeatherController.class)
+@Import(SecurityConfig.class)
+@TestPropertySource(properties = {
+        "auth.jwt.secret=01234567890123456789012345678901",
+        "auth.jwt.issuer=bike-back-test",
+        "auth.jwt.token-validity-sec=3600"
+})
 class WeatherControllerTest {
 
     @Autowired
