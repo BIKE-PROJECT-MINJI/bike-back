@@ -3,6 +3,8 @@ package com.bikeprojectminji.bikeback.controller.course;
 import com.bikeprojectminji.bikeback.dto.ridepolicy.RidePolicyEvaluationRequest;
 import com.bikeprojectminji.bikeback.dto.ridepolicy.RidePolicyEvaluationResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseShareResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseDownloadResponse;
 import com.bikeprojectminji.bikeback.dto.course.CreateCourseFromRideRecordRequest;
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointsResponse;
@@ -50,17 +52,27 @@ public class CourseController {
     @GetMapping("/{courseId}")
     public ApiResponse<CourseDetailResponse> getCourseDetail(
             @PathVariable Long courseId,
+            @RequestParam(required = false) String shareToken,
             @AuthenticationPrincipal Jwt jwt
     ) {
-        return ApiResponse.success(courseService.getCourseDetail(courseId, jwt != null ? jwt.getSubject() : null));
+        return ApiResponse.success(courseService.getCourseDetail(courseId, jwt != null ? jwt.getSubject() : null, shareToken));
     }
 
     @GetMapping("/{courseId}/route-points")
     public ApiResponse<CourseRoutePointsResponse> getCourseRoutePoints(
             @PathVariable Long courseId,
+            @RequestParam(required = false) String shareToken,
             @AuthenticationPrincipal Jwt jwt
     ) {
-        return ApiResponse.success(courseService.getCourseRoutePoints(courseId, jwt != null ? jwt.getSubject() : null));
+        return ApiResponse.success(courseService.getCourseRoutePoints(courseId, jwt != null ? jwt.getSubject() : null, shareToken));
+    }
+
+    @GetMapping("/search")
+    public ApiResponse<CourseListResponse> searchCourses(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String sort
+    ) {
+        return ApiResponse.success(courseService.searchPublicCourses(q, sort));
     }
 
     @GetMapping("/featured")
@@ -116,5 +128,22 @@ public class CourseController {
             @RequestBody UpdateCourseVisibilityRequest request
     ) {
         return ApiResponse.success(courseService.updateCourseVisibility(jwt.getSubject(), courseId, request));
+    }
+
+    @PostMapping("/{courseId}/share")
+    public ApiResponse<CourseShareResponse> getCourseShareInfo(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long courseId
+    ) {
+        return ApiResponse.success(courseService.getCourseShareInfo(jwt.getSubject(), courseId));
+    }
+
+    @GetMapping("/{courseId}/download")
+    public ApiResponse<CourseDownloadResponse> downloadCourse(
+            @PathVariable Long courseId,
+            @RequestParam(required = false) String shareToken,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        return ApiResponse.success(courseService.downloadCourse(courseId, jwt != null ? jwt.getSubject() : null, shareToken));
     }
 }

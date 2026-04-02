@@ -2,7 +2,9 @@ package com.bikeprojectminji.bikeback.service.course;
 
 import com.bikeprojectminji.bikeback.dto.course.CourseListItemResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
+import com.bikeprojectminji.bikeback.dto.course.CourseDownloadResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointRequest;
+import com.bikeprojectminji.bikeback.dto.course.CourseShareResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseWriteResponse;
 import com.bikeprojectminji.bikeback.dto.course.CreateCourseFromRideRecordRequest;
 import com.bikeprojectminji.bikeback.dto.course.CourseDetailResponse;
@@ -32,6 +34,7 @@ import java.util.List;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -86,8 +89,8 @@ public class CourseService {
         return new CourseListResponse(items, hasNext, nextCursor);
     }
 
-    public CourseDetailResponse getCourseDetail(Long courseId, String subject) {
-        CourseEntity course = findReadableCourse(courseId, subject);
+    public CourseDetailResponse getCourseDetail(Long courseId, String subject, String shareToken) {
+        CourseEntity course = findReadableCourse(courseId, subject, shareToken);
 
         return new CourseDetailResponse(
                 course.getId(),
@@ -97,8 +100,8 @@ public class CourseService {
         );
     }
 
-    public CourseRoutePointsResponse getCourseRoutePoints(Long courseId, String subject) {
-        CourseEntity course = findReadableCourse(courseId, subject);
+    public CourseRoutePointsResponse getCourseRoutePoints(Long courseId, String subject, String shareToken) {
+        CourseEntity course = findReadableCourse(courseId, subject, shareToken);
 
         List<CourseRoutePointResponse> points = courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(course.getId()).stream()
                 .map(routePoint -> new CourseRoutePointResponse(
@@ -135,6 +138,25 @@ public class CourseService {
                 .toList());
 
         return new FeaturedCourseResponse(distanceMode ? "distance" : "fallback", items);
+    }
+
+    public CourseListResponse searchPublicCourses(String query, String sort) {
+        validateSearchSort(sort);
+
+        List<CourseEntity> courses = isBlank(query)
+                ? courseRepository.findTop20ByVisibilityOrderByIdDesc(CourseVisibility.PUBLIC)
+                : courseRepository.findTop20ByVisibilityAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility.PUBLIC, query.trim());
+
+        List<CourseListItemResponse> items = courses.stream()
+                .map(course -> new CourseListItemResponse(
+                        course.getId(),
+                        course.getTitle(),
+                        course.getDistanceKm(),
+                        course.getEstimatedDurationMin()
+                ))
+                .toList();
+
+        return new CourseListResponse(items, false, null);
     }
 
     @Transactional
@@ -201,6 +223,38 @@ public class CourseService {
         CourseEntity course = findOwnedCourse(courseId, user.getId());
         course.updateMetadata(course.getTitle(), course.getDescription(), parseVisibility(request.visibility()));
         return toCourseWriteResponse(courseRepository.save(course));
+    }
+
+    @Transactional
+    public CourseShareResponse getCourseShareInfo(String subject, Long courseId) {
+        UserEntity user = authService.findUserBySubject(subject);
+        CourseEntity course = findOwnedCourse(courseId, user.getId());
+
+        if (course.getVisibility() == CourseVisibility.PRIVATE) {
+            throw new BadRequestException("PRIVATE 코스는 먼저 공개 범위를 변경한 뒤 공유해야 합니다.");
+        }
+
+        if (course.getShareToken() == null || course.getShareToken().isBlank()) {
+            course.updateShareToken(UUID.randomUUID().toString().replace("-", ""));
+            course = courseRepository.save(course);
+        }
+
+        String shareType = course.getVisibility() == CourseVisibility.PUBLIC ? "PUBLIC_LINK" : "UNLISTED_LINK";
+        String shareUrl = "/api/v1/courses/" + course.getId() + "?shareToken=" + course.getShareToken();
+        return new CourseShareResponse(shareType, course.getVisibility().name(), shareUrl, course.getShareToken());
+    }
+
+    public CourseDownloadResponse downloadCourse(Long courseId, String subject, String shareToken) {
+        CourseEntity course = findReadableCourse(courseId, subject, shareToken);
+        List<CourseRoutePointResponse> routePoints = courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(course.getId()).stream()
+                .map(routePoint -> new CourseRoutePointResponse(
+                        routePoint.getPointOrder(),
+                        routePoint.getLatitude(),
+                        routePoint.getLongitude()
+                ))
+                .toList();
+
+        return new CourseDownloadResponse(course.getId(), course.getTitle(), course.getVisibility().name(), routePoints);
     }
 
     private int resolveLimit(Integer limit) {
@@ -275,13 +329,21 @@ public class CourseService {
         return course;
     }
 
-    private CourseEntity findReadableCourse(Long courseId, String subject) {
+    private CourseEntity findReadableCourse(Long courseId, String subject, String shareToken) {
         CourseEntity course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new NotFoundException("코스를 찾을 수 없습니다."));
 
-        if (course.getVisibility() == CourseVisibility.PUBLIC || course.getVisibility() == CourseVisibility.UNLISTED) {
+        if (course.getVisibility() == CourseVisibility.PUBLIC) {
             return course;
         }
+
+        if (course.getVisibility() == CourseVisibility.UNLISTED) {
+            if (!isBlank(shareToken) && shareToken.equals(course.getShareToken())) {
+                return course;
+            }
+            throw new ForbiddenException("이 코스에 접근할 권한이 없습니다.");
+        }
+
         if (subject == null || subject.isBlank()) {
             throw new ForbiddenException("이 코스는 공개되지 않았습니다.");
         }
@@ -292,6 +354,19 @@ public class CourseService {
         }
 
         return course;
+    }
+
+    private void validateSearchSort(String sort) {
+        if (sort == null || sort.isBlank()) {
+            return;
+        }
+        if (!"latest".equalsIgnoreCase(sort)) {
+            throw new BadRequestException("sort는 latest만 지원합니다.");
+        }
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private CourseVisibility parseVisibility(String rawVisibility) {
