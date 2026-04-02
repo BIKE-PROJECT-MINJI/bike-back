@@ -17,6 +17,7 @@ import com.bikeprojectminji.bikeback.dto.course.CourseListResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointResponse;
 import com.bikeprojectminji.bikeback.dto.course.CourseRoutePointsResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
+import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.service.course.CourseService;
 import com.bikeprojectminji.bikeback.service.ridepolicy.RidePolicyService;
@@ -59,7 +60,7 @@ class CourseControllerTest {
                 BigDecimal.valueOf(23.4),
                 95
         );
-        given(courseService.getCourseDetail(7L)).willReturn(response);
+        given(courseService.getCourseDetail(7L, null)).willReturn(response);
 
         mockMvc.perform(get("/api/v1/courses/7"))
                 .andExpect(status().isOk())
@@ -75,7 +76,7 @@ class CourseControllerTest {
     @DisplayName("코스 상세 API는 없는 코스면 404를 응답한다")
     void getCourseDetailReturnsNotFoundWhenCourseDoesNotExist() throws Exception {
         willThrow(new NotFoundException("코스를 찾을 수 없습니다."))
-                .given(courseService).getCourseDetail(999L);
+                .given(courseService).getCourseDetail(999L, null);
 
         mockMvc.perform(get("/api/v1/courses/999"))
                 .andExpect(status().isNotFound())
@@ -93,7 +94,7 @@ class CourseControllerTest {
                         new CourseRoutePointResponse(2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
                 )
         );
-        given(courseService.getCourseRoutePoints(7L)).willReturn(response);
+        given(courseService.getCourseRoutePoints(7L, null)).willReturn(response);
 
         mockMvc.perform(get("/api/v1/courses/7/route-points"))
                 .andExpect(status().isOk())
@@ -108,7 +109,7 @@ class CourseControllerTest {
     @DisplayName("코스 경로 API는 없는 코스면 404를 응답한다")
     void getCourseRoutePointsReturnsNotFoundWhenCourseDoesNotExist() throws Exception {
         willThrow(new NotFoundException("코스를 찾을 수 없습니다."))
-                .given(courseService).getCourseRoutePoints(999L);
+                .given(courseService).getCourseRoutePoints(999L, null);
 
         mockMvc.perform(get("/api/v1/courses/999/route-points"))
                 .andExpect(status().isNotFound())
@@ -197,5 +198,26 @@ class CourseControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.visibility").value("PUBLIC"));
+    }
+
+    @Test
+    @DisplayName("비공개 코스 상세 API는 비로그인 요청이면 403을 응답한다")
+    void getPrivateCourseDetailReturnsForbiddenWithoutToken() throws Exception {
+        willThrow(new ForbiddenException("이 코스는 공개되지 않았습니다."))
+                .given(courseService).getCourseDetail(2001L, null);
+
+        mockMvc.perform(get("/api/v1/courses/2001"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("이 코스는 공개되지 않았습니다."));
+    }
+
+    @Test
+    @DisplayName("비공개 코스 상세 API는 owner 토큰이면 응답한다")
+    void getPrivateCourseDetailReturnsResponseForOwner() throws Exception {
+        given(courseService.getCourseDetail(2001L, "1")).willReturn(new CourseDetailResponse(2001L, "내 코스", BigDecimal.valueOf(18.3), 60));
+
+        mockMvc.perform(get("/api/v1/courses/2001").with(jwt().jwt(jwt -> jwt.subject("1"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(2001));
     }
 }
