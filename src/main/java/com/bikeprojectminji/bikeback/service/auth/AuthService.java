@@ -3,7 +3,9 @@ package com.bikeprojectminji.bikeback.service.auth;
 import com.bikeprojectminji.bikeback.dto.auth.AuthMeResponse;
 import com.bikeprojectminji.bikeback.dto.auth.LoginRequest;
 import com.bikeprojectminji.bikeback.dto.auth.LoginResponse;
+import com.bikeprojectminji.bikeback.dto.auth.RegisterRequest;
 import com.bikeprojectminji.bikeback.entity.user.UserEntity;
+import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.UnauthorizedException;
 import com.bikeprojectminji.bikeback.repository.user.UserRepository;
 import java.time.Clock;
@@ -14,6 +16,7 @@ import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -21,6 +24,7 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final JwtEncoder jwtEncoder;
+    private final PasswordEncoder passwordEncoder;
     private final Clock clock;
     private final String issuer;
     private final long tokenValiditySec;
@@ -28,31 +32,50 @@ public class AuthService {
     public AuthService(
             UserRepository userRepository,
             JwtEncoder jwtEncoder,
+            PasswordEncoder passwordEncoder,
             Clock clock,
             @Value("${auth.jwt.issuer}") String issuer,
             @Value("${auth.jwt.token-validity-sec}") long tokenValiditySec
     ) {
         this.userRepository = userRepository;
         this.jwtEncoder = jwtEncoder;
+        this.passwordEncoder = passwordEncoder;
         this.clock = clock;
         this.issuer = issuer;
         this.tokenValiditySec = tokenValiditySec;
     }
 
-    public LoginResponse login(LoginRequest request) {
-        UserEntity user = userRepository.findByExternalId(request.externalId())
-                .map(existing -> updateUser(existing, request))
-                .orElseGet(() -> new UserEntity(request.externalId(), request.displayName(), request.profileImageUrl()));
+    public LoginResponse register(RegisterRequest request) {
+        if (userRepository.existsByEmail(request.email())) {
+            throw new BadRequestException("이미 사용 중인 이메일입니다.");
+        }
 
-        UserEntity savedUser = userRepository.save(user);
+        UserEntity savedUser = userRepository.save(new UserEntity(
+                null,
+                request.email(),
+                passwordEncoder.encode(request.password()),
+                request.displayName(),
+                request.profileImageUrl()
+        ));
         String accessToken = issueToken(savedUser);
-
         return new LoginResponse("Bearer", accessToken, tokenValiditySec, savedUser.getId(), savedUser.getDisplayName());
+    }
+
+    public LoginResponse login(LoginRequest request) {
+        UserEntity user = userRepository.findByEmail(request.email())
+                .orElseThrow(() -> new UnauthorizedException("이메일 또는 비밀번호가 올바르지 않습니다."));
+
+        if (user.getPasswordHash() == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            throw new UnauthorizedException("이메일 또는 비밀번호가 올바르지 않습니다.");
+        }
+
+        String accessToken = issueToken(user);
+        return new LoginResponse("Bearer", accessToken, tokenValiditySec, user.getId(), user.getDisplayName());
     }
 
     public AuthMeResponse getCurrentUser(String subject) {
         UserEntity user = findUserBySubject(subject);
-        return new AuthMeResponse(user.getId(), user.getDisplayName(), true, "USER");
+        return new AuthMeResponse(user.getId(), user.getEmail(), user.getDisplayName(), true, "USER");
     }
 
     public UserEntity findUserBySubject(String subject) {
@@ -65,11 +88,6 @@ public class AuthService {
 
         return userRepository.findById(userId)
                 .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다."));
-    }
-
-    private UserEntity updateUser(UserEntity existingUser, LoginRequest request) {
-        existingUser.updateProfile(request.displayName(), request.profileImageUrl());
-        return existingUser;
     }
 
     private String issueToken(UserEntity user) {
@@ -85,7 +103,7 @@ public class AuthService {
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .subject(String.valueOf(user.getId()))
-                .claim("externalId", user.getExternalId())
+                .claim("email", user.getEmail())
                 .claim("displayName", user.getDisplayName())
                 .build();
 
