@@ -39,12 +39,13 @@ class ProfileControllerTest {
     @DisplayName("내 프로필 조회 API는 success 래퍼로 응답한다")
     void getMyProfileReturnsWrappedResponse() throws Exception {
         given(profileService.getMyProfile("1"))
-                .willReturn(new ProfileMeResponse(1L, "bikeoasis", "https://example.com/me.png"));
+                .willReturn(new ProfileMeResponse(1L, "bikeoasis@example.com", "bikeoasis", "https://example.com/me.png"));
 
         mockMvc.perform(get("/api/v1/profile/me").with(jwt().jwt(jwt -> jwt.subject("1"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.userId").value(1))
+                .andExpect(jsonPath("$.data.email").value("bikeoasis@example.com"))
                 .andExpect(jsonPath("$.data.displayName").value("bikeoasis"));
     }
 
@@ -52,7 +53,7 @@ class ProfileControllerTest {
     @DisplayName("내 프로필 수정 API는 success 래퍼로 응답한다")
     void updateMyProfileReturnsWrappedResponse() throws Exception {
         given(profileService.updateMyProfile("1", new com.bikeprojectminji.bikeback.dto.profile.UpdateProfileRequest("bikeoasis", "https://example.com/me.png")))
-                .willReturn(new ProfileMeResponse(1L, "bikeoasis", "https://example.com/me.png"));
+                .willReturn(new ProfileMeResponse(1L, "bikeoasis@example.com", "bikeoasis", "https://example.com/me.png"));
 
         mockMvc.perform(patch("/api/v1/profile/me")
                         .with(jwt().jwt(jwt -> jwt.subject("1")))

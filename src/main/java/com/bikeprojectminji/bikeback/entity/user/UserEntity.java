@@ -19,6 +19,12 @@ public class UserEntity {
     @Column(name = "external_id", nullable = false, unique = true, length = 120)
     private String externalId;
 
+    @Column(name = "email", unique = true, length = 160)
+    private String email;
+
+    @Column(name = "password_hash", length = 255)
+    private String passwordHash;
+
     @Column(name = "display_name", nullable = false, length = 80)
     private String displayName;
 
@@ -34,13 +40,22 @@ public class UserEntity {
     protected UserEntity() {
     }
 
-    public UserEntity(String externalId, String displayName, String profileImageUrl) {
+    public UserEntity(String externalId, String email, String passwordHash, String displayName, String profileImageUrl) {
         this.externalId = externalId;
+        this.email = email;
+        this.passwordHash = passwordHash;
         this.displayName = displayName;
         this.profileImageUrl = profileImageUrl;
     }
 
     public void updateProfile(String displayName, String profileImageUrl) {
+        this.displayName = displayName;
+        this.profileImageUrl = profileImageUrl;
+    }
+
+    public void claimLocalAccount(String email, String passwordHash, String displayName, String profileImageUrl) {
+        this.email = email;
+        this.passwordHash = passwordHash;
         this.displayName = displayName;
         this.profileImageUrl = profileImageUrl;
     }
@@ -51,6 +66,14 @@ public class UserEntity {
 
     public String getExternalId() {
         return externalId;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
     }
 
     public String getDisplayName() {

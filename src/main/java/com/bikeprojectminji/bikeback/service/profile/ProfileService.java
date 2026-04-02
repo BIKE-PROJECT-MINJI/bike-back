@@ -31,6 +31,6 @@ public class ProfileService {
     }
 
     private ProfileMeResponse toResponse(UserEntity user) {
-        return new ProfileMeResponse(user.getId(), user.getDisplayName(), user.getProfileImageUrl());
+        return new ProfileMeResponse(user.getId(), user.getEmail(), user.getDisplayName(), user.getProfileImageUrl());
     }
 }

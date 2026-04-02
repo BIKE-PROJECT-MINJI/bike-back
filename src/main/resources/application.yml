@@ -17,6 +17,3 @@ auth:
     secret: ${AUTH_JWT_SECRET}
     issuer: ${AUTH_JWT_ISSUER:bike-back}
     token-validity-sec: ${AUTH_JWT_TOKEN_VALIDITY_SEC:86400}
-  login:
-    dev-enabled: ${AUTH_LOGIN_DEV_ENABLED:false}
-    dev-secret: ${AUTH_LOGIN_DEV_SECRET:}

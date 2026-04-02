@@ -42,7 +42,7 @@ class RideRecordServiceTest {
     @Test
     @DisplayName("자유 주행 기록 저장은 소유자와 route point를 함께 저장한다")
     void saveRideRecordReturnsPersistedRecordResponse() {
-        UserEntity user = new UserEntity("device-1", "bikeoasis", null);
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
         ReflectionTestUtils.setField(user, "id", 1L);
         RideRecordEntity savedRideRecord = new RideRecordEntity(1L, OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), OffsetDateTime.parse("2026-03-29T11:00:00+09:00"), 18250, 3600);
         ReflectionTestUtils.setField(savedRideRecord, "id", 1001L);

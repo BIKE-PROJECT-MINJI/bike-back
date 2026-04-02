@@ -8,7 +8,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.bikeprojectminji.bikeback.dto.auth.AuthMeResponse;
+import com.bikeprojectminji.bikeback.dto.auth.LoginRequest;
 import com.bikeprojectminji.bikeback.dto.auth.LoginResponse;
+import com.bikeprojectminji.bikeback.dto.auth.RegisterRequest;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.service.auth.AuthService;
 import org.junit.jupiter.api.DisplayName;
@@ -26,9 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @TestPropertySource(properties = {
         "auth.jwt.secret=01234567890123456789012345678901",
         "auth.jwt.issuer=bike-back-test",
-        "auth.jwt.token-validity-sec=3600",
-        "auth.login.dev-enabled=true",
-        "auth.login.dev-secret=dev-login-secret"
+        "auth.jwt.token-validity-sec=3600"
 })
 class AuthControllerTest {
 
@@ -39,19 +39,21 @@ class AuthControllerTest {
     private AuthService authService;
 
     @Test
-    @DisplayName("로그인 API는 success 래퍼로 JWT 응답을 반환한다")
-    void loginReturnsWrappedResponse() throws Exception {
-        given(authService.login(new com.bikeprojectminji.bikeback.dto.auth.LoginRequest("device-1", "bikeoasis", null)))
+    @DisplayName("회원가입 API는 success 래퍼로 JWT 응답을 반환한다")
+    void registerReturnsWrappedResponse() throws Exception {
+        RegisterRequest request = new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null);
+        given(authService.register(request))
                 .willReturn(new LoginResponse("Bearer", "jwt-token", 3600, 1L, "bikeoasis"));
 
-        mockMvc.perform(post("/api/v1/auth/login")
-                        .header("X-Dev-Login-Secret", "dev-login-secret")
+        mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "externalId": "device-1",
+                                  "email": "bikeoasis@example.com",
+                                  "password": "example-password",
                                   "displayName": "bikeoasis",
-                                  "profileImageUrl": null
+                                  "profileImageUrl": null,
+                                  "legacyExternalId": null
                                 }
                                 """))
                 .andExpect(status().isOk())
@@ -62,32 +64,36 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("로그인 API는 dev secret이 없으면 403을 반환한다")
-    void loginReturnsForbiddenWithoutDevSecret() throws Exception {
+    @DisplayName("로그인 API는 success 래퍼로 JWT 응답을 반환한다")
+    void loginReturnsWrappedResponse() throws Exception {
+        LoginRequest request = new LoginRequest("bikeoasis@example.com", "example-password");
+        given(authService.login(request))
+                .willReturn(new LoginResponse("Bearer", "jwt-token", 3600, 1L, "bikeoasis"));
+
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "externalId": "device-1",
-                                  "displayName": "bikeoasis",
-                                  "profileImageUrl": null
+                                  "email": "bikeoasis@example.com",
+                                  "password": "example-password"
                                 }
                                 """))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value(403))
-                .andExpect(jsonPath("$.message").value("로그인 API 접근이 허용되지 않았습니다."));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.accessToken").value("jwt-token"));
     }
 
     @Test
     @DisplayName("내 인증 상태 API는 인증된 사용자의 정보를 반환한다")
     void getMeReturnsAuthenticatedUser() throws Exception {
         given(authService.getCurrentUser("1"))
-                .willReturn(new AuthMeResponse(1L, "bikeoasis", true, "USER"));
+                .willReturn(new AuthMeResponse(1L, "bikeoasis@example.com", "bikeoasis", true, "USER"));
 
         mockMvc.perform(get("/api/v1/auth/me").with(jwt().jwt(jwt -> jwt.subject("1"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.userId").value(1))
+                .andExpect(jsonPath("$.data.email").value("bikeoasis@example.com"))
                 .andExpect(jsonPath("$.data.displayName").value("bikeoasis"));
     }
 
