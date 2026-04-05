@@ -1,4 +1,4 @@
-package com.bikeprojectminji.bikeback.service.weather;
+package com.bikeprojectminji.bikeback.weather.service;
 
 import java.util.Optional;
 

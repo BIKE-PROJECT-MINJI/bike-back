@@ -1,4 +1,4 @@
-package com.bikeprojectminji.bikeback.controller.weather;
+package com.bikeprojectminji.bikeback.weather.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
@@ -6,11 +6,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.bikeprojectminji.bikeback.dto.weather.CurrentWeatherResponse;
-import com.bikeprojectminji.bikeback.dto.weather.WeatherData;
-import com.bikeprojectminji.bikeback.dto.weather.WindData;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
-import com.bikeprojectminji.bikeback.service.weather.WeatherService;
+import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
+import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
+import com.bikeprojectminji.bikeback.weather.dto.WindData;
+import com.bikeprojectminji.bikeback.weather.service.WeatherService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,6 +57,20 @@ class WeatherControllerTest {
                 .andExpect(jsonPath("$.data.wind.speedKmh").value(14))
                 .andExpect(jsonPath("$.data.stale").value(false))
                 .andExpect(jsonPath("$.data.forecastFallbackUsed").value(false));
+    }
+
+    @Test
+    @DisplayName("현재 날씨를 사용할 수 없으면 명시적 실패 응답을 반환한다")
+    void getCurrentReturnsNotFoundWhenWeatherUnavailable() throws Exception {
+        given(weatherService.getCurrent(any(), any())).willThrow(new NotFoundException("현재 날씨 정보를 사용할 수 없습니다."));
+
+        mockMvc.perform(get("/api/v1/weather/current")
+                        .param("lat", "37.5665")
+                        .param("lon", "126.9780"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.message").value("현재 날씨 정보를 사용할 수 없습니다."))
+                .andExpect(jsonPath("$.data").doesNotExist());
     }
 
     @Test

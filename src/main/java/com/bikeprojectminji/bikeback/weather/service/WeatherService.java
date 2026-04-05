@@ -1,6 +1,7 @@
-package com.bikeprojectminji.bikeback.service.weather;
+package com.bikeprojectminji.bikeback.weather.service;
 
-import com.bikeprojectminji.bikeback.dto.weather.CurrentWeatherResponse;
+import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -16,6 +17,7 @@ public class WeatherService {
 
     private static final Logger log = LoggerFactory.getLogger(WeatherService.class);
     private static final Duration LAST_SUCCESS_TTL = Duration.ofMinutes(60);
+    private static final String WEATHER_UNAVAILABLE_MESSAGE = "현재 날씨 정보를 사용할 수 없습니다.";
 
     private final WeatherProviderPort weatherProviderPort;
     private final LastSuccessWeatherStore lastSuccessWeatherStore;
@@ -49,7 +51,7 @@ public class WeatherService {
         }
 
         log.info("weather unavailable locationKey={}", locationKey);
-        return null;
+        throw new NotFoundException(WEATHER_UNAVAILABLE_MESSAGE);
     }
 
     private boolean isWithinLastSuccessTtl(WeatherSnapshot snapshot) {

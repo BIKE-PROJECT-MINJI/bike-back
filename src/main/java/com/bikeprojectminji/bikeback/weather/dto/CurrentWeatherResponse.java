@@ -1,4 +1,4 @@
-package com.bikeprojectminji.bikeback.dto.weather;
+package com.bikeprojectminji.bikeback.weather.dto;
 
 public record CurrentWeatherResponse(
         WeatherData weather,

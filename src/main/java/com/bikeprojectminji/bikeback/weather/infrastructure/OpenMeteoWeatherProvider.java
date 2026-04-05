@@ -1,11 +1,11 @@
-package com.bikeprojectminji.bikeback.infrastructure.weather;
+package com.bikeprojectminji.bikeback.weather.infrastructure;
 
-import com.bikeprojectminji.bikeback.dto.weather.WeatherData;
-import com.bikeprojectminji.bikeback.dto.weather.WindData;
-import com.bikeprojectminji.bikeback.service.weather.WeatherLocationKey;
-import com.bikeprojectminji.bikeback.service.weather.WeatherProviderPort;
-import com.bikeprojectminji.bikeback.service.weather.WeatherProviderResult;
-import com.bikeprojectminji.bikeback.service.weather.WeatherSnapshot;
+import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
+import com.bikeprojectminji.bikeback.weather.dto.WindData;
+import com.bikeprojectminji.bikeback.weather.service.WeatherLocationKey;
+import com.bikeprojectminji.bikeback.weather.service.WeatherProviderPort;
+import com.bikeprojectminji.bikeback.weather.service.WeatherProviderResult;
+import com.bikeprojectminji.bikeback.weather.service.WeatherSnapshot;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;

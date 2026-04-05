@@ -1,4 +1,4 @@
-package com.bikeprojectminji.bikeback.service.weather;
+package com.bikeprojectminji.bikeback.weather.service;
 
 public record WeatherProviderResult(
         boolean success,

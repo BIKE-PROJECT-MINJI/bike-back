@@ -1,4 +1,4 @@
-package com.bikeprojectminji.bikeback.infrastructure.weather;
+package com.bikeprojectminji.bikeback.weather.infrastructure;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;

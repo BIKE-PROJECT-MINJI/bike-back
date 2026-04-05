@@ -1,9 +1,9 @@
-package com.bikeprojectminji.bikeback.controller.weather;
+package com.bikeprojectminji.bikeback.weather.controller;
 
-import com.bikeprojectminji.bikeback.dto.weather.CurrentWeatherResponse;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
-import com.bikeprojectminji.bikeback.service.weather.WeatherService;
+import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
+import com.bikeprojectminji.bikeback.weather.service.WeatherService;
 import java.math.BigDecimal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

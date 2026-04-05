@@ -1,7 +1,7 @@
-package com.bikeprojectminji.bikeback.service.weather;
+package com.bikeprojectminji.bikeback.weather.service;
 
-import com.bikeprojectminji.bikeback.dto.weather.WeatherData;
-import com.bikeprojectminji.bikeback.dto.weather.WindData;
+import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
+import com.bikeprojectminji.bikeback.weather.dto.WindData;
 import java.time.OffsetDateTime;
 
 public record WeatherSnapshot(

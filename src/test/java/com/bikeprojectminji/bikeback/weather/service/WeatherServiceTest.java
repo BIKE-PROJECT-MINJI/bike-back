@@ -1,12 +1,14 @@
-package com.bikeprojectminji.bikeback.service.weather;
+package com.bikeprojectminji.bikeback.weather.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
-import com.bikeprojectminji.bikeback.dto.weather.CurrentWeatherResponse;
-import com.bikeprojectminji.bikeback.dto.weather.WeatherData;
-import com.bikeprojectminji.bikeback.dto.weather.WindData;
+import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
+import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
+import com.bikeprojectminji.bikeback.weather.dto.WindData;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -68,15 +70,27 @@ class WeatherServiceTest {
     }
 
     @Test
-    @DisplayName("provider 실패 시 마지막 성공값이 60분을 넘기면 정보 없음으로 처리한다")
-    void getCurrentReturnsUnavailableWhenLastSuccessExpired() {
+    @DisplayName("provider 실패 시 마지막 성공값이 60분을 넘기면 명시적 실패로 처리한다")
+    void getCurrentThrowsWhenLastSuccessExpired() {
         WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
         given(weatherProviderPort.getCurrent(key)).willReturn(WeatherProviderResult.failure());
         given(lastSuccessWeatherStore.find(key)).willReturn(Optional.of(snapshot(false, "2026-03-29T09:10:00+09:00")));
 
-        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        assertThatThrownBy(() -> weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("현재 날씨 정보를 사용할 수 없습니다.");
+    }
 
-        assertThat(response).isNull();
+    @Test
+    @DisplayName("provider 실패 시 마지막 성공값이 없으면 명시적 실패로 처리한다")
+    void getCurrentThrowsWhenLastSuccessMissing() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        given(weatherProviderPort.getCurrent(key)).willReturn(WeatherProviderResult.failure());
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("현재 날씨 정보를 사용할 수 없습니다.");
     }
 
     private WeatherSnapshot snapshot(boolean forecastFallbackUsed, String lastSucceededAt) {
