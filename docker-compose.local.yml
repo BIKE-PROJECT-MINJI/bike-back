@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: bike-back-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bike
+      POSTGRES_USER: bike
+      POSTGRES_PASSWORD: bike
+    ports:
+      - "5433:5432"
+    volumes:
+      - bike_back_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bike -d bike"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: bike-back-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - bike_back_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  bike_back_postgres_data:
+  bike_back_redis_data:
