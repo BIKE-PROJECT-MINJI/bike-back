@@ -23,6 +23,7 @@ public class LocationController {
     @GetMapping("/me/recent")
     public ApiResponse<RecentLocationResponse> getMyRecentLocation(@AuthenticationPrincipal Jwt jwt) {
         // recent cache는 선택적 상태이므로, 값이 없으면 404로 명시적으로 응답한다.
+        // 즉, source of truth 부재를 숨기지 않고 "현재 캐시가 없다"는 사실을 그대로 표현한다.
         return recentLocationCacheService.find(jwt.getSubject())
                 .map(snapshot -> ApiResponse.success(new RecentLocationResponse(
                         snapshot.rideRecordId(),
