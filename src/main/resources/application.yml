@@ -1,16 +1,29 @@
 spring:
   application:
     name: bike-back
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:${DATABASE_URL:}}
+    username: ${SPRING_DATASOURCE_USERNAME:${PGUSER:}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${PGPASSWORD:}}
+    driver-class-name: org.postgresql.Driver
+
   jpa:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+
   flyway:
     enabled: true
+
   data:
     redis:
+      url: ${SPRING_DATA_REDIS_URL:${REDIS_URL:}}
       repositories:
         enabled: false
+
+server:
+  port: ${PORT:8080}
 
 auth:
   jwt:
