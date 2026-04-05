@@ -67,6 +67,7 @@ public class RideRecordService {
             List<RideRecordPointEntity> routePoints,
             OffsetDateTime endedAt
     ) {
+        // 최종 기록은 DB가 원본이고, 최근 위치 조회만 빠르게 하기 위해 마지막 포인트를 보조 캐시에 남긴다.
         if (routePoints.isEmpty()) {
             return;
         }

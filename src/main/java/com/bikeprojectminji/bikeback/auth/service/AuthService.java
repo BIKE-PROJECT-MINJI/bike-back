@@ -22,6 +22,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class AuthService {
 
+    // 사용자 계정 aggregate는 auth 도메인이 소유하고,
+    // 다른 도메인은 현재 사용자 식별/조회가 필요할 때 이 서비스를 통해 접근한다.
+
     private final UserRepository userRepository;
     private final JwtEncoder jwtEncoder;
     private final PasswordEncoder passwordEncoder;

@@ -12,6 +12,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class StringRedisJsonValueStore implements RedisJsonValueStore {
 
+    // 도메인별 Redis key/TTL 의미는 각 도메인이 소유하고,
+    // 이 클래스는 JSON 직렬화/역직렬화와 저수준 get/set만 담당한다.
+
     private static final Logger log = LoggerFactory.getLogger(StringRedisJsonValueStore.class);
 
     private final StringRedisTemplate stringRedisTemplate;

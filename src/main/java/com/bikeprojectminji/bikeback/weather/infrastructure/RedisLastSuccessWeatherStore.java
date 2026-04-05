@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class RedisLastSuccessWeatherStore implements LastSuccessWeatherStore {
 
+    // weather 마지막 성공값은 60분 fallback 정책을 지원하기 위해 61분 TTL로 저장한다.
     private static final Duration TTL = Duration.ofMinutes(61);
 
     private final RedisJsonValueStore redisJsonValueStore;

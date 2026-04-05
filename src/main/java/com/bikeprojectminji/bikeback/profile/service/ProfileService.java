@@ -10,6 +10,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class ProfileService {
 
+    // profile은 별도 aggregate를 만들지 않고,
+    // auth 도메인이 소유한 사용자 계정 aggregate를 use case 단위로 조작한다.
+
     private final AuthService authService;
     private final UserRepository userRepository;
 
