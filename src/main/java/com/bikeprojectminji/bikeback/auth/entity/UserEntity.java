@@ -1,4 +1,4 @@
-package com.bikeprojectminji.bikeback.entity.user;
+package com.bikeprojectminji.bikeback.auth.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

@@ -1,6 +1,6 @@
-package com.bikeprojectminji.bikeback.repository.user;
+package com.bikeprojectminji.bikeback.auth.repository;
 
-import com.bikeprojectminji.bikeback.entity.user.UserEntity;
+import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 

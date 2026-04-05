@@ -1,4 +1,4 @@
-package com.bikeprojectminji.bikeback.dto.profile;
+package com.bikeprojectminji.bikeback.profile.dto;
 
 public record UpdateProfileRequest(
         String displayName,

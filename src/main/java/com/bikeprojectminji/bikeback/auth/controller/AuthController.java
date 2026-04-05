@@ -1,12 +1,12 @@
-package com.bikeprojectminji.bikeback.controller.auth;
+package com.bikeprojectminji.bikeback.auth.controller;
 
-import com.bikeprojectminji.bikeback.dto.auth.AuthMeResponse;
-import com.bikeprojectminji.bikeback.dto.auth.LoginRequest;
-import com.bikeprojectminji.bikeback.dto.auth.LoginResponse;
-import com.bikeprojectminji.bikeback.dto.auth.RegisterRequest;
+import com.bikeprojectminji.bikeback.auth.dto.AuthMeResponse;
+import com.bikeprojectminji.bikeback.auth.dto.LoginRequest;
+import com.bikeprojectminji.bikeback.auth.dto.LoginResponse;
+import com.bikeprojectminji.bikeback.auth.dto.RegisterRequest;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
-import com.bikeprojectminji.bikeback.service.auth.AuthService;
+import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;

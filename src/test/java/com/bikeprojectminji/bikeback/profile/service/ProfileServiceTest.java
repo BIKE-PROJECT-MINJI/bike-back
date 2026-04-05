@@ -1,13 +1,13 @@
-package com.bikeprojectminji.bikeback.service.profile;
+package com.bikeprojectminji.bikeback.profile.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
-import com.bikeprojectminji.bikeback.dto.profile.UpdateProfileRequest;
-import com.bikeprojectminji.bikeback.entity.user.UserEntity;
-import com.bikeprojectminji.bikeback.repository.user.UserRepository;
-import com.bikeprojectminji.bikeback.service.auth.AuthService;
+import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
+import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
+import com.bikeprojectminji.bikeback.auth.service.AuthService;
+import com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

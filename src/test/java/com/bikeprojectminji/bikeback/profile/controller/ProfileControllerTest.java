@@ -1,4 +1,4 @@
-package com.bikeprojectminji.bikeback.controller.profile;
+package com.bikeprojectminji.bikeback.profile.controller;
 
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -7,9 +7,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.bikeprojectminji.bikeback.dto.profile.ProfileMeResponse;
+import com.bikeprojectminji.bikeback.profile.dto.ProfileMeResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
-import com.bikeprojectminji.bikeback.service.profile.ProfileService;
+import com.bikeprojectminji.bikeback.profile.service.ProfileService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,7 +52,7 @@ class ProfileControllerTest {
     @Test
     @DisplayName("내 프로필 수정 API는 success 래퍼로 응답한다")
     void updateMyProfileReturnsWrappedResponse() throws Exception {
-        given(profileService.updateMyProfile("1", new com.bikeprojectminji.bikeback.dto.profile.UpdateProfileRequest("bikeoasis", "https://example.com/me.png")))
+        given(profileService.updateMyProfile("1", new com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest("bikeoasis", "https://example.com/me.png")))
                 .willReturn(new ProfileMeResponse(1L, "bikeoasis@example.com", "bikeoasis", "https://example.com/me.png"));
 
         mockMvc.perform(patch("/api/v1/profile/me")

@@ -1,4 +1,4 @@
-package com.bikeprojectminji.bikeback.controller.auth;
+package com.bikeprojectminji.bikeback.auth.controller;
 
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -7,12 +7,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.bikeprojectminji.bikeback.dto.auth.AuthMeResponse;
-import com.bikeprojectminji.bikeback.dto.auth.LoginRequest;
-import com.bikeprojectminji.bikeback.dto.auth.LoginResponse;
-import com.bikeprojectminji.bikeback.dto.auth.RegisterRequest;
+import com.bikeprojectminji.bikeback.auth.dto.AuthMeResponse;
+import com.bikeprojectminji.bikeback.auth.dto.LoginRequest;
+import com.bikeprojectminji.bikeback.auth.dto.LoginResponse;
+import com.bikeprojectminji.bikeback.auth.dto.RegisterRequest;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
-import com.bikeprojectminji.bikeback.service.auth.AuthService;
+import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

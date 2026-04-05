@@ -1,10 +1,10 @@
-package com.bikeprojectminji.bikeback.controller.profile;
+package com.bikeprojectminji.bikeback.profile.controller;
 
-import com.bikeprojectminji.bikeback.dto.profile.ProfileMeResponse;
-import com.bikeprojectminji.bikeback.dto.profile.UpdateProfileRequest;
+import com.bikeprojectminji.bikeback.profile.dto.ProfileMeResponse;
+import com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
-import com.bikeprojectminji.bikeback.service.profile.ProfileService;
+import com.bikeprojectminji.bikeback.profile.service.ProfileService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;

@@ -1,4 +1,4 @@
-package com.bikeprojectminji.bikeback.dto.auth;
+package com.bikeprojectminji.bikeback.auth.dto;
 
 public record AuthMeResponse(
         Long userId,

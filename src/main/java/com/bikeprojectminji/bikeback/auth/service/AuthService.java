@@ -1,13 +1,13 @@
-package com.bikeprojectminji.bikeback.service.auth;
+package com.bikeprojectminji.bikeback.auth.service;
 
-import com.bikeprojectminji.bikeback.dto.auth.AuthMeResponse;
-import com.bikeprojectminji.bikeback.dto.auth.LoginRequest;
-import com.bikeprojectminji.bikeback.dto.auth.LoginResponse;
-import com.bikeprojectminji.bikeback.dto.auth.RegisterRequest;
-import com.bikeprojectminji.bikeback.entity.user.UserEntity;
+import com.bikeprojectminji.bikeback.auth.dto.AuthMeResponse;
+import com.bikeprojectminji.bikeback.auth.dto.LoginRequest;
+import com.bikeprojectminji.bikeback.auth.dto.LoginResponse;
+import com.bikeprojectminji.bikeback.auth.dto.RegisterRequest;
+import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.UnauthorizedException;
-import com.bikeprojectminji.bikeback.repository.user.UserRepository;
+import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
 import java.time.Clock;
 import java.time.Instant;
 import org.springframework.beans.factory.annotation.Value;
