@@ -18,6 +18,7 @@ public class RecentLocationCacheService {
     }
 
     public Optional<RecentLocationSnapshot> find(String subject) {
+        // subject 기준 최근 위치는 현재 단계에서 1건만 유지하므로, 그대로 Optional로 조회한다.
         return recentLocationCacheStore.find(subject);
     }
 
@@ -29,6 +30,8 @@ public class RecentLocationCacheService {
             BigDecimal longitude,
             OffsetDateTime capturedAt
     ) {
+        // 지금은 ACTIVE 세션 전체를 저장하지 않고,
+        // 주행 저장이 완료된 시점의 마지막 위치만 COMPLETE 상태로 캐시에 남긴다.
         recentLocationCacheStore.save(subject, new RecentLocationSnapshot(
                 rideRecordId,
                 latitude,

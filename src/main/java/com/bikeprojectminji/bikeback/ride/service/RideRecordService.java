@@ -41,6 +41,8 @@ public class RideRecordService {
 
     @Transactional
     public RideRecordResponse saveRideRecord(String subject, CreateRideRecordRequest request) {
+        // 자유 주행 저장은 입력 검증 -> 현재 사용자 식별 -> ride record 저장 -> route point 저장 순서로 진행한다.
+        // point와 summary는 항상 DB가 원본이고, 캐시는 후속 조회 최적화 용도로만 갱신한다.
         validateCreateRequest(request);
         UserEntity user = authService.findUserBySubject(subject);
 
@@ -83,6 +85,8 @@ public class RideRecordService {
     }
 
     private void validateCreateRequest(CreateRideRecordRequest request) {
+        // 저장 요청은 startedAt/endedAt/summary/routePoints가 모두 있어야 하고,
+        // 음수 거리/시간이나 비정상 pointOrder는 여기서 조기에 차단한다.
         if (request == null) {
             throw new BadRequestException("자유 주행 기록 요청 본문이 필요합니다.");
         }
@@ -102,6 +106,8 @@ public class RideRecordService {
     }
 
     private List<RideRecordPointRequest> normalizeRoutePoints(List<RideRecordPointRequest> routePoints) {
+        // route point는 입력 순서가 어떻든 pointOrder 기준으로 다시 정렬하고,
+        // 중복 pointOrder와 누락 좌표를 여기서 한 번에 검증한다.
         if (routePoints == null || routePoints.isEmpty()) {
             throw new BadRequestException("routePoints는 비어 있을 수 없습니다.");
         }

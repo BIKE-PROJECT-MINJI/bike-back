@@ -67,6 +67,8 @@ public class CourseService {
     }
 
     public CourseListResponse getCourses(Long cursor, Integer limit) {
+        // 전체 코스 목록은 public 코스만 대상으로 cursor pagination을 적용하고,
+        // 응답에서는 화면 목록에 필요한 최소 필드만 남긴다.
         int pageSize = resolveLimit(limit);
         List<CourseEntity> queriedCourses = courseRepository.findPublicPageAfter(cursor, pageSize + 1);
 
@@ -90,6 +92,7 @@ public class CourseService {
     }
 
     public CourseDetailResponse getCourseDetail(Long courseId, String subject, String shareToken) {
+        // 코스 상세는 visibility / owner / shareToken 규칙을 통과한 코스만 읽을 수 있다.
         CourseEntity course = findReadableCourse(courseId, subject, shareToken);
 
         return new CourseDetailResponse(
@@ -101,6 +104,7 @@ public class CourseService {
     }
 
     public CourseRoutePointsResponse getCourseRoutePoints(Long courseId, String subject, String shareToken) {
+        // 경로 포인트 조회도 상세 조회와 같은 읽기 권한 규칙을 그대로 따른다.
         CourseEntity course = findReadableCourse(courseId, subject, shareToken);
 
         List<CourseRoutePointResponse> points = courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(course.getId()).stream()
@@ -115,6 +119,8 @@ public class CourseService {
     }
 
     public FeaturedCourseResponse getFeaturedCourses(BigDecimal lat, BigDecimal lon) {
+        // 추천 코스는 curated 후보를 먼저 읽고,
+        // 위치가 있으면 거리 기준 정렬, 없으면 fallback 순서로 제한된 개수만 노출한다.
         List<CourseEntity> featuredCourses = courseRepository.findFeaturedCourses();
         if (featuredCourses.isEmpty()) {
             log.info("featured courses fallback: no curated courses available");
@@ -161,6 +167,8 @@ public class CourseService {
 
     @Transactional
     public CourseWriteResponse createCourseFromRideRecord(String subject, CreateCourseFromRideRecordRequest request) {
+        // 코스 생성은 사용자가 소유한 ride record를 읽어 route point를 course route point로 복제하는 방식이다.
+        // 즉 ride 기록과 course는 source of truth를 공유하지 않고, 생성 시점에 복사본을 만든다.
         validateCreateRequest(request);
         UserEntity user = authService.findUserBySubject(subject);
         RideRecordEntity rideRecord = rideRecordRepository.findByIdAndOwnerUserId(request.sourceRideRecordId(), user.getId())
@@ -196,6 +204,8 @@ public class CourseService {
 
     @Transactional
     public CourseWriteResponse updateCourse(String subject, Long courseId, UpdateCourseRequest request) {
+        // 코스 수정은 metadata 수정과 route point 교체를 한 트랜잭션으로 처리해
+        // 제목/설명/visibility와 경로 포인트가 어긋난 상태를 남기지 않게 한다.
         validateUpdateRequest(request);
         UserEntity user = authService.findUserBySubject(subject);
         CourseEntity course = findOwnedCourse(courseId, user.getId());
@@ -227,6 +237,8 @@ public class CourseService {
 
     @Transactional
     public CourseShareResponse getCourseShareInfo(String subject, Long courseId) {
+        // 공유 정보 조회는 PRIVATE 코스를 먼저 차단하고,
+        // 공개 가능한 코스에 대해서만 shareToken을 생성 또는 재사용한다.
         UserEntity user = authService.findUserBySubject(subject);
         CourseEntity course = findOwnedCourse(courseId, user.getId());
 
