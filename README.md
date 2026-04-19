@@ -63,6 +63,8 @@
   - `POST /api/v1/ride-records`
 - 날씨
   - `GET /api/v1/weather/current`
+- 운영
+  - `GET /health`
 
 ## 패키지 구조
 
