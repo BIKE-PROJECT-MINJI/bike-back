@@ -1,99 +1,117 @@
 # bike-back
 
-자전거 여행용 주행 HUD 앱의 백엔드 저장소입니다.
+BIKE 백엔드는 **코스 탐색, 주행 정책, 날씨 조회, 인증/프로필, 주행 기록 저장, 코스 생성·공유**를 담당하는 Spring Boot API 서버입니다.
 
-이 저장소는 **코스 조회 / 주행 정책 / 날씨 / 2차 인증·기록·코스 저장·공유** 기준을 담당합니다.
+> Organization: [BIKE-PROJECT-MINJI](https://github.com/BIKE-PROJECT-MINJI)  
+> Related repositories: [bike-front](https://github.com/BIKE-PROJECT-MINJI/bike-front)
 
-## 현재 기술 스택
+## What this repository does
 
-- Java 17
-- Spring Boot 3.5.7
-- Gradle Wrapper
-- Spring Web
-- Spring Security
-- OAuth2 Resource Server (JWT 검증/발급)
-- Spring Data JPA
-- Spring Data Redis
-- Flyway
-- PostgreSQL
+BIKE는 자전거 여행 중 **경로와 상태 정보를 한 화면에서 확인하게 해 외부 앱 재진입을 줄이는 주행 HUD 앱**입니다.
 
-## 현재 구현 범위
+`bike-back`은 아래 책임을 가집니다.
+- 홈 추천 코스 / 전체 코스 목록 / 코스 상세 / 경로 좌표 제공
+- ride 시작 가능 여부 및 이탈 경고 계산
+- 날씨 / 풍향 / 풍속 조회와 fallback 정책 제공
+- 최소 인증 / 프로필 / owner 판정
+- 자유 주행 기록 저장과 기록 기반 코스 생성
+- 코스 공개 범위 / 공유 / 다운로드 제어
 
-### 1차 핵심 범위
+## Current scope
+
+### MVP1
 - 추천 코스 조회
 - 전체 코스 목록 조회
 - 코스 상세 조회
 - 코스 경로 좌표 조회
 - ride 시작 가능 여부 평가
 - 현재 날씨 조회
+- 최근 위치 조회
+- health endpoint
 
-### 2차 백엔드 범위
-- 회원가입 + 로그인 + JWT 발급
-- 내 인증 상태 조회 (`/api/v1/auth/me`)
-- 내 프로필 조회/수정 (`/api/v1/profile/me`)
-- 자유 주행 기록 저장 (`/api/v1/ride-records`)
-- 기록 기반 코스 생성 (`POST /api/v1/courses`)
+### Phase 2+
+- 회원가입 / 로그인 / JWT 발급
+- 내 인증 상태 조회
+- 내 프로필 조회 / 수정
+- 자유 주행 기록 저장
+- 기록 기반 코스 생성
 - 코스 수정 / 공개 범위 변경
-- 공개 코스 검색 (`/api/v1/courses/search`)
-- 코스 공유 정보 조회 (`/api/v1/courses/{id}/share`)
-- 코스 다운로드 (`/api/v1/courses/{id}/download`)
+- 공개 코스 검색
+- 코스 공유 / 다운로드
 - `PUBLIC / UNLISTED / PRIVATE` 접근 제어
 
-## 주요 API 묶음
+## Core API surface
 
-- 인증/프로필
-  - `POST /api/v1/auth/register`
-  - `POST /api/v1/auth/login`
-  - `GET /api/v1/auth/me`
-  - `GET /api/v1/profile/me`
-  - `PATCH /api/v1/profile/me`
-- 코스
-  - `GET /api/v1/courses`
-  - `GET /api/v1/courses/search`
-  - `GET /api/v1/courses/featured`
-  - `GET /api/v1/courses/{courseId}`
-  - `GET /api/v1/courses/{courseId}/route-points`
-  - `POST /api/v1/courses`
-  - `PUT /api/v1/courses/{courseId}`
-  - `PATCH /api/v1/courses/{courseId}/visibility`
-  - `POST /api/v1/courses/{courseId}/share`
-  - `GET /api/v1/courses/{courseId}/download`
-  - `POST /api/v1/courses/{courseId}/ride-policy/evaluate`
-- 주행 기록
-  - `POST /api/v1/ride-records`
-- 날씨
-  - `GET /api/v1/weather/current`
-- 운영
-  - `GET /health`
+| Domain | Endpoints |
+|---|---|
+| Auth / Profile | `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me`, `GET/PATCH /api/v1/profile/me` |
+| Course Discovery | `GET /api/v1/courses`, `GET /api/v1/courses/featured`, `GET /api/v1/courses/{courseId}`, `GET /api/v1/courses/{courseId}/route-points` |
+| Course Create / Share | `POST /api/v1/courses`, `PUT /api/v1/courses/{courseId}`, `PATCH /api/v1/courses/{courseId}/visibility`, `POST /api/v1/courses/{courseId}/share`, `GET /api/v1/courses/search`, `GET /api/v1/courses/{courseId}/download` |
+| Ride | `POST /api/v1/courses/{courseId}/ride-policy/evaluate`, `POST /api/v1/ride-records` |
+| Weather / Ops | `GET /api/v1/weather/current`, `GET /health` |
 
-## 패키지 구조
+## Stack
 
-- `controller/` : HTTP 엔드포인트
-- `service/` : 비즈니스 로직 + 트랜잭션
-- `repository/` : 영속성, 커스텀 조회
-- `entity/` : JPA 엔티티
-- `dto/` : 요청/응답 DTO
-- `global/` : 공통 설정, 예외, 응답 래퍼
+- Java 17
+- Spring Boot 3.5.7
+- Spring Web
+- Spring Security / JWT
+- Spring Data JPA
+- Spring Data Redis
+- Flyway
+- PostgreSQL + PostGIS
+- Gradle Wrapper
 
-## 실행 / 검증
+## Project structure
 
-Windows PowerShell 기준:
+```text
+com.bikeprojectminji.bikeback
+├─ auth/
+├─ course/
+├─ location/
+├─ profile/
+├─ ride/
+├─ weather/
+└─ global/
+```
 
-- 전체 테스트: `./gradlew.bat test`
-- 전체 빌드: `./gradlew.bat build`
-- 앱 실행(dev): `./gradlew.bat bootRun`
+- 도메인 기준 최상단 패키지 구조를 사용합니다.
+- 각 도메인 아래에는 `controller / service / repository / entity / dto / infrastructure` 중 필요한 레이어만 둡니다.
+- `global/`은 공통 설정, 예외, 응답, Redis, health 같은 기술 레이어만 둡니다.
 
-## 현재 문서 기준
+## Local development
 
-이 저장소 구현은 아래 current 문서를 따른다.
+### WSL / bash
+```bash
+./gradlew test
+./gradlew build
+./gradlew bootRun
+```
+
+### Windows PowerShell
+```powershell
+./gradlew.bat test
+./gradlew.bat build
+./gradlew.bat bootRun
+```
+
+## Verification policy
+
+- 기능 추가/수정 시 검증 테스트를 함께 작성합니다.
+- 엔티티 테스트는 순수 단위 테스트로 작성합니다.
+- 서비스 테스트는 `@SpringBootTest` 기반 통합 테스트를 사용합니다.
+- README는 계획이 아니라 **실제로 구현된 범위만** 기록합니다.
+
+## Current docs
 
 - `DOCS/00_기준/프로젝트_헌법.md`
 - `DOCS/00_기준/통합_개발_테스트_방법론.md`
+- `DOCS/00_기준/기술판단_변경_기록_작성_원칙.md`
+- `DOCS/15_기능명세/backend/백엔드_기능명세_통합.md`
 - `DOCS/15_기능명세/backend/인증_프로필_백엔드_계약_및_요구사항.md`
 - `DOCS/15_기능명세/backend/코스_생성_공유_백엔드_계약_및_요구사항.md`
 
-## 유지 원칙
+## Notes
 
-- 기능이 추가되거나 제거되면 **README의 “현재 구현 범위”와 “주요 API 묶음”을 함께 갱신**합니다.
-- 기술 스택이 바뀌면 **“현재 기술 스택”을 바로 갱신**합니다.
-- README는 계획이 아니라 **지금 실제로 구현되어 있는 범위만** 적습니다.
+- 기능이 추가되거나 제거되면 **Current scope**와 **Core API surface**를 함께 갱신합니다.
+- current 문서와 구현이 어긋나면 README보다 current 문서를 먼저 바로잡습니다.
