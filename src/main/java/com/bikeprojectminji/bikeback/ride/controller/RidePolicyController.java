@@ -26,6 +26,8 @@ public class RidePolicyController {
             @PathVariable Long courseId,
             @RequestBody RidePolicyEvaluationRequest request
     ) {
+        // 외부 API는 기존 course path를 그대로 유지해 앱 계약을 깨지 않고,
+        // 내부 계산 책임만 ride.policy 서비스로 위임한다.
         return ApiResponse.success(ridePolicyService.evaluate(courseId, request));
     }
 }

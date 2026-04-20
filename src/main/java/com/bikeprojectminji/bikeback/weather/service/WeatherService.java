@@ -34,6 +34,8 @@ public class WeatherService {
     }
 
     public CurrentWeatherResponse getCurrent(BigDecimal lat, BigDecimal lon) {
+        // 현재 날씨 조회는 provider 성공을 우선 사용하고,
+        // 실패 시에는 last-success 캐시를 60분 범위 안에서만 fallback으로 허용한다.
         WeatherLocationKey locationKey = WeatherLocationKey.from(lat, lon);
         WeatherProviderResult providerResult = weatherProviderPort.getCurrent(locationKey);
 
@@ -55,11 +57,14 @@ public class WeatherService {
     }
 
     private boolean isWithinLastSuccessTtl(WeatherSnapshot snapshot) {
+        // weather fallback은 마지막 성공 시각이 60분을 넘지 않아야만 유효하다.
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         return Duration.between(snapshot.lastSucceededAt(), now).compareTo(LAST_SUCCESS_TTL) <= 0;
     }
 
     private CurrentWeatherResponse toResponse(WeatherSnapshot snapshot, boolean stale) {
+        // 외부 응답에서는 snapshot 내부 구조를 그대로 노출하지 않고,
+        // stale 여부와 forecast fallback 사용 여부만 함께 풀어서 전달한다.
         return new CurrentWeatherResponse(
                 snapshot.weather(),
                 snapshot.wind(),
