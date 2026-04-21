@@ -1,0 +1,157 @@
+name: bike-back-cd
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: bike-back-cd-main
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: ap-northeast-2
+  APP_PORT: ${{ vars.APP_PORT || '8080' }}
+  APP_DEPLOY_DIR: ${{ vars.APP_DEPLOY_DIR || '/opt/bike-back' }}
+  APP_SERVICE_NAME: ${{ vars.APP_SERVICE_NAME || 'bike-back' }}
+  APP_INSTANCE_ID: ${{ vars.APP_INSTANCE_ID }}
+  DEPLOY_S3_BUCKET: ${{ vars.DEPLOY_S3_BUCKET }}
+  HEALTHCHECK_URL: ${{ vars.HEALTHCHECK_URL }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required configuration
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          for value in AWS_DEPLOY_ROLE_ARN APP_INSTANCE_ID DEPLOY_S3_BUCKET HEALTHCHECK_URL; do
+            if [ -z "${!value:-}" ]; then
+              printf '[ERROR] Missing required GitHub Actions setting: %s\n' "$value" >&2
+              exit 1
+            fi
+          done
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Grant Gradle wrapper permission
+        run: chmod +x ./gradlew
+
+      - name: Run tests before deploy
+        run: ./gradlew --no-daemon test
+
+      - name: Build executable jar
+        run: ./gradlew --no-daemon clean bootJar
+
+      - name: Resolve artifact path
+        id: artifact
+        run: |
+          set -euo pipefail
+          ARTIFACT_PATH="$(find build/libs -maxdepth 1 -type f -name '*.jar' | head -n 1)"
+          if [ -z "$ARTIFACT_PATH" ]; then
+            printf '[ERROR] No Spring Boot jar was produced in build/libs\n' >&2
+            exit 1
+          fi
+          printf 'artifact_path=%s\n' "$ARTIFACT_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact to S3
+        env:
+          ARTIFACT_PATH: ${{ steps.artifact.outputs.artifact_path }}
+        run: |
+          set -euo pipefail
+          aws s3 cp "$ARTIFACT_PATH" "s3://${DEPLOY_S3_BUCKET}/bike-back/releases/${GITHUB_SHA}/app.jar"
+
+      - name: Render SSM deploy command
+        run: |
+          set -euo pipefail
+          cat > ssm-commands.json <<EOF
+          {
+            "commands": [
+              "set -euo pipefail",
+              "APP_DEPLOY_DIR='${APP_DEPLOY_DIR}'",
+              "APP_SERVICE_NAME='${APP_SERVICE_NAME}'",
+              "APP_PORT='${APP_PORT}'",
+              "DEPLOY_BUCKET='${DEPLOY_S3_BUCKET}'",
+              "DEPLOY_SHA='${GITHUB_SHA}'",
+              "mkdir -p \"${APP_DEPLOY_DIR}/releases/${GITHUB_SHA}\"",
+              "PREVIOUS_TARGET=\$(readlink -f \"${APP_DEPLOY_DIR}/current.jar\" || true)",
+              "aws s3 cp \"s3://${DEPLOY_S3_BUCKET}/bike-back/releases/${GITHUB_SHA}/app.jar\" \"${APP_DEPLOY_DIR}/releases/${GITHUB_SHA}/app.jar\"",
+              "ln -sfn \"${APP_DEPLOY_DIR}/releases/${GITHUB_SHA}/app.jar\" \"${APP_DEPLOY_DIR}/current.jar\"",
+              "if systemctl restart \"${APP_SERVICE_NAME}\" && curl -fsS \"http://127.0.0.1:${APP_PORT}/health\" >/tmp/bike-back-health.json; then exit 0; fi",
+              "if [ -n \"${PREVIOUS_TARGET}\" ]; then ln -sfn \"${PREVIOUS_TARGET}\" \"${APP_DEPLOY_DIR}/current.jar\"; systemctl restart \"${APP_SERVICE_NAME}\"; fi",
+              "exit 1"
+            ]
+          }
+          EOF
+
+      - name: Send deploy command to EC2 with SSM
+        id: ssm
+        run: |
+          set -euo pipefail
+          COMMAND_ID="$(aws ssm send-command \
+            --instance-ids "$APP_INSTANCE_ID" \
+            --document-name 'AWS-RunShellScript' \
+            --comment "bike-back deploy ${GITHUB_SHA}" \
+            --parameters file://ssm-commands.json \
+            --query 'Command.CommandId' \
+            --output text)"
+          printf 'command_id=%s\n' "$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM command completion
+        env:
+          COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            STATUS="$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$APP_INSTANCE_ID" \
+              --query 'Status' \
+              --output text)"
+
+            case "$STATUS" in
+              Success)
+                exit 0
+                ;;
+              Pending|InProgress|Delayed)
+                sleep 10
+                ;;
+              *)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$APP_INSTANCE_ID"
+                exit 1
+                ;;
+            esac
+          done
+
+          printf '[ERROR] Timed out waiting for SSM deploy command\n' >&2
+          exit 1
+
+      - name: Verify public health endpoint
+        run: |
+          set -euo pipefail
+          curl -fsS "$HEALTHCHECK_URL"

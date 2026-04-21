@@ -102,6 +102,13 @@ com.bikeprojectminji.bikeback
 - 서비스 테스트는 `@SpringBootTest` 기반 통합 테스트를 사용합니다.
 - README는 계획이 아니라 **실제로 구현된 범위만** 기록합니다.
 
+## CI/CD
+
+- GitHub Actions CI: `.github/workflows/backend-ci.yml`
+- GitHub Actions CD: `.github/workflows/backend-cd.yml`
+- 기본 CD 경로: GitHub OIDC -> AWS IAM role -> S3 artifact -> SSM Run Command -> app EC2 `systemd` restart
+- 자세한 서버 준비 조건과 GitHub 설정값은 `docs/aws-ec2-github-actions-cicd.md`를 따릅니다.
+
 ## Current docs
 
 - `DOCS/00_기준/프로젝트_헌법.md`
