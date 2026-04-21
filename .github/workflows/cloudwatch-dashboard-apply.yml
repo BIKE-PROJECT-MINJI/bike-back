@@ -36,8 +36,8 @@ jobs:
           set -euo pipefail
           for value in AWS_DEPLOY_ROLE_ARN APP_INSTANCE_ID; do
             if [ -z "${!value:-}" ]; then
-              printf '[ERROR] Missing required setting: %s
-' "$value" >&2
+              printf '[ERROR] Missing required setting: %s\n' "$value" >&2
+              printf '[ERROR] Missing required setting: %s\n' "$value" >&2
               exit 1
             fi
           done
