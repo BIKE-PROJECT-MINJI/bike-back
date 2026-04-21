@@ -55,11 +55,11 @@ public class RidePolicyService {
         RideLocationRequest location = request.location();
 
         if (isLowAccuracy(phase, location)) {
-            log.info("ride policy undetermined: low accuracy courseId={} phase={}", courseId, phase);
+            log.info("ride_policy_undetermined request_id={} reason=low_accuracy course_id={} phase={}", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), courseId, phase);
             return undeterminedResponse(phase, "LOCATION_LOW_ACCURACY", lowAccuracyMessage(phase));
         }
         if (isStale(phase, location)) {
-            log.info("ride policy undetermined: stale location courseId={} phase={}", courseId, phase);
+            log.info("ride_policy_undetermined request_id={} reason=stale_location course_id={} phase={}", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), courseId, phase);
             return undeterminedResponse(phase, "LOCATION_STALE", staleMessage(phase));
         }
 
@@ -103,7 +103,7 @@ public class RidePolicyService {
             RideLocationRequest location
     ) {
         if (routePoints.isEmpty()) {
-            log.warn("ride policy undetermined: course path unavailable courseId={}", courseId);
+            log.warn("ride_policy_undetermined request_id={} reason=course_path_unavailable course_id={}", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), courseId);
             return new RidePolicyEvaluationResponse(
                     "ACTIVE",
                     new RidePolicyGateResponse("ELIGIBLE", "ALREADY_ACTIVE"),

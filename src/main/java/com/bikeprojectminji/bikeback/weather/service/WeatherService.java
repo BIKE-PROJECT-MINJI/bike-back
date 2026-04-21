@@ -48,11 +48,11 @@ public class WeatherService {
                 .filter(this::isWithinLastSuccessTtl);
 
         if (fallback.isPresent()) {
-            log.info("weather fallback used locationKey={}", locationKey);
+            log.info("weather_fallback_used request_id={} location_key={}", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), locationKey);
             return toResponse(fallback.get(), true);
         }
 
-        log.info("weather unavailable locationKey={}", locationKey);
+        log.info("weather_unavailable request_id={} location_key={}", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), locationKey);
         throw new NotFoundException(WEATHER_UNAVAILABLE_MESSAGE);
     }
 
