@@ -35,6 +35,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/register").permitAll()
                         .requestMatchers("/api/v1/auth/login").permitAll()
                         .requestMatchers("/api/v1/auth/me", "/api/v1/profile/me").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/events", "/api/v1/events/batch").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/ride-records").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses/*/share").authenticated()
