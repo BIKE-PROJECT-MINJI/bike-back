@@ -101,7 +101,7 @@ jobs:
               "aws s3 cp \"s3://${DEPLOY_S3_BUCKET}/bike-back/releases/${GITHUB_SHA}/app.jar\" \"${APP_DEPLOY_DIR}/releases/${GITHUB_SHA}/app.jar\"",
               "ln -sfn \"${APP_DEPLOY_DIR}/releases/${GITHUB_SHA}/app.jar\" \"${APP_DEPLOY_DIR}/current.jar\"",
               "if systemctl restart \"${APP_SERVICE_NAME}\" && curl -fsS \"http://127.0.0.1:${APP_PORT}/health\" >/tmp/bike-back-health.json; then exit 0; fi",
-              "if [ -n \"${PREVIOUS_TARGET}\" ]; then ln -sfn \"${PREVIOUS_TARGET}\" \"${APP_DEPLOY_DIR}/current.jar\"; systemctl restart \"${APP_SERVICE_NAME}\"; fi",
+              "if [ -n \"\${PREVIOUS_TARGET}\" ]; then ln -sfn \"\${PREVIOUS_TARGET}\" \"${APP_DEPLOY_DIR}/current.jar\"; systemctl restart \"${APP_SERVICE_NAME}\"; fi",
               "exit 1"
             ]
           }
