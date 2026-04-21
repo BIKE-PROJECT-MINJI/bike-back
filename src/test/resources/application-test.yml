@@ -1,0 +1,24 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:${random.uuid};MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: none
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema-h2.sql
+  flyway:
+    enabled: false
+  data:
+    redis:
+      url: redis://localhost:6379
+
+auth:
+  jwt:
+    secret: 01234567890123456789012345678901
+    issuer: bike-back-test
+    token-validity-sec: 3600
