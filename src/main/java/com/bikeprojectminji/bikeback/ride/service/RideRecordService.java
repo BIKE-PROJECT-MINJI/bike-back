@@ -20,6 +20,8 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -84,7 +86,7 @@ public class RideRecordService {
                 .toList();
         rideRecordPointRepository.saveAll(routePoints);
         cacheLatestCompletedLocation(subject, rideRecordId, routePoints, request.endedAt());
-        rideRecordFinalizationService.requestFinalization(rideRecordId);
+        registerFinalizationAfterCommit(rideRecordId);
         log.info("ride record saved subject={} rideRecordId={} routePointCount={} startedAt={} endedAt={}",
                 subject, rideRecordId, routePoints.size(), request.startedAt(), request.endedAt());
 
@@ -187,6 +189,19 @@ public class RideRecordService {
         return routePoints.stream()
                 .sorted(Comparator.comparing(RideRecordPointRequest::pointOrder))
                 .toList();
+    }
+
+    private void registerFinalizationAfterCommit(Long rideRecordId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            rideRecordFinalizationService.requestFinalization(rideRecordId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                rideRecordFinalizationService.requestFinalization(rideRecordId);
+            }
+        });
     }
 
 }
