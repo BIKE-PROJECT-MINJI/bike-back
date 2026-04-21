@@ -31,6 +31,24 @@ public class RideRecordEntity {
     @Column(name = "duration_sec", nullable = false)
     private Integer durationSec;
 
+    @Column(name = "finalization_status", nullable = false)
+    private String finalizationStatus;
+
+    @Column(name = "finalization_attempts", nullable = false)
+    private Integer finalizationAttempts;
+
+    @Column(name = "finalization_started_at")
+    private OffsetDateTime finalizationStartedAt;
+
+    @Column(name = "finalization_completed_at")
+    private OffsetDateTime finalizationCompletedAt;
+
+    @Column(name = "finalization_failed_at")
+    private OffsetDateTime finalizationFailedAt;
+
+    @Column(name = "finalization_error_message")
+    private String finalizationErrorMessage;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -43,6 +61,8 @@ public class RideRecordEntity {
         this.endedAt = endedAt;
         this.distanceM = distanceM;
         this.durationSec = durationSec;
+        this.finalizationStatus = RideRecordFinalizationStatus.FINALIZING.name();
+        this.finalizationAttempts = 0;
     }
 
     public Long getId() {
@@ -67,5 +87,53 @@ public class RideRecordEntity {
 
     public Integer getDurationSec() {
         return durationSec;
+    }
+
+    public RideRecordFinalizationStatus getFinalizationStatus() {
+        return RideRecordFinalizationStatus.valueOf(finalizationStatus);
+    }
+
+    public Integer getFinalizationAttempts() {
+        return finalizationAttempts;
+    }
+
+    public OffsetDateTime getFinalizationStartedAt() {
+        return finalizationStartedAt;
+    }
+
+    public OffsetDateTime getFinalizationCompletedAt() {
+        return finalizationCompletedAt;
+    }
+
+    public OffsetDateTime getFinalizationFailedAt() {
+        return finalizationFailedAt;
+    }
+
+    public String getFinalizationErrorMessage() {
+        return finalizationErrorMessage;
+    }
+
+    // 주행 기록 후처리는 raw 저장 직후 FINALIZING으로 시작하고,
+    // 최종 경로가 준비되면 READY, 실패하면 FAILED로 전이한다.
+    public void markFinalizing(OffsetDateTime now) {
+        this.finalizationStatus = RideRecordFinalizationStatus.FINALIZING.name();
+        this.finalizationAttempts = this.finalizationAttempts + 1;
+        this.finalizationStartedAt = now;
+        this.finalizationCompletedAt = null;
+        this.finalizationFailedAt = null;
+        this.finalizationErrorMessage = null;
+    }
+
+    public void markReady(OffsetDateTime now) {
+        this.finalizationStatus = RideRecordFinalizationStatus.READY.name();
+        this.finalizationCompletedAt = now;
+        this.finalizationFailedAt = null;
+        this.finalizationErrorMessage = null;
+    }
+
+    public void markFailed(OffsetDateTime now, String errorMessage) {
+        this.finalizationStatus = RideRecordFinalizationStatus.FAILED.name();
+        this.finalizationFailedAt = now;
+        this.finalizationErrorMessage = errorMessage;
     }
 }
