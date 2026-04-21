@@ -1,0 +1,144 @@
+name: bike-back-observability-rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      nginx_target_path:
+        description: "nginx observability config target path"
+        required: true
+        default: "/etc/nginx/conf.d/bike-observability.conf"
+        type: string
+      cloudwatch_target_path:
+        description: "CloudWatch Agent config target path"
+        required: true
+        default: "/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/bike-observability.json"
+        type: string
+      app_log_file:
+        description: "Application log file path expected by CloudWatch Agent"
+        required: true
+        default: "/var/log/bike-back/application.log"
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: bike-back-observability-rollout-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  APP_PORT: ${{ vars.APP_PORT || '8080' }}
+  APP_INSTANCE_ID: ${{ vars.APP_INSTANCE_ID }}
+
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required settings
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          for value in AWS_DEPLOY_ROLE_ARN APP_INSTANCE_ID; do
+            if [ -z "${!value:-}" ]; then
+              printf '[ERROR] Missing required setting: %s\n' "$value" >&2
+              exit 1
+            fi
+          done
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Encode config samples
+        id: payloads
+        env:
+          APP_LOG_FILE: ${{ github.event.inputs.app_log_file }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, os
+          base = Path.cwd().parents[1] / 'DOCS' / '00_기준'
+          nginx = (base / 'nginx_access_log_설정_샘플.conf').read_bytes()
+          cloudwatch = (base / 'cloudwatch_agent_수집_설정_샘플.json').read_text(encoding='utf-8')
+          cloudwatch = cloudwatch.replace('/var/log/bike-back/application.log', os.environ['APP_LOG_FILE'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+              fh.write(f"nginx_b64={base64.b64encode(nginx).decode()}\\n")
+              fh.write(f"cloudwatch_b64={base64.b64encode(cloudwatch.encode()).decode()}\\n")
+          PY
+
+      - name: Render SSM rollout command
+        run: |
+          set -euo pipefail
+          cat > ssm-observability.json <<SSMEOF
+          {
+            "commands": [
+              "set -euo pipefail",
+              "NGINX_TARGET='${{ github.event.inputs.nginx_target_path }}'",
+              "CW_TARGET='${{ github.event.inputs.cloudwatch_target_path }}'",
+              "mkdir -p \"$(dirname \"$NGINX_TARGET\")\"",
+              "mkdir -p \"$(dirname \"$CW_TARGET\")\"",
+              "printf '%s' '${{ steps.payloads.outputs.nginx_b64 }}' | base64 -d > \"$NGINX_TARGET\"",
+              "printf '%s' '${{ steps.payloads.outputs.cloudwatch_b64 }}' | base64 -d > \"$CW_TARGET\"",
+              "nginx -t",
+              "systemctl reload nginx",
+              "if command -v amazon-cloudwatch-agent-ctl >/dev/null 2>&1; then /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:$CW_TARGET -s; else echo 'CloudWatch Agent not installed' >&2; exit 20; fi",
+              "curl -fsS http://127.0.0.1:${APP_PORT}/health >/tmp/bike-health.json",
+              "tail -n 5 /var/log/nginx/bike_access.log || true"
+            ]
+          }
+          SSMEOF
+
+      - name: Send observability rollout command
+        id: ssm
+        run: |
+          set -euo pipefail
+          COMMAND_ID="$(aws ssm send-command \
+            --instance-ids "$APP_INSTANCE_ID" \
+            --document-name 'AWS-RunShellScript' \
+            --comment "bike-back observability rollout ${GITHUB_SHA}" \
+            --parameters file://ssm-observability.json \
+            --query 'Command.CommandId' \
+            --output text)"
+          printf 'command_id=%s\n' "$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM completion
+        env:
+          COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            STATUS="$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$APP_INSTANCE_ID" \
+              --query 'Status' \
+              --output text)"
+            case "$STATUS" in
+              Success)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$APP_INSTANCE_ID"
+                exit 0
+                ;;
+              Pending|InProgress|Delayed)
+                sleep 10
+                ;;
+              *)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$APP_INSTANCE_ID"
+                exit 1
+                ;;
+            esac
+          done
+          printf '[ERROR] Timed out waiting for SSM observability rollout\n' >&2
+          exit 1
