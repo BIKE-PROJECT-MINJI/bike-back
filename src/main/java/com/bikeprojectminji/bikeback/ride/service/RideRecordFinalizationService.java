@@ -90,7 +90,7 @@ public class RideRecordFinalizationService {
         } catch (Exception exception) {
             rideRecord.markFailed(OffsetDateTime.now(), exception.getMessage());
             rideRecordRepository.save(rideRecord);
-            log.error("ride record finalization failed rideRecordId={}", rideRecordId, exception);
+            log.error("ride_record_finalization_failed request_id={} ride_record_id={}", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), rideRecordId, exception);
         }
     }
 }

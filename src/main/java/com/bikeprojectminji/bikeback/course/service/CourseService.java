@@ -129,13 +129,13 @@ public class CourseService {
         // 위치가 있으면 거리 기준 정렬, 없으면 fallback 순서로 제한된 개수만 노출한다.
         List<CourseEntity> featuredCourses = courseRepository.findFeaturedCourses();
         if (featuredCourses.isEmpty()) {
-            log.info("featured courses fallback: no curated courses available");
+            log.info("featured_courses_fallback request_id={} reason=no_curated_courses", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId());
             return new FeaturedCourseResponse("fallback", List.of());
         }
 
         boolean distanceMode = lat != null && lon != null;
         if (!distanceMode) {
-            log.info("featured courses fallback: request without location parameters");
+            log.info("featured_courses_fallback request_id={} reason=missing_location_parameters", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId());
         }
         List<FeaturedCourseItemResponse> items = (distanceMode ? featuredCourses.stream()
                 .map(course -> toFeaturedResponse(course, lat, lon))
