@@ -72,8 +72,8 @@ jobs:
           cloudwatch = (base / 'cloudwatch_agent_수집_설정_샘플.json').read_text(encoding='utf-8')
           cloudwatch = cloudwatch.replace('/var/log/bike-back/application.log', os.environ['APP_LOG_FILE'])
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-              fh.write(f"nginx_b64={base64.b64encode(nginx).decode()}\\n")
-              fh.write(f"cloudwatch_b64={base64.b64encode(cloudwatch.encode()).decode()}\\n")
+              fh.write(f"nginx_b64={base64.b64encode(nginx).decode()}\n")
+              fh.write(f"cloudwatch_b64={base64.b64encode(cloudwatch.encode()).decode()}\n")
           PY
 
       - name: Render SSM rollout command
@@ -85,13 +85,13 @@ jobs:
               "set -euo pipefail",
               "NGINX_TARGET='${{ github.event.inputs.nginx_target_path }}'",
               "CW_TARGET='${{ github.event.inputs.cloudwatch_target_path }}'",
-              "mkdir -p \"$(dirname \"$NGINX_TARGET\")\"",
-              "mkdir -p \"$(dirname \"$CW_TARGET\")\"",
-              "printf '%s' '${{ steps.payloads.outputs.nginx_b64 }}' | base64 -d > \"$NGINX_TARGET\"",
-              "printf '%s' '${{ steps.payloads.outputs.cloudwatch_b64 }}' | base64 -d > \"$CW_TARGET\"",
+              "mkdir -p \"$(dirname \"$$NGINX_TARGET\")\"",
+              "mkdir -p \"$(dirname \"$$CW_TARGET\")\"",
+              "printf '%s' '${{ steps.payloads.outputs.nginx_b64 }}' | base64 -d > \"$$NGINX_TARGET\"",
+              "printf '%s' '${{ steps.payloads.outputs.cloudwatch_b64 }}' | base64 -d > \"$$CW_TARGET\"",
               "nginx -t",
               "systemctl reload nginx",
-              "if command -v amazon-cloudwatch-agent-ctl >/dev/null 2>&1; then /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:$CW_TARGET -s; else echo 'CloudWatch Agent not installed' >&2; exit 20; fi",
+              "if command -v amazon-cloudwatch-agent-ctl >/dev/null 2>&1; then /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:$$CW_TARGET -s; else echo 'CloudWatch Agent not installed' >&2; exit 20; fi",
               "curl -fsS http://127.0.0.1:${APP_PORT}/health >/tmp/bike-health.json",
               "tail -n 5 /var/log/nginx/bike_access.log || true"
             ]
