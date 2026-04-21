@@ -7,8 +7,7 @@
       "width": 24,
       "height": 2,
       "properties": {
-        "markdown": "# BIKE Backend Observability
-1차 기준: nginx access log + app structured log + request_id"
+        "markdown": "# BIKE Backend Observability\n1차 기준: nginx access log + app structured log + request_id"
       }
     },
     {
