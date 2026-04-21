@@ -11,12 +11,14 @@ import com.bikeprojectminji.bikeback.ride.dto.RideRecordPointRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordSummaryRequest;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
+import com.bikeprojectminji.bikeback.ride.entity.RideRecordPointEntity;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -77,5 +79,38 @@ class RideRecordServiceTest {
                 eq(BigDecimal.valueOf(126.9792)),
                 eq(OffsetDateTime.parse("2026-03-29T11:00:00+09:00"))
         );
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 저장은 직선 구간 포인트를 canonical path로 간소화한다")
+    void saveRideRecordSimplifiesStraightLinePoints() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity savedRideRecord = new RideRecordEntity(1L, OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), OffsetDateTime.parse("2026-03-29T11:00:00+09:00"), 18250, 3600);
+        ReflectionTestUtils.setField(savedRideRecord, "id", 1001L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.save(any(RideRecordEntity.class))).willReturn(savedRideRecord);
+
+        RideRecordResponse response = rideRecordService.saveRideRecord("1", new CreateRideRecordRequest(
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                new RideRecordSummaryRequest(18250, 3600),
+                List.of(
+                        new RideRecordPointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                        new RideRecordPointRequest(2, BigDecimal.valueOf(37.56655), BigDecimal.valueOf(126.9785)),
+                        new RideRecordPointRequest(3, BigDecimal.valueOf(37.56660), BigDecimal.valueOf(126.9790)),
+                        new RideRecordPointRequest(4, BigDecimal.valueOf(37.56665), BigDecimal.valueOf(126.9795))
+                )
+        ));
+
+        assertThat(response.routePointCount()).isEqualTo(2);
+        ArgumentCaptor<List<RideRecordPointEntity>> captor = ArgumentCaptor.forClass(List.class);
+        verify(rideRecordPointRepository).saveAll(captor.capture());
+        assertThat(captor.getValue()).hasSize(2);
+        assertThat(captor.getValue().get(0).getPointOrder()).isEqualTo(1);
+        assertThat(captor.getValue().get(1).getPointOrder()).isEqualTo(2);
+        assertThat(captor.getValue().get(0).getLatitude()).isEqualTo(BigDecimal.valueOf(37.5665));
+        assertThat(captor.getValue().get(1).getLatitude()).isEqualTo(BigDecimal.valueOf(37.56665));
     }
 }
