@@ -17,13 +17,16 @@ import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
 import com.bikeprojectminji.bikeback.course.entity.CourseRoutePointEntity;
 import com.bikeprojectminji.bikeback.course.entity.CourseVisibility;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
+import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordPointEntity;
+import com.bikeprojectminji.bikeback.ride.entity.RideRecordProcessedPointEntity;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordPointRepository;
+import com.bikeprojectminji.bikeback.ride.repository.RideRecordProcessedPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import java.math.BigDecimal;
@@ -52,6 +55,9 @@ class CourseServiceTest {
 
     @Mock
     private RideRecordPointRepository rideRecordPointRepository;
+
+    @Mock
+    private RideRecordProcessedPointRepository rideRecordProcessedPointRepository;
 
     @Mock
     private AuthService authService;
@@ -199,14 +205,15 @@ class CourseServiceTest {
         ReflectionTestUtils.setField(user, "id", 1L);
         RideRecordEntity rideRecord = new RideRecordEntity(1L, java.time.OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), java.time.OffsetDateTime.parse("2026-03-29T11:00:00+09:00"), 18250, 3600);
         ReflectionTestUtils.setField(rideRecord, "id", 1001L);
+        rideRecord.markReady(java.time.OffsetDateTime.parse("2026-03-29T11:01:00+09:00"));
         CourseEntity savedCourse = new CourseEntity("한강 코스", "설명", BigDecimal.valueOf(18.3), 60, 11, false, null, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780), 1L, CourseVisibility.PRIVATE);
         ReflectionTestUtils.setField(savedCourse, "id", 2001L);
 
         given(authService.findUserBySubject("1")).willReturn(user);
         given(rideRecordRepository.findByIdAndOwnerUserId(1001L, 1L)).willReturn(Optional.of(rideRecord));
-        given(rideRecordPointRepository.findByRideRecordIdOrderByPointOrderAsc(1001L)).willReturn(List.of(
-                new RideRecordPointEntity(1001L, 1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
-                new RideRecordPointEntity(1001L, 2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
+        given(rideRecordProcessedPointRepository.findByRideRecordIdOrderByPointOrderAsc(1001L)).willReturn(List.of(
+                new RideRecordProcessedPointEntity(1001L, 1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                new RideRecordProcessedPointEntity(1001L, 2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
         ));
         given(courseRepository.findTopByOrderByDisplayOrderDescIdDesc()).willReturn(Optional.of(createCourses(10).get(9)));
         given(courseRepository.save(any(CourseEntity.class))).willReturn(savedCourse);
@@ -216,6 +223,22 @@ class CourseServiceTest {
         assertThat(response.courseId()).isEqualTo(2001L);
         assertThat(response.ownerUserId()).isEqualTo(1L);
         assertThat(response.visibility()).isEqualTo("PRIVATE");
+    }
+
+    @Test
+    @DisplayName("기록 기반 코스 생성은 finalization 완료 전이면 BadRequestException을 던진다")
+    void createCourseFromRideRecordThrowsWhenFinalizationNotReady() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity rideRecord = new RideRecordEntity(1L, java.time.OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), java.time.OffsetDateTime.parse("2026-03-29T11:00:00+09:00"), 18250, 3600);
+        ReflectionTestUtils.setField(rideRecord, "id", 1001L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(1001L, 1L)).willReturn(Optional.of(rideRecord));
+
+        assertThatThrownBy(() -> courseService.createCourseFromRideRecord("1", new CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE")))
+                .isInstanceOf(com.bikeprojectminji.bikeback.global.exception.BadRequestException.class)
+                .hasMessage("경로 보정이 아직 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
     }
 
     @Test
