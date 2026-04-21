@@ -100,7 +100,7 @@ jobs:
               "PREVIOUS_TARGET=\$(readlink -f \"${APP_DEPLOY_DIR}/current.jar\" || true)",
               "aws s3 cp \"s3://${DEPLOY_S3_BUCKET}/bike-back/releases/${GITHUB_SHA}/app.jar\" \"${APP_DEPLOY_DIR}/releases/${GITHUB_SHA}/app.jar\"",
               "ln -sfn \"${APP_DEPLOY_DIR}/releases/${GITHUB_SHA}/app.jar\" \"${APP_DEPLOY_DIR}/current.jar\"",
-              "if systemctl restart \"${APP_SERVICE_NAME}\"; then for _ in $(seq 1 15); do if curl -fsS \"http://127.0.0.1:${APP_PORT}/health\" >/tmp/bike-back-health.json; then exit 0; fi; sleep 2; done; fi",
+              "if systemctl restart \"${APP_SERVICE_NAME}\"; then n=0; while [ \$n -lt 15 ]; do if curl -fsS \"http://127.0.0.1:${APP_PORT}/health\" >/tmp/bike-back-health.json; then exit 0; fi; n=\$((n+1)); sleep 2; done; fi",
               "if [ -n \"\${PREVIOUS_TARGET}\" ]; then ln -sfn \"\${PREVIOUS_TARGET}\" \"${APP_DEPLOY_DIR}/current.jar\"; systemctl restart \"${APP_SERVICE_NAME}\"; fi",
               "exit 1"
             ]
