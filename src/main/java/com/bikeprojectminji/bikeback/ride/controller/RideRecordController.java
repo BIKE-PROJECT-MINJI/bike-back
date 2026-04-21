@@ -2,8 +2,11 @@ package com.bikeprojectminji.bikeback.ride.controller;
 
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
+import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordResponse;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,5 +30,21 @@ public class RideRecordController {
             @RequestBody CreateRideRecordRequest request
     ) {
         return ApiResponse.success(rideRecordService.saveRideRecord(jwt.getSubject(), request));
+    }
+
+    @GetMapping("/{rideRecordId}")
+    public ApiResponse<RideRecordFinalizationStatusResponse> getRideRecordStatus(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long rideRecordId
+    ) {
+        return ApiResponse.success(rideRecordService.getRideRecordStatus(jwt.getSubject(), rideRecordId));
+    }
+
+    @PostMapping("/{rideRecordId}/regenerate")
+    public ApiResponse<RideRecordFinalizationStatusResponse> regenerateRideRecord(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long rideRecordId
+    ) {
+        return ApiResponse.success(rideRecordService.regenerateRideRecord(jwt.getSubject(), rideRecordId));
     }
 }

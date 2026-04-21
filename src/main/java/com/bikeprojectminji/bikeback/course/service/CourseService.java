@@ -18,7 +18,9 @@ import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
 import com.bikeprojectminji.bikeback.course.entity.CourseRoutePointEntity;
 import com.bikeprojectminji.bikeback.course.entity.CourseVisibility;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
+import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordPointEntity;
+import com.bikeprojectminji.bikeback.ride.entity.RideRecordProcessedPointEntity;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
@@ -27,6 +29,7 @@ import java.math.RoundingMode;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordPointRepository;
+import com.bikeprojectminji.bikeback.ride.repository.RideRecordProcessedPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import java.math.BigDecimal;
@@ -50,6 +53,7 @@ public class CourseService {
     private final CourseRoutePointRepository courseRoutePointRepository;
     private final RideRecordRepository rideRecordRepository;
     private final RideRecordPointRepository rideRecordPointRepository;
+    private final RideRecordProcessedPointRepository rideRecordProcessedPointRepository;
     private final AuthService authService;
 
     public CourseService(
@@ -57,12 +61,14 @@ public class CourseService {
             CourseRoutePointRepository courseRoutePointRepository,
             RideRecordRepository rideRecordRepository,
             RideRecordPointRepository rideRecordPointRepository,
+            RideRecordProcessedPointRepository rideRecordProcessedPointRepository,
             AuthService authService
     ) {
         this.courseRepository = courseRepository;
         this.courseRoutePointRepository = courseRoutePointRepository;
         this.rideRecordRepository = rideRecordRepository;
         this.rideRecordPointRepository = rideRecordPointRepository;
+        this.rideRecordProcessedPointRepository = rideRecordProcessedPointRepository;
         this.authService = authService;
     }
 
@@ -173,9 +179,12 @@ public class CourseService {
         UserEntity user = authService.findUserBySubject(subject);
         RideRecordEntity rideRecord = rideRecordRepository.findByIdAndOwnerUserId(request.sourceRideRecordId(), user.getId())
                 .orElseThrow(() -> new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
-        List<RideRecordPointEntity> rideRecordPoints = rideRecordPointRepository.findByRideRecordIdOrderByPointOrderAsc(rideRecord.getId());
+        if (rideRecord.getFinalizationStatus() != RideRecordFinalizationStatus.READY) {
+            throw new BadRequestException("경로 보정이 아직 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+        }
+        List<RideRecordProcessedPointEntity> rideRecordPoints = rideRecordProcessedPointRepository.findByRideRecordIdOrderByPointOrderAsc(rideRecord.getId());
         if (rideRecordPoints.isEmpty()) {
-            throw new BadRequestException("기록 경로가 비어 있어 코스를 생성할 수 없습니다.");
+            throw new BadRequestException("최종 경로가 비어 있어 코스를 생성할 수 없습니다.");
         }
 
         CourseVisibility visibility = parseVisibility(request.visibility());

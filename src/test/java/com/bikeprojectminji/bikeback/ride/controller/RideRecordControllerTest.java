@@ -38,7 +38,7 @@ class RideRecordControllerTest {
     @DisplayName("자유 주행 기록 저장 API는 인증된 사용자의 저장 결과를 응답한다")
     void saveRideRecordReturnsWrappedResponse() throws Exception {
         given(rideRecordService.saveRideRecord(org.mockito.ArgumentMatchers.eq("1"), org.mockito.ArgumentMatchers.any()))
-                .willReturn(new RideRecordResponse(1001L, 1L, 2));
+                .willReturn(new RideRecordResponse(1001L, 1L, 2, "FINALIZING"));
 
         mockMvc.perform(post("/api/v1/ride-records")
                         .with(jwt().jwt(jwt -> jwt.subject("1")))
@@ -67,7 +67,8 @@ class RideRecordControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.rideRecordId").value(1001))
-                .andExpect(jsonPath("$.data.ownerUserId").value(1));
+                .andExpect(jsonPath("$.data.ownerUserId").value(1))
+                .andExpect(jsonPath("$.data.finalizationStatus").value("FINALIZING"));
     }
 
     @Test
