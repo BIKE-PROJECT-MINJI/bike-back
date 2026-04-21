@@ -67,7 +67,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import base64, os
-          base = Path.cwd().parents[1] / 'DOCS' / '00_기준'
+          base = Path.cwd() / 'ops' / 'observability'
           nginx = (base / 'nginx_access_log_설정_샘플.conf').read_bytes()
           cloudwatch = (base / 'cloudwatch_agent_수집_설정_샘플.json').read_text(encoding='utf-8')
           cloudwatch = cloudwatch.replace('/var/log/bike-back/application.log', os.environ['APP_LOG_FILE'])
