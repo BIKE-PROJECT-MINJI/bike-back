@@ -66,4 +66,10 @@ jobs:
           DASHBOARD_NAME: ${{ github.event.inputs.dashboard_name }}
         run: |
           set -euo pipefail
-          aws cloudwatch put-dashboard --dashboard-name "$DASHBOARD_NAME" --dashboard-body file://dashboard-body.json
+          DASHBOARD_BODY="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.dumps(json.loads(Path('dashboard-body.json').read_text(encoding='utf-8'))))
+          PY
+          )"
+          aws cloudwatch put-dashboard --dashboard-name "$DASHBOARD_NAME" --dashboard-body "$DASHBOARD_BODY"
