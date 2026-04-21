@@ -1,0 +1,119 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 2,
+      "properties": {
+        "markdown": "# BIKE Backend Observability
+1차 기준: nginx access log + app structured log + request_id"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 2,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "title": "EC2 CPU Utilization",
+        "region": "ap-northeast-2",
+        "stat": "Average",
+        "period": 300,
+        "metrics": [
+          [ "AWS/EC2", "CPUUtilization", "InstanceId", "${APP_INSTANCE_ID}" ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 2,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "title": "Status Check Failed",
+        "region": "ap-northeast-2",
+        "stat": "Maximum",
+        "period": 300,
+        "metrics": [
+          [ "AWS/EC2", "StatusCheckFailed", "InstanceId", "${APP_INSTANCE_ID}" ]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 2,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "view": "timeSeries",
+        "title": "Network In / Out",
+        "region": "ap-northeast-2",
+        "stat": "Sum",
+        "period": 300,
+        "metrics": [
+          [ "AWS/EC2", "NetworkIn", "InstanceId", "${APP_INSTANCE_ID}" ],
+          [ ".", "NetworkOut", ".", "." ]
+        ]
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 8,
+      "width": 12,
+      "height": 8,
+      "properties": {
+        "region": "ap-northeast-2",
+        "title": "nginx access recent",
+        "query": "SOURCE '/bike/nginx/access' | fields @timestamp, @message | sort @timestamp desc | limit 50",
+        "view": "table"
+      }
+    },
+    {
+      "type": "log",
+      "x": 12,
+      "y": 8,
+      "width": 12,
+      "height": 8,
+      "properties": {
+        "region": "ap-northeast-2",
+        "title": "backend app recent",
+        "query": "SOURCE '/bike/app/backend' | fields @timestamp, @message | sort @timestamp desc | limit 50",
+        "view": "table"
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 16,
+      "width": 12,
+      "height": 8,
+      "properties": {
+        "region": "ap-northeast-2",
+        "title": "4xx / 5xx access log filter",
+        "query": "SOURCE '/bike/nginx/access' | filter @message like /\"status\":4/ or @message like /\"status\":5/ | fields @timestamp, @message | sort @timestamp desc | limit 100",
+        "view": "table"
+      }
+    },
+    {
+      "type": "log",
+      "x": 12,
+      "y": 16,
+      "width": 12,
+      "height": 8,
+      "properties": {
+        "region": "ap-northeast-2",
+        "title": "fallback / paused / failure app logs",
+        "query": "SOURCE '/bike/app/backend' | filter @message like /fallback/ or @message like /paused/ or @message like /failed/ or @message like /unexpected_error/ | fields @timestamp, @message | sort @timestamp desc | limit 100",
+        "view": "table"
+      }
+    }
+  ]
+}
