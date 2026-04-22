@@ -29,4 +29,4 @@ auth:
   jwt:
     secret: ${AUTH_JWT_SECRET}
     issuer: ${AUTH_JWT_ISSUER:bike-back}
-    token-validity-sec: ${AUTH_JWT_TOKEN_VALIDITY_SEC:86400}
+    token-validity-sec: ${AUTH_JWT_TOKEN_VALIDITY_SEC:900}

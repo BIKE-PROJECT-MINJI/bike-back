@@ -21,4 +21,4 @@ auth:
   jwt:
     secret: 01234567890123456789012345678901
     issuer: bike-back-test
-    token-validity-sec: 3600
+    token-validity-sec: 900
