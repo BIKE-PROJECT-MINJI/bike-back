@@ -7,7 +7,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
+import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
+import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,11 +33,19 @@ class ProfileControllerIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private RideRecordRepository rideRecordRepository;
+
+    @Autowired
+    private CourseRepository courseRepository;
+
     private Long savedUserId;
 
     @BeforeEach
     @Transactional
     void setUp() {
+        rideRecordRepository.deleteAll();
+        courseRepository.deleteAll();
         userRepository.deleteAll();
 
         UserEntity user = new UserEntity("external-profile-1", "profile@example.com", null, "profile-user", null);
