@@ -109,3 +109,4 @@ WantedBy=multi-user.target
 - 이 흐름은 app EC2 배포 자동화 기준입니다.
 - db EC2 schema 변경은 Flyway migration 영향이 있으므로, 대규모 schema 변경 시에는 배포 전 백업 기준을 먼저 잠가야 합니다.
 - Redis는 현재 코드와 `/health/monitor`에 연결 흔적이 있으므로, 운영에서 제거할 때는 앱 계약과 monitor 기준을 먼저 정리해야 합니다.
+- Redis AOF baseline은 앱 jar CD와 별도입니다. current 기준의 concrete 설정은 `dev/bike-back/ops/redis/redis.aof.conf` (`appendonly yes`, `appendfsync everysec`) 를 따르고, self-managed Redis host/container에 같은 값을 반영해야 합니다.

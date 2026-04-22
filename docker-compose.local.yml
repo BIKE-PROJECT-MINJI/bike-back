@@ -21,10 +21,12 @@ services:
     image: redis:7-alpine
     container_name: bike-back-redis
     restart: unless-stopped
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     ports:
       - "6380:6379"
     volumes:
       - bike_back_redis_data:/data
+      - ./ops/redis/redis.aof.conf:/usr/local/etc/redis/redis.conf:ro
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
