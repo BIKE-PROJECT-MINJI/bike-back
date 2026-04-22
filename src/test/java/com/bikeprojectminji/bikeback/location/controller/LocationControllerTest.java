@@ -69,4 +69,13 @@ class LocationControllerTest {
                 .andExpect(jsonPath("$.code").value(404))
                 .andExpect(jsonPath("$.message").value("최근 위치 정보를 찾을 수 없습니다."));
     }
+
+    @Test
+    @DisplayName("최근 위치 조회 API는 인증 없이 접근하면 401을 응답한다")
+    void getMyRecentLocationRequiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/v1/location/me/recent"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401))
+                .andExpect(jsonPath("$.message").value("로그인 정보가 필요합니다."));
+    }
 }
