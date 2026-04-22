@@ -18,7 +18,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest
@@ -42,7 +41,6 @@ class ProfileControllerIntegrationTest {
     private Long savedUserId;
 
     @BeforeEach
-    @Transactional
     void setUp() {
         rideRecordRepository.deleteAll();
         courseRepository.deleteAll();
@@ -54,7 +52,6 @@ class ProfileControllerIntegrationTest {
 
     @Test
     @DisplayName("내 활동 요약 API는 데이터가 없어도 200과 빈 요약을 반환한다")
-    @Transactional
     void getMyActivitySummaryReturnsEmptySummaryWhenNoDataExists() throws Exception {
         mockMvc.perform(get("/api/v1/profile/me/activity-summary")
                         .with(jwt().jwt(jwt -> jwt.subject(String.valueOf(savedUserId)))))
