@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.ride.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
@@ -26,6 +27,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.verifyNoInteractions;
+
+import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 
 @ExtendWith(MockitoExtension.class)
 class RideRecordServiceTest {
@@ -47,6 +51,50 @@ class RideRecordServiceTest {
 
     @InjectMocks
     private RideRecordService rideRecordService;
+
+    @Test
+    @DisplayName("자유 주행 기록 저장은 10초 미만 duration을 거절한다")
+    void saveRideRecordRejectsDurationUnderTenSeconds() {
+        CreateRideRecordRequest request = new CreateRideRecordRequest(
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T10:00:09+09:00"),
+                new RideRecordSummaryRequest(42, 9),
+                List.of(new RideRecordPointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)))
+        );
+
+        assertThatThrownBy(() -> rideRecordService.saveRideRecord("1", request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("주행 시작 후 10초 미만 기록은 저장되지 않습니다.");
+
+        verifyNoInteractions(authService, rideRecordRepository, rideRecordPointRepository,
+                recentLocationCacheService, rideRecordFinalizationService);
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 저장은 10초 duration이면 기존 finalization 흐름을 유지한다")
+    void saveRideRecordAcceptsTenSecondDuration() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity savedRideRecord = new RideRecordEntity(1L, OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), OffsetDateTime.parse("2026-03-29T10:00:10+09:00"), 120, 10);
+        ReflectionTestUtils.setField(savedRideRecord, "id", 1001L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.save(any(RideRecordEntity.class))).willReturn(savedRideRecord);
+
+        RideRecordResponse response = rideRecordService.saveRideRecord("1", new CreateRideRecordRequest(
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T10:00:10+09:00"),
+                new RideRecordSummaryRequest(120, 10),
+                List.of(
+                        new RideRecordPointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                        new RideRecordPointRequest(2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
+                )
+        ));
+
+        assertThat(response.rideRecordId()).isEqualTo(1001L);
+        assertThat(response.finalizationStatus()).isEqualTo("FINALIZING");
+        verify(rideRecordFinalizationService).requestFinalization(1001L);
+    }
 
     @Test
     @DisplayName("자유 주행 기록 저장은 소유자와 route point를 함께 저장한다")

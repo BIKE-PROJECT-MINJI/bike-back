@@ -150,6 +150,9 @@ public class RideRecordService {
         if (request.summary().durationSec() == null || request.summary().durationSec() < 0) {
             throw new BadRequestException("durationSec은 0 이상이어야 합니다.");
         }
+        if (request.summary().durationSec() < 10) {
+            throw new BadRequestException("주행 시작 후 10초 미만 기록은 저장되지 않습니다.");
+        }
         normalizeRoutePoints(request.routePoints());
     }
 
