@@ -7,9 +7,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.bikeprojectminji.bikeback.profile.dto.ProfileActivitySummaryResponse;
+import com.bikeprojectminji.bikeback.profile.dto.ProfileOverallActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileMeResponse;
+import com.bikeprojectminji.bikeback.profile.dto.ProfileWeeklyActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.profile.service.ProfileService;
+import java.math.BigDecimal;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,5 +79,27 @@ class ProfileControllerTest {
         mockMvc.perform(get("/api/v1/profile/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    @DisplayName("내 활동 요약 조회 API는 주간/전체 요약을 success 래퍼로 응답한다")
+    void getMyActivitySummaryReturnsWrappedResponse() throws Exception {
+        given(profileService.getMyActivitySummary("1"))
+                .willReturn(new ProfileActivitySummaryResponse(
+                        new ProfileWeeklyActivitySummaryResponse(new BigDecimal("24.5"), 2, 70, 1),
+                        new ProfileOverallActivitySummaryResponse(new BigDecimal("120.5"), 12, new BigDecimal("18.1"), 0)
+                ));
+
+        mockMvc.perform(get("/api/v1/profile/me/activity-summary").with(jwt().jwt(jwt -> jwt.subject("1"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.weeklySummary.distanceKm").value(24.5))
+                .andExpect(jsonPath("$.data.weeklySummary.rideCount").value(2))
+                .andExpect(jsonPath("$.data.weeklySummary.durationMinutes").value(70))
+                .andExpect(jsonPath("$.data.weeklySummary.savedCourseCount").value(1))
+                .andExpect(jsonPath("$.data.overallSummary.totalDistanceKm").value(120.5))
+                .andExpect(jsonPath("$.data.overallSummary.totalRides").value(12))
+                .andExpect(jsonPath("$.data.overallSummary.avgSpeedKmh").value(18.1))
+                .andExpect(jsonPath("$.data.overallSummary.totalElevationM").value(0));
     }
 }

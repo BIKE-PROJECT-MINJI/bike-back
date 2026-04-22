@@ -1,5 +1,6 @@
 package com.bikeprojectminji.bikeback.profile.controller;
 
+import com.bikeprojectminji.bikeback.profile.dto.ProfileActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileMeResponse;
 import com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
@@ -26,6 +27,11 @@ public class ProfileController {
     @GetMapping("/me")
     public ApiResponse<ProfileMeResponse> getMyProfile(@AuthenticationPrincipal Jwt jwt) {
         return ApiResponse.success(profileService.getMyProfile(jwt.getSubject()));
+    }
+
+    @GetMapping("/me/activity-summary")
+    public ApiResponse<ProfileActivitySummaryResponse> getMyActivitySummary(@AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.success(profileService.getMyActivitySummary(jwt.getSubject()));
     }
 
     @PatchMapping("/me")
