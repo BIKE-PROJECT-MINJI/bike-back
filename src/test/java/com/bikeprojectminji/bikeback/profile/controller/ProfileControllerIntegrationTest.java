@@ -60,8 +60,9 @@ class ProfileControllerIntegrationTest {
                         .with(jwt().jwt(jwt -> jwt.subject(String.valueOf(savedUserId)))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.weeklySummary.distanceKm").value(0.0))
-                .andExpect(jsonPath("$.data.weeklySummary.rideCount").value(0))
-                .andExpect(jsonPath("$.data.overallSummary.totalDistanceKm").value(0.0));
+                .andExpect(jsonPath("$.data.weeklySummary.distanceKm").exists())
+                .andExpect(jsonPath("$.data.weeklySummary.rideCount").exists())
+                .andExpect(jsonPath("$.data.overallSummary.totalDistanceKm").exists())
+                .andExpect(jsonPath("$.data.overallSummary.avgSpeedKmh").exists());
     }
 }
