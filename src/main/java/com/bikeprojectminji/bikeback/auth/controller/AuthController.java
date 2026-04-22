@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.auth.controller;
 import com.bikeprojectminji.bikeback.auth.dto.AuthMeResponse;
 import com.bikeprojectminji.bikeback.auth.dto.LoginRequest;
 import com.bikeprojectminji.bikeback.auth.dto.LoginResponse;
+import com.bikeprojectminji.bikeback.auth.dto.RefreshTokenRequest;
 import com.bikeprojectminji.bikeback.auth.dto.RegisterRequest;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
@@ -37,6 +38,12 @@ public class AuthController {
         return ApiResponse.success(authService.login(request));
     }
 
+    @PostMapping("/refresh")
+    public ApiResponse<LoginResponse> refresh(@RequestBody RefreshTokenRequest request) {
+        validateRefreshRequest(request);
+        return ApiResponse.success(authService.refresh(request));
+    }
+
     @GetMapping("/me")
     public ApiResponse<AuthMeResponse> getMyAuth(@AuthenticationPrincipal Jwt jwt) {
         return ApiResponse.success(authService.getCurrentUser(jwt.getSubject()));
@@ -66,6 +73,15 @@ public class AuthController {
         }
         if (isBlank(request.password())) {
             throw new BadRequestException("password는 비어 있을 수 없습니다.");
+        }
+    }
+
+    private void validateRefreshRequest(RefreshTokenRequest request) {
+        if (request == null) {
+            throw new BadRequestException("리프레시 요청 본문이 필요합니다.");
+        }
+        if (isBlank(request.refreshToken())) {
+            throw new BadRequestException("refreshToken은 비어 있을 수 없습니다.");
         }
     }
 

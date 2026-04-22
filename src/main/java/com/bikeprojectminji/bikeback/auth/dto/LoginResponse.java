@@ -3,7 +3,9 @@ package com.bikeprojectminji.bikeback.auth.dto;
 public record LoginResponse(
         String tokenType,
         String accessToken,
-        long expiresInSec,
+        String refreshToken,
+        long accessExpiresInSec,
+        long refreshExpiresInSec,
         Long userId,
         String displayName
 ) {

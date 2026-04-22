@@ -10,9 +10,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.bikeprojectminji.bikeback.auth.dto.AuthMeResponse;
 import com.bikeprojectminji.bikeback.auth.dto.LoginRequest;
 import com.bikeprojectminji.bikeback.auth.dto.LoginResponse;
+import com.bikeprojectminji.bikeback.auth.dto.RefreshTokenRequest;
 import com.bikeprojectminji.bikeback.auth.dto.RegisterRequest;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
+import com.bikeprojectminji.bikeback.global.exception.UnauthorizedException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +30,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @TestPropertySource(properties = {
         "auth.jwt.secret=01234567890123456789012345678901",
         "auth.jwt.issuer=bike-back-test",
-        "auth.jwt.token-validity-sec=3600"
+        "auth.jwt.token-validity-sec=900"
 })
 class AuthControllerTest {
 
@@ -43,7 +45,7 @@ class AuthControllerTest {
     void registerReturnsWrappedResponse() throws Exception {
         RegisterRequest request = new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null);
         given(authService.register(request))
-                .willReturn(new LoginResponse("Bearer", "jwt-token", 3600, 1L, "bikeoasis"));
+                .willReturn(new LoginResponse("Bearer", "access-token", "refresh-token", 900, 1209600, 1L, "bikeoasis"));
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -59,7 +61,10 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.tokenType").value("Bearer"))
-                .andExpect(jsonPath("$.data.accessToken").value("jwt-token"))
+                .andExpect(jsonPath("$.data.accessToken").value("access-token"))
+                .andExpect(jsonPath("$.data.refreshToken").value("refresh-token"))
+                .andExpect(jsonPath("$.data.accessExpiresInSec").value(900))
+                .andExpect(jsonPath("$.data.refreshExpiresInSec").value(1209600))
                 .andExpect(jsonPath("$.data.userId").value(1));
     }
 
@@ -68,7 +73,7 @@ class AuthControllerTest {
     void loginReturnsWrappedResponse() throws Exception {
         LoginRequest request = new LoginRequest("bikeoasis@example.com", "example-password");
         given(authService.login(request))
-                .willReturn(new LoginResponse("Bearer", "jwt-token", 3600, 1L, "bikeoasis"));
+                .willReturn(new LoginResponse("Bearer", "access-token", "refresh-token", 900, 1209600, 1L, "bikeoasis"));
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -80,7 +85,51 @@ class AuthControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.accessToken").value("jwt-token"));
+                .andExpect(jsonPath("$.data.accessToken").value("access-token"))
+                .andExpect(jsonPath("$.data.refreshToken").value("refresh-token"))
+                .andExpect(jsonPath("$.data.accessExpiresInSec").value(900))
+                .andExpect(jsonPath("$.data.refreshExpiresInSec").value(1209600));
+    }
+
+    @Test
+    @DisplayName("리프레시 API는 success 래퍼로 새 access/refresh 토큰 응답을 반환한다")
+    void refreshReturnsWrappedResponse() throws Exception {
+        RefreshTokenRequest request = new RefreshTokenRequest("refresh-token");
+        given(authService.refresh(request))
+                .willReturn(new LoginResponse("Bearer", "new-access-token", "new-refresh-token", 900, 1209600, 1L, "bikeoasis"));
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "refreshToken": "refresh-token"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.accessToken").value("new-access-token"))
+                .andExpect(jsonPath("$.data.refreshToken").value("new-refresh-token"))
+                .andExpect(jsonPath("$.data.userId").value(1))
+                .andExpect(jsonPath("$.data.displayName").value("bikeoasis"));
+    }
+
+    @Test
+    @DisplayName("리프레시 API는 잘못된 refresh token이면 401을 반환한다")
+    void refreshReturnsUnauthorizedWhenTokenIsInvalid() throws Exception {
+        RefreshTokenRequest request = new RefreshTokenRequest("broken-token");
+        given(authService.refresh(request))
+                .willThrow(new UnauthorizedException("로그인 정보가 필요합니다."));
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "refreshToken": "broken-token"
+                                }
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401))
+                .andExpect(jsonPath("$.message").value("로그인 정보가 필요합니다."));
     }
 
     @Test
