@@ -16,6 +16,10 @@ public interface CourseRepository extends JpaRepository<CourseEntity, Long>, Cou
 
     Optional<CourseEntity> findByIdAndShareToken(Long id, String shareToken);
 
+    Optional<CourseEntity> findTopByOwnerUserIdAndSourceRideRecordIdOrderByIdDesc(Long ownerUserId, Long sourceRideRecordId);
+
+    List<CourseEntity> findByOwnerUserIdAndSourceRideRecordIdIn(Long ownerUserId, List<Long> sourceRideRecordIds);
+
     List<CourseEntity> findTop20ByVisibilityOrderByIdDesc(CourseVisibility visibility);
 
     List<CourseEntity> findTop20ByVisibilityAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility visibility, String title);

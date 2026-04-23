@@ -49,6 +49,9 @@ public class CourseEntity {
     @Column(name = "owner_user_id")
     private Long ownerUserId;
 
+    @Column(name = "source_ride_record_id")
+    private Long sourceRideRecordId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private CourseVisibility visibility;
@@ -96,6 +99,23 @@ public class CourseEntity {
             Long ownerUserId,
             CourseVisibility visibility
     ) {
+        this(title, description, distanceKm, estimatedDurationMin, displayOrder, curated, featuredRank, startLatitude, startLongitude, ownerUserId, null, visibility);
+    }
+
+    public CourseEntity(
+            String title,
+            String description,
+            BigDecimal distanceKm,
+            Integer estimatedDurationMin,
+            Integer displayOrder,
+            boolean curated,
+            Integer featuredRank,
+            BigDecimal startLatitude,
+            BigDecimal startLongitude,
+            Long ownerUserId,
+            Long sourceRideRecordId,
+            CourseVisibility visibility
+    ) {
         this.title = title;
         this.description = description;
         this.distanceKm = distanceKm;
@@ -106,6 +126,7 @@ public class CourseEntity {
         this.startLatitude = startLatitude;
         this.startLongitude = startLongitude;
         this.ownerUserId = ownerUserId;
+        this.sourceRideRecordId = sourceRideRecordId;
         this.visibility = visibility;
     }
 
@@ -187,6 +208,10 @@ public class CourseEntity {
 
     public Long getOwnerUserId() {
         return ownerUserId;
+    }
+
+    public Long getSourceRideRecordId() {
+        return sourceRideRecordId;
     }
 
     public CourseVisibility getVisibility() {

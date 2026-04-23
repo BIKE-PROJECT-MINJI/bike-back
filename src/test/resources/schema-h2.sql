@@ -23,6 +23,7 @@ CREATE TABLE courses (
     start_latitude NUMERIC(10,7),
     start_longitude NUMERIC(10,7),
     owner_user_id BIGINT,
+    source_ride_record_id BIGINT,
     visibility VARCHAR(20) NOT NULL,
     share_token VARCHAR(64),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
