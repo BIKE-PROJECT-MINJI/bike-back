@@ -2,6 +2,7 @@ package com.bikeprojectminji.bikeback.ride.repository;
 
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -9,6 +10,8 @@ import org.springframework.data.jpa.repository.Query;
 public interface RideRecordRepository extends JpaRepository<RideRecordEntity, Long> {
 
     Optional<RideRecordEntity> findByIdAndOwnerUserId(Long id, Long ownerUserId);
+
+    List<RideRecordEntity> findTop20ByOwnerUserIdOrderByEndedAtDescIdDesc(Long ownerUserId);
 
     @Query("select count(r) from RideRecordEntity r where r.ownerUserId = :ownerUserId and r.finalizationStatus = :finalizationStatus")
     long countByOwnerUserIdAndFinalizationStatus(Long ownerUserId, String finalizationStatus);

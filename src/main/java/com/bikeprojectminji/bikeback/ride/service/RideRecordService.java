@@ -1,10 +1,14 @@
 package com.bikeprojectminji.bikeback.ride.service;
 
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
+import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
+import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.location.service.RecentLocationCacheService;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusResponse;
+import com.bikeprojectminji.bikeback.ride.dto.RideRecordListItemResponse;
+import com.bikeprojectminji.bikeback.ride.dto.RideRecordListResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordPointRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordResponse;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
@@ -14,8 +18,10 @@ import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +36,7 @@ public class RideRecordService {
     private static final Logger log = LoggerFactory.getLogger(RideRecordService.class);
 
     private final AuthService authService;
+    private final CourseRepository courseRepository;
     private final RideRecordRepository rideRecordRepository;
     private final RideRecordPointRepository rideRecordPointRepository;
     private final RecentLocationCacheService recentLocationCacheService;
@@ -37,12 +44,14 @@ public class RideRecordService {
 
     public RideRecordService(
             AuthService authService,
+            CourseRepository courseRepository,
             RideRecordRepository rideRecordRepository,
             RideRecordPointRepository rideRecordPointRepository,
             RecentLocationCacheService recentLocationCacheService,
             RideRecordFinalizationService rideRecordFinalizationService
     ) {
         this.authService = authService;
+        this.courseRepository = courseRepository;
         this.rideRecordRepository = rideRecordRepository;
         this.rideRecordPointRepository = rideRecordPointRepository;
         this.recentLocationCacheService = recentLocationCacheService;
@@ -94,11 +103,44 @@ public class RideRecordService {
     }
 
     @Transactional(readOnly = true)
+    public RideRecordListResponse listRideRecords(String subject) {
+        UserEntity user = authService.findUserBySubject(subject);
+        List<RideRecordEntity> rideRecords = rideRecordRepository.findTop20ByOwnerUserIdOrderByEndedAtDescIdDesc(user.getId());
+        Map<Long, Long> linkedCourseIds = resolveLinkedCourseIds(user.getId(), rideRecords);
+
+        return new RideRecordListResponse(rideRecords.stream()
+                .map(rideRecord -> new RideRecordListItemResponse(
+                        rideRecord.getId(),
+                        rideRecord.getStartedAt(),
+                        rideRecord.getEndedAt(),
+                        rideRecord.getDistanceM(),
+                        rideRecord.getDurationSec(),
+                        rideRecord.getFinalizationStatus().name(),
+                        linkedCourseIds.get(rideRecord.getId())
+                ))
+                .toList());
+    }
+
+    @Transactional(readOnly = true)
     public RideRecordFinalizationStatusResponse getRideRecordStatus(String subject, Long rideRecordId) {
         UserEntity user = authService.findUserBySubject(subject);
         RideRecordEntity rideRecord = rideRecordRepository.findByIdAndOwnerUserId(rideRecordId, user.getId())
                 .orElseThrow(() -> new BadRequestException("자유 주행 기록을 찾을 수 없습니다."));
-        return rideRecordFinalizationService.getStatus(rideRecord);
+        RideRecordFinalizationStatusResponse status = rideRecordFinalizationService.getStatus(rideRecord);
+
+        return new RideRecordFinalizationStatusResponse(
+                status.rideRecordId(),
+                status.status(),
+                status.rawPointCount(),
+                status.processedPointCount(),
+                status.finalizationAttempts(),
+                status.errorMessage(),
+                rideRecord.getStartedAt(),
+                rideRecord.getEndedAt(),
+                rideRecord.getDistanceM(),
+                rideRecord.getDurationSec(),
+                findLinkedCourseId(user.getId(), rideRecord.getId())
+        );
     }
 
     @Transactional
@@ -154,6 +196,31 @@ public class RideRecordService {
             throw new BadRequestException("주행 시작 후 10초 미만 기록은 저장되지 않습니다.");
         }
         normalizeRoutePoints(request.routePoints());
+    }
+
+    private Long findLinkedCourseId(Long ownerUserId, Long rideRecordId) {
+        return courseRepository.findTopByOwnerUserIdAndSourceRideRecordIdOrderByIdDesc(ownerUserId, rideRecordId)
+                .map(CourseEntity::getId)
+                .orElse(null);
+    }
+
+    private Map<Long, Long> resolveLinkedCourseIds(Long ownerUserId, List<RideRecordEntity> rideRecords) {
+        Map<Long, Long> linkedCourseIds = new HashMap<>();
+        if (rideRecords.isEmpty()) {
+            return linkedCourseIds;
+        }
+
+        List<Long> rideRecordIds = rideRecords.stream()
+                .map(RideRecordEntity::getId)
+                .toList();
+
+        for (CourseEntity course : courseRepository.findByOwnerUserIdAndSourceRideRecordIdIn(ownerUserId, rideRecordIds)) {
+            if (course.getSourceRideRecordId() == null) {
+                continue;
+            }
+            linkedCourseIds.putIfAbsent(course.getSourceRideRecordId(), course.getId());
+        }
+        return linkedCourseIds;
     }
 
     private List<RideRecordPointRequest> normalizeRoutePoints(List<RideRecordPointRequest> routePoints) {

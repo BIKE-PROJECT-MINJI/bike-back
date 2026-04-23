@@ -11,6 +11,7 @@ import com.bikeprojectminji.bikeback.course.service.CourseService;
 import com.bikeprojectminji.bikeback.location.service.RecentLocationCacheStore;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusResponse;
+import com.bikeprojectminji.bikeback.ride.dto.RideRecordListResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordPointRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordSummaryRequest;
@@ -86,6 +87,16 @@ class RideRecordFinalizationIntegrationTest {
         );
 
         assertThat(courseResponse.courseId()).isNotNull();
+        assertThat(courseResponse.sourceRideRecordId()).isEqualTo(response.rideRecordId());
+
+        RideRecordListResponse listResponse = rideRecordService.listRideRecords("1");
+        assertThat(listResponse.items()).hasSize(1);
+        assertThat(listResponse.items().get(0).linkedCourseId()).isEqualTo(courseResponse.courseId());
+
+        RideRecordFinalizationStatusResponse detailResponse = rideRecordService.getRideRecordStatus("1", response.rideRecordId());
+        assertThat(detailResponse.distanceM()).isEqualTo(18250);
+        assertThat(detailResponse.durationSec()).isEqualTo(3600);
+        assertThat(detailResponse.linkedCourseId()).isEqualTo(courseResponse.courseId());
     }
 
     private RideRecordFinalizationStatusResponse awaitReady(Long rideRecordId) throws Exception {
