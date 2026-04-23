@@ -6,6 +6,11 @@ public record CourseDetailResponse(
         Long id,
         String title,
         BigDecimal distanceKm,
-        Integer estimatedDurationMin
+        Integer estimatedDurationMin,
+        Long sourceRideRecordId
 ) {
+
+    public CourseDetailResponse(Long id, String title, BigDecimal distanceKm, Integer estimatedDurationMin) {
+        this(id, title, distanceKm, estimatedDurationMin, null);
+    }
 }

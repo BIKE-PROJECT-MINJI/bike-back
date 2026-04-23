@@ -206,7 +206,7 @@ class CourseServiceTest {
         RideRecordEntity rideRecord = new RideRecordEntity(1L, java.time.OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), java.time.OffsetDateTime.parse("2026-03-29T11:00:00+09:00"), 18250, 3600);
         ReflectionTestUtils.setField(rideRecord, "id", 1001L);
         rideRecord.markReady(java.time.OffsetDateTime.parse("2026-03-29T11:01:00+09:00"));
-        CourseEntity savedCourse = new CourseEntity("한강 코스", "설명", BigDecimal.valueOf(18.3), 60, 11, false, null, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780), 1L, CourseVisibility.PRIVATE);
+        CourseEntity savedCourse = new CourseEntity("한강 코스", "설명", BigDecimal.valueOf(18.3), 60, 11, false, null, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780), 1L, 1001L, CourseVisibility.PRIVATE);
         ReflectionTestUtils.setField(savedCourse, "id", 2001L);
 
         given(authService.findUserBySubject("1")).willReturn(user);
@@ -223,6 +223,7 @@ class CourseServiceTest {
         assertThat(response.courseId()).isEqualTo(2001L);
         assertThat(response.ownerUserId()).isEqualTo(1L);
         assertThat(response.visibility()).isEqualTo("PRIVATE");
+        assertThat(response.sourceRideRecordId()).isEqualTo(1001L);
     }
 
     @Test

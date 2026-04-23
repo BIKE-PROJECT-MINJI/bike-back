@@ -139,7 +139,7 @@ class CourseControllerTest {
     @DisplayName("기록 기반 코스 생성 API는 인증된 사용자의 코스 생성 결과를 응답한다")
     void createCourseFromRideRecordReturnsWrappedResponse() throws Exception {
         given(courseService.createCourseFromRideRecord("1", new com.bikeprojectminji.bikeback.course.dto.CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE")))
-                .willReturn(new CourseWriteResponse(2001L, 1L, "PRIVATE", "한강 코스"));
+                .willReturn(new CourseWriteResponse(2001L, 1L, "PRIVATE", "한강 코스", 1001L));
 
         mockMvc.perform(post("/api/v1/courses")
                         .with(jwt().jwt(jwt -> jwt.subject("1")))
@@ -155,7 +155,8 @@ class CourseControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.courseId").value(2001))
-                .andExpect(jsonPath("$.data.visibility").value("PRIVATE"));
+                .andExpect(jsonPath("$.data.visibility").value("PRIVATE"))
+                .andExpect(jsonPath("$.data.sourceRideRecordId").value(1001));
     }
 
     @Test

@@ -105,7 +105,8 @@ public class CourseService {
                 course.getId(),
                 course.getTitle(),
                 course.getDistanceKm(),
-                course.getEstimatedDurationMin()
+                course.getEstimatedDurationMin(),
+                course.getSourceRideRecordId()
         );
     }
 
@@ -199,6 +200,7 @@ public class CourseService {
                 rideRecordPoints.get(0).getLatitude(),
                 rideRecordPoints.get(0).getLongitude(),
                 user.getId(),
+                rideRecord.getId(),
                 visibility
         );
         CourseEntity savedCourse = courseRepository.save(course);
@@ -437,7 +439,13 @@ public class CourseService {
     }
 
     private CourseWriteResponse toCourseWriteResponse(CourseEntity course) {
-        return new CourseWriteResponse(course.getId(), course.getOwnerUserId(), course.getVisibility().name(), course.getTitle());
+        return new CourseWriteResponse(
+                course.getId(),
+                course.getOwnerUserId(),
+                course.getVisibility().name(),
+                course.getTitle(),
+                course.getSourceRideRecordId()
+        );
     }
 
     private double haversineMeters(double lat1, double lon1, double lat2, double lon2) {

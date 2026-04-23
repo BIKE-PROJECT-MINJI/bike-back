@@ -4,6 +4,11 @@ public record CourseWriteResponse(
         Long courseId,
         Long ownerUserId,
         String visibility,
-        String title
+        String title,
+        Long sourceRideRecordId
 ) {
+
+    public CourseWriteResponse(Long courseId, Long ownerUserId, String visibility, String title) {
+        this(courseId, ownerUserId, visibility, title, null);
+    }
 }
