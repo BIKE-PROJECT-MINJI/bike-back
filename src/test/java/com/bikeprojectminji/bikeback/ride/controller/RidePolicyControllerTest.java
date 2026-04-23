@@ -5,8 +5,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyCompletionResponse;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationResponse;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyGateResponse;
+import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyOffRouteResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.ride.policy.service.RidePolicyService;
 import org.junit.jupiter.api.DisplayName;
@@ -41,7 +43,8 @@ class RidePolicyControllerTest {
                 .willReturn(new RidePolicyEvaluationResponse(
                         "PRE_START",
                         new RidePolicyGateResponse("ELIGIBLE", "WITHIN_START_POINT_THRESHOLD", 12, 50),
-                        new RidePolicyGateResponse("UNDETERMINED", "NOT_ACTIVE_YET"),
+                        new RidePolicyOffRouteResponse("UNDETERMINED", "NOT_ACTIVE_YET", null, 50, 15, 30, null),
+                        new RidePolicyCompletionResponse("UNDETERMINED", "NOT_ACTIVE_YET", null, 80, null, null, null, null),
                         "PRE_START_ELIGIBLE",
                         "주행을 시작할 수 있습니다."
                 ));
@@ -64,6 +67,8 @@ class RidePolicyControllerTest {
                 .andExpect(jsonPath("$.message").value("success"))
                 .andExpect(jsonPath("$.data.phase").value("PRE_START"))
                 .andExpect(jsonPath("$.data.startGate.status").value("ELIGIBLE"))
+                .andExpect(jsonPath("$.data.offRoute.status").value("UNDETERMINED"))
+                .andExpect(jsonPath("$.data.completion.status").value("UNDETERMINED"))
                 .andExpect(jsonPath("$.data.startGate.distanceM").value(12))
                 .andExpect(jsonPath("$.data.startGate.thresholdM").value(50));
     }
