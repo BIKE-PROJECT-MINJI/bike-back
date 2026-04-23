@@ -48,7 +48,7 @@ class RidePolicyServiceTest {
     }
 
     @Test
-    @DisplayName("시작점 150m 이내면 PRE_START에서 시작 가능 판정을 응답한다")
+    @DisplayName("시작점 50m 이내면 PRE_START에서 시작 가능 판정을 응답한다")
     void evaluateReturnsEligibleAtPreStart() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
@@ -60,13 +60,16 @@ class RidePolicyServiceTest {
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("PRE_START", 37.5665, 126.9780, 18.5, "2026-03-29T10:15:19+09:00"));
 
         assertThat(response.startGate().status()).isEqualTo("ELIGIBLE");
+        assertThat(response.startGate().reasonCode()).isEqualTo("WITHIN_START_POINT_THRESHOLD");
+        assertThat(response.startGate().distanceM()).isNotNull();
+        assertThat(response.startGate().thresholdM()).isEqualTo(50);
         assertThat(response.offRoute().reasonCode()).isEqualTo("NOT_ACTIVE_YET");
         assertThat(response.overallState()).isEqualTo("PRE_START_ELIGIBLE");
     }
 
     @Test
-    @DisplayName("시작점에서 멀어도 경로 선분 150m 이내면 PRE_START에서 시작 가능 판정을 응답한다")
-    void evaluateReturnsEligibleWhenNearRouteSegment() {
+    @DisplayName("시작점에서 멀면 경로에 가까워도 PRE_START를 차단한다")
+    void evaluateBlocksWhenOnlyNearRouteSegment() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5900, 126.9900)));
         given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(
@@ -76,8 +79,11 @@ class RidePolicyServiceTest {
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("PRE_START", 37.5665, 126.9780, 18.5, "2026-03-29T10:15:19+09:00"));
 
-        assertThat(response.startGate().status()).isEqualTo("ELIGIBLE");
-        assertThat(response.overallState()).isEqualTo("PRE_START_ELIGIBLE");
+        assertThat(response.startGate().status()).isEqualTo("BLOCKED");
+        assertThat(response.startGate().reasonCode()).isEqualTo("START_POINT_THRESHOLD_EXCEEDED");
+        assertThat(response.startGate().distanceM()).isGreaterThan(50);
+        assertThat(response.startGate().thresholdM()).isEqualTo(50);
+        assertThat(response.overallState()).isEqualTo("PRE_START_BLOCKED");
     }
 
     @Test
@@ -105,6 +111,8 @@ class RidePolicyServiceTest {
 
         assertThat(response.offRoute().status()).isEqualTo("WARNING");
         assertThat(response.offRoute().reasonCode()).isEqualTo("OFF_ROUTE_THRESHOLD_EXCEEDED");
+        assertThat(response.offRoute().distanceM()).isGreaterThan(100);
+        assertThat(response.offRoute().thresholdM()).isEqualTo(100);
         assertThat(response.overallState()).isEqualTo("ACTIVE_WARNING");
     }
 

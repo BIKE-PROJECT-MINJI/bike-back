@@ -23,7 +23,7 @@ import org.springframework.stereotype.Service;
 public class RidePolicyService {
 
     private static final Logger log = LoggerFactory.getLogger(RidePolicyService.class);
-    private static final BigDecimal START_DISTANCE_THRESHOLD_M = BigDecimal.valueOf(150);
+    private static final BigDecimal START_DISTANCE_THRESHOLD_M = BigDecimal.valueOf(50);
     private static final BigDecimal PRE_START_ACCURACY_THRESHOLD_M = BigDecimal.valueOf(120);
     private static final long PRE_START_STALE_THRESHOLD_SECONDS = 60L;
     private static final BigDecimal ACTIVE_ACCURACY_THRESHOLD_M = BigDecimal.valueOf(50);
@@ -78,22 +78,33 @@ public class RidePolicyService {
             List<CourseRoutePointEntity> routePoints,
             RideLocationRequest location
     ) {
-        if (isWithinStartThreshold(course, location) || isWithinRouteThreshold(routePoints, location, START_DISTANCE_THRESHOLD_M)) {
+        BigDecimal startPointDistance = startPointDistanceMeters(course, location);
+        if (startPointDistance != null && startPointDistance.compareTo(START_DISTANCE_THRESHOLD_M) <= 0) {
             return new RidePolicyEvaluationResponse(
                     "PRE_START",
-                    new RidePolicyGateResponse("ELIGIBLE", "WITHIN_START_OR_ROUTE"),
+                    new RidePolicyGateResponse(
+                            "ELIGIBLE",
+                            "WITHIN_START_POINT_THRESHOLD",
+                            startPointDistance.intValue(),
+                            START_DISTANCE_THRESHOLD_M.intValue()
+                    ),
                     new RidePolicyGateResponse("UNDETERMINED", "NOT_ACTIVE_YET"),
                     "PRE_START_ELIGIBLE",
-                    "주행을 시작할 수 있습니다."
+                    "코스 시작점 근처이므로 주행을 시작할 수 있습니다."
             );
         }
 
         return new RidePolicyEvaluationResponse(
                 "PRE_START",
-                new RidePolicyGateResponse("BLOCKED", "TOO_FAR_FROM_COURSE"),
+                new RidePolicyGateResponse(
+                        "BLOCKED",
+                        "START_POINT_THRESHOLD_EXCEEDED",
+                        startPointDistance != null ? startPointDistance.intValue() : null,
+                        START_DISTANCE_THRESHOLD_M.intValue()
+                ),
                 new RidePolicyGateResponse("UNDETERMINED", "NOT_ACTIVE_YET"),
                 "PRE_START_BLOCKED",
-                "경로 인근에서 시작해야 합니다. 현재 위치가 선택한 코스와 너무 멉니다."
+                "코스 시작점 50m 이내에서만 주행을 시작할 수 있습니다. 시작점 근처로 이동해 주세요."
         );
     }
 
@@ -113,11 +124,17 @@ public class RidePolicyService {
             );
         }
 
-        if (isWithinRouteThreshold(routePoints, location, OFF_ROUTE_THRESHOLD_M)) {
+        BigDecimal routeDistance = minimumRouteDistanceMeters(routePoints, location);
+        if (routeDistance.compareTo(OFF_ROUTE_THRESHOLD_M) <= 0) {
             return new RidePolicyEvaluationResponse(
                     "ACTIVE",
                     new RidePolicyGateResponse("ELIGIBLE", "ALREADY_ACTIVE"),
-                    new RidePolicyGateResponse("ON_ROUTE", "WITHIN_ROUTE_THRESHOLD"),
+                    new RidePolicyGateResponse(
+                            "ON_ROUTE",
+                            "WITHIN_ROUTE_THRESHOLD",
+                            routeDistance.intValue(),
+                            OFF_ROUTE_THRESHOLD_M.intValue()
+                    ),
                     "ACTIVE_ON_ROUTE",
                     "현재 코스를 따라 주행 중입니다."
             );
@@ -126,7 +143,12 @@ public class RidePolicyService {
         return new RidePolicyEvaluationResponse(
                 "ACTIVE",
                 new RidePolicyGateResponse("ELIGIBLE", "ALREADY_ACTIVE"),
-                new RidePolicyGateResponse("WARNING", "OFF_ROUTE_THRESHOLD_EXCEEDED"),
+                new RidePolicyGateResponse(
+                        "WARNING",
+                        "OFF_ROUTE_THRESHOLD_EXCEEDED",
+                        routeDistance.intValue(),
+                        OFF_ROUTE_THRESHOLD_M.intValue()
+                ),
                 "ACTIVE_WARNING",
                 "경로를 벗어났습니다. 코스 라인으로 복귀하세요."
         );
@@ -169,23 +191,16 @@ public class RidePolicyService {
         return "ACTIVE".equals(phase) ? ACTIVE_STALE_THRESHOLD_SECONDS : PRE_START_STALE_THRESHOLD_SECONDS;
     }
 
-    private boolean isWithinStartThreshold(CourseEntity course, RideLocationRequest location) {
+    private BigDecimal startPointDistanceMeters(CourseEntity course, RideLocationRequest location) {
         if (course.getStartLatitude() == null || course.getStartLongitude() == null) {
-            return false;
+            return null;
         }
         return distanceMeters(
                 location.lat().doubleValue(),
                 location.lon().doubleValue(),
                 course.getStartLatitude().doubleValue(),
                 course.getStartLongitude().doubleValue()
-        ).compareTo(START_DISTANCE_THRESHOLD_M) <= 0;
-    }
-
-    private boolean isWithinRouteThreshold(List<CourseRoutePointEntity> routePoints, RideLocationRequest location, BigDecimal thresholdMeters) {
-        if (routePoints.isEmpty()) {
-            return false;
-        }
-        return minimumRouteDistanceMeters(routePoints, location).compareTo(thresholdMeters) <= 0;
+        );
     }
 
     private BigDecimal minimumRouteDistanceMeters(List<CourseRoutePointEntity> routePoints, RideLocationRequest location) {

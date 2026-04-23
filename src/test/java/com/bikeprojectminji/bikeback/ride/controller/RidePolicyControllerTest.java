@@ -40,7 +40,7 @@ class RidePolicyControllerTest {
         given(ridePolicyService.evaluate(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.any()))
                 .willReturn(new RidePolicyEvaluationResponse(
                         "PRE_START",
-                        new RidePolicyGateResponse("ELIGIBLE", "WITHIN_START_OR_ROUTE"),
+                        new RidePolicyGateResponse("ELIGIBLE", "WITHIN_START_POINT_THRESHOLD", 12, 50),
                         new RidePolicyGateResponse("UNDETERMINED", "NOT_ACTIVE_YET"),
                         "PRE_START_ELIGIBLE",
                         "주행을 시작할 수 있습니다."
@@ -63,6 +63,8 @@ class RidePolicyControllerTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.message").value("success"))
                 .andExpect(jsonPath("$.data.phase").value("PRE_START"))
-                .andExpect(jsonPath("$.data.startGate.status").value("ELIGIBLE"));
+                .andExpect(jsonPath("$.data.startGate.status").value("ELIGIBLE"))
+                .andExpect(jsonPath("$.data.startGate.distanceM").value(12))
+                .andExpect(jsonPath("$.data.startGate.thresholdM").value(50));
     }
 }
