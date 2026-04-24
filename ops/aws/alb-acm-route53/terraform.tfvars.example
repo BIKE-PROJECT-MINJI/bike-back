@@ -1,0 +1,23 @@
+aws_region                    = "ap-northeast-2"
+name_prefix                   = "bike-api"
+vpc_id                        = "vpc-xxxxxxxx"
+public_subnet_ids             = ["subnet-aaaaaaa", "subnet-bbbbbbb"]
+app_instance_id               = "i-xxxxxxxxxxxxxxxxx"
+app_instance_security_group_id = "sg-xxxxxxxxxxxxxxxxx"
+domain_name                   = "api.gajabike.shop"
+health_check_path             = "/health"
+app_port                      = 8080
+
+# Keep false when DNS stays in Gabia.
+create_route53_records        = false
+route53_hosted_zone_id        = null
+
+# Step 1: false  -> create cert request + HTTP listener only
+# Step 2: true   -> after ACM ISSUED, create HTTPS listener + HTTP redirect
+enable_https_listener         = false
+
+tags = {
+  Project = "bike"
+  Env     = "prod"
+  Owner   = "bike-team"
+}
