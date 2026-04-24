@@ -6,6 +6,7 @@ import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepository;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RideLocationRequest;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyCompletionResponse;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationRequest;
@@ -44,15 +45,18 @@ public class RidePolicyService {
 
     private final CourseRepository courseRepository;
     private final CourseRoutePointRepository courseRoutePointRepository;
+    private final BikeMetricsRecorder bikeMetricsRecorder;
     private final Clock clock;
 
     public RidePolicyService(
             CourseRepository courseRepository,
             CourseRoutePointRepository courseRoutePointRepository,
+            BikeMetricsRecorder bikeMetricsRecorder,
             Clock clock
     ) {
         this.courseRepository = courseRepository;
         this.courseRoutePointRepository = courseRoutePointRepository;
+        this.bikeMetricsRecorder = bikeMetricsRecorder;
         this.clock = clock;
     }
 
@@ -67,10 +71,12 @@ public class RidePolicyService {
         RideLocationRequest location = request.location();
 
         if (isLowAccuracy(phase, location)) {
+            bikeMetricsRecorder.recordRidePolicyUndetermined(phase, "low_accuracy");
             log.info("ride_policy_undetermined request_id={} reason=low_accuracy course_id={} phase={}", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), courseId, phase);
             return undeterminedResponse(phase, "LOCATION_LOW_ACCURACY", lowAccuracyMessage(phase));
         }
         if (isStale(phase, location)) {
+            bikeMetricsRecorder.recordRidePolicyUndetermined(phase, "stale_location");
             log.info("ride_policy_undetermined request_id={} reason=stale_location course_id={} phase={}", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), courseId, phase);
             return undeterminedResponse(phase, "LOCATION_STALE", staleMessage(phase));
         }
@@ -125,6 +131,7 @@ public class RidePolicyService {
             RidePolicyEvaluationRequest request
     ) {
         if (routePoints.isEmpty()) {
+            bikeMetricsRecorder.recordRidePolicyUndetermined("ACTIVE", "course_path_unavailable");
             log.warn("ride_policy_undetermined request_id={} reason=course_path_unavailable course_id={}", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), courseId);
             return new RidePolicyEvaluationResponse(
                     "ACTIVE",

@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.ride.service;
 
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordPointRequest;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
@@ -27,17 +28,20 @@ public class RideRecordFinalizationService {
     private final RideRecordPointRepository rideRecordPointRepository;
     private final RideRecordProcessedPointRepository rideRecordProcessedPointRepository;
     private final RideRouteCanonicalizer rideRouteCanonicalizer;
+    private final BikeMetricsRecorder bikeMetricsRecorder;
 
     public RideRecordFinalizationService(
             RideRecordRepository rideRecordRepository,
             RideRecordPointRepository rideRecordPointRepository,
             RideRecordProcessedPointRepository rideRecordProcessedPointRepository,
-            RideRouteCanonicalizer rideRouteCanonicalizer
+            RideRouteCanonicalizer rideRouteCanonicalizer,
+            BikeMetricsRecorder bikeMetricsRecorder
     ) {
         this.rideRecordRepository = rideRecordRepository;
         this.rideRecordPointRepository = rideRecordPointRepository;
         this.rideRecordProcessedPointRepository = rideRecordProcessedPointRepository;
         this.rideRouteCanonicalizer = rideRouteCanonicalizer;
+        this.bikeMetricsRecorder = bikeMetricsRecorder;
     }
 
     @Async
@@ -90,6 +94,7 @@ public class RideRecordFinalizationService {
         } catch (Exception exception) {
             rideRecord.markFailed(OffsetDateTime.now(), exception.getMessage());
             rideRecordRepository.save(rideRecord);
+            bikeMetricsRecorder.recordRideRecordFinalizationFailure();
             log.error("ride_record_finalization_failed request_id={} ride_record_id={}", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), rideRecordId, exception);
         }
     }

@@ -25,6 +25,7 @@ import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import java.math.RoundingMode;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepository;
@@ -55,6 +56,7 @@ public class CourseService {
     private final RideRecordPointRepository rideRecordPointRepository;
     private final RideRecordProcessedPointRepository rideRecordProcessedPointRepository;
     private final AuthService authService;
+    private final BikeMetricsRecorder bikeMetricsRecorder;
 
     public CourseService(
             CourseRepository courseRepository,
@@ -62,7 +64,8 @@ public class CourseService {
             RideRecordRepository rideRecordRepository,
             RideRecordPointRepository rideRecordPointRepository,
             RideRecordProcessedPointRepository rideRecordProcessedPointRepository,
-            AuthService authService
+            AuthService authService,
+            BikeMetricsRecorder bikeMetricsRecorder
     ) {
         this.courseRepository = courseRepository;
         this.courseRoutePointRepository = courseRoutePointRepository;
@@ -70,6 +73,7 @@ public class CourseService {
         this.rideRecordPointRepository = rideRecordPointRepository;
         this.rideRecordProcessedPointRepository = rideRecordProcessedPointRepository;
         this.authService = authService;
+        this.bikeMetricsRecorder = bikeMetricsRecorder;
     }
 
     public CourseListResponse getCourses(Long cursor, Integer limit) {
@@ -130,12 +134,14 @@ public class CourseService {
         // 위치가 있으면 거리 기준 정렬, 없으면 fallback 순서로 제한된 개수만 노출한다.
         List<CourseEntity> featuredCourses = courseRepository.findFeaturedCourses();
         if (featuredCourses.isEmpty()) {
+            bikeMetricsRecorder.recordFeaturedCoursesFallback("no_curated_courses");
             log.info("featured_courses_fallback request_id={} reason=no_curated_courses", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId());
             return new FeaturedCourseResponse("fallback", List.of());
         }
 
         boolean distanceMode = lat != null && lon != null;
         if (!distanceMode) {
+            bikeMetricsRecorder.recordFeaturedCoursesFallback("missing_location_parameters");
             log.info("featured_courses_fallback request_id={} reason=missing_location_parameters", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId());
         }
         List<FeaturedCourseItemResponse> items = (distanceMode ? featuredCourses.stream()

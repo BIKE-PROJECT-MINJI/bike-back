@@ -10,6 +10,7 @@ import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationRespons
 import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
 import com.bikeprojectminji.bikeback.course.entity.CourseRoutePointEntity;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepository;
 import java.math.BigDecimal;
@@ -37,6 +38,9 @@ class RidePolicyServiceTest {
     @Mock
     private CourseRoutePointRepository courseRoutePointRepository;
 
+    @Mock
+    private BikeMetricsRecorder bikeMetricsRecorder;
+
     private RidePolicyService ridePolicyService;
 
     @BeforeEach
@@ -44,6 +48,7 @@ class RidePolicyServiceTest {
         ridePolicyService = new RidePolicyService(
                 courseRepository,
                 courseRoutePointRepository,
+                bikeMetricsRecorder,
                 Clock.fixed(Instant.parse("2026-03-29T01:15:30Z"), ZoneOffset.UTC)
         );
     }
