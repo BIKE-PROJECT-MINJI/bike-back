@@ -33,6 +33,58 @@ services:
       timeout: 5s
       retries: 20
 
+  postgres_exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter
+    container_name: bike-back-postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://bike:bike@postgres:5432/bike?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis_exporter:
+    image: oliver006/redis_exporter
+    container_name: bike-back-redis-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus
+    container_name: bike-back-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./ops/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - postgres_exporter
+      - redis_exporter
+
+  grafana:
+    image: grafana/grafana-oss
+    container_name: bike-back-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - bike_back_grafana_data:/var/lib/grafana
+      - ./ops/observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./ops/observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./ops/observability/grafana/dashboards:/var/lib/grafana/dashboards/bike:ro
+    depends_on:
+      - prometheus
+
 volumes:
   bike_back_postgres_data:
   bike_back_redis_data:
+  bike_back_grafana_data:
