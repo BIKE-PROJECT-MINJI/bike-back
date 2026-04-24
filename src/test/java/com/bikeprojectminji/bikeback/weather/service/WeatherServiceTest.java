@@ -3,9 +3,12 @@ package com.bikeprojectminji.bikeback.weather.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
 import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
 import com.bikeprojectminji.bikeback.weather.dto.WindData;
@@ -15,9 +18,12 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -31,15 +37,29 @@ class WeatherServiceTest {
     @Mock
     private LastSuccessWeatherStore lastSuccessWeatherStore;
 
+    @Mock
+    private BikeMetricsRecorder bikeMetricsRecorder;
+
+    private ExecutorService weatherProviderExecutor;
+
     private WeatherService weatherService;
 
     @BeforeEach
     void setUp() {
+        weatherProviderExecutor = Executors.newSingleThreadExecutor();
         weatherService = new WeatherService(
                 weatherProviderPort,
                 lastSuccessWeatherStore,
+                bikeMetricsRecorder,
+                weatherProviderExecutor,
+                900,
                 Clock.fixed(Instant.parse("2026-03-29T01:20:00Z"), ZoneOffset.UTC)
         );
+    }
+
+    @AfterEach
+    void tearDown() {
+        weatherProviderExecutor.shutdownNow();
     }
 
     @Test
@@ -60,13 +80,32 @@ class WeatherServiceTest {
     @DisplayName("provider 실패 시 60분 이내 마지막 성공값이 있으면 stale=true로 응답한다")
     void getCurrentReturnsStaleFallbackResponse() {
         WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
-        given(weatherProviderPort.getCurrent(key)).willReturn(WeatherProviderResult.failure());
+        lenient().when(weatherProviderPort.getCurrent(key)).thenReturn(WeatherProviderResult.failure());
         given(lastSuccessWeatherStore.find(key)).willReturn(Optional.of(snapshot(true, "2026-03-29T09:40:00+09:00")));
 
         CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
 
         assertThat(response.stale()).isTrue();
         assertThat(response.forecastFallbackUsed()).isTrue();
+    }
+
+    @Test
+    @DisplayName("유효한 last-success가 있으면 stale 응답을 먼저 반환하고 provider refresh는 비동기로 수행한다")
+    void getCurrentReturnsStaleFirstAndRefreshesAsync() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        WeatherSnapshot staleSnapshot = snapshot(true, "2026-03-29T09:40:00+09:00");
+        WeatherSnapshot refreshedSnapshot = snapshot(false, "2026-03-29T10:19:00+09:00");
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.of(staleSnapshot));
+        given(weatherProviderPort.getCurrent(key)).willAnswer(invocation -> {
+            Thread.sleep(150);
+            return WeatherProviderResult.success(refreshedSnapshot);
+        });
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.stale()).isTrue();
+        assertThat(response.forecastFallbackUsed()).isTrue();
+        verify(lastSuccessWeatherStore, timeout(1000)).save(key, refreshedSnapshot);
     }
 
     @Test
@@ -91,6 +130,34 @@ class WeatherServiceTest {
         assertThatThrownBy(() -> weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("현재 날씨 정보를 사용할 수 없습니다.");
+    }
+
+    @Test
+    @DisplayName("provider 총 요청 시간이 초과되면 60분 이내 마지막 성공값으로 fallback한다")
+    void getCurrentReturnsStaleFallbackWhenProviderTimesOut() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        weatherService = new WeatherService(
+                locationKey -> {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        return WeatherProviderResult.failure();
+                    }
+                    return WeatherProviderResult.success(snapshot(false, "2026-03-29T10:19:00+09:00"));
+                },
+                lastSuccessWeatherStore,
+                bikeMetricsRecorder,
+                weatherProviderExecutor,
+                50,
+                Clock.fixed(Instant.parse("2026-03-29T01:20:00Z"), ZoneOffset.UTC)
+        );
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.of(snapshot(true, "2026-03-29T09:40:00+09:00")));
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.stale()).isTrue();
+        assertThat(response.forecastFallbackUsed()).isTrue();
     }
 
     private WeatherSnapshot snapshot(boolean forecastFallbackUsed, String lastSucceededAt) {

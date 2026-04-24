@@ -13,24 +13,49 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.client.RestClient;
 
 @Component
 public class OpenMeteoWeatherProvider implements WeatherProviderPort {
 
     private static final Logger log = LoggerFactory.getLogger(OpenMeteoWeatherProvider.class);
+    private static final int DEFAULT_CONNECT_TIMEOUT_MS = 300;
+    private static final int DEFAULT_READ_TIMEOUT_MS = 1000;
 
     private final RestClient restClient;
     private final Clock clock;
 
+    @Autowired
+    public OpenMeteoWeatherProvider(
+            RestClient.Builder restClientBuilder,
+            Clock clock,
+            @Value("${weather.provider.open-meteo.connect-timeout-ms:" + DEFAULT_CONNECT_TIMEOUT_MS + "}") int connectTimeoutMs,
+            @Value("${weather.provider.open-meteo.read-timeout-ms:" + DEFAULT_READ_TIMEOUT_MS + "}") int readTimeoutMs
+    ) {
+        this(
+                restClientBuilder
+                        .baseUrl("https://api.open-meteo.com")
+                        .requestFactory(WeatherRequestFactoryFactory.create(connectTimeoutMs, readTimeoutMs))
+                        .build(),
+                clock
+        );
+    }
+
     public OpenMeteoWeatherProvider(RestClient.Builder restClientBuilder, Clock clock) {
-        this.restClient = restClientBuilder.baseUrl("https://api.open-meteo.com").build();
+        this(restClientBuilder, clock, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_READ_TIMEOUT_MS);
+    }
+
+    OpenMeteoWeatherProvider(RestClient restClient, Clock clock) {
+        this.restClient = restClient;
         this.clock = clock;
     }
 
     @Override
     public WeatherProviderResult getCurrent(WeatherLocationKey locationKey) {
+        long startedAtNanos = System.nanoTime();
         try {
             OpenMeteoForecastResponse response = restClient.get()
                     .uri(uriBuilder -> uriBuilder
@@ -46,18 +71,59 @@ public class OpenMeteoWeatherProvider implements WeatherProviderPort {
                     .body(OpenMeteoForecastResponse.class);
 
             if (response == null) {
+                log.info(
+                        "weather_provider_result request_id={} lat={} lon={} outcome=failure reason=null_response duration_ms={}",
+                        com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(),
+                        locationKey.lat(),
+                        locationKey.lon(),
+                        toDurationMs(startedAtNanos)
+                );
                 return WeatherProviderResult.failure();
             }
 
             WeatherSnapshot currentSnapshot = mapCurrent(response.current());
             if (currentSnapshot != null) {
+                log.info(
+                        "weather_provider_result request_id={} lat={} lon={} outcome=success source=current duration_ms={} forecast_fallback_used={}",
+                        com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(),
+                        locationKey.lat(),
+                        locationKey.lon(),
+                        toDurationMs(startedAtNanos),
+                        currentSnapshot.forecastFallbackUsed()
+                );
                 return WeatherProviderResult.success(currentSnapshot);
             }
 
             WeatherSnapshot fallbackSnapshot = mapFallback(response.hourly());
-            return fallbackSnapshot != null ? WeatherProviderResult.success(fallbackSnapshot) : WeatherProviderResult.failure();
+            if (fallbackSnapshot != null) {
+                log.info(
+                        "weather_provider_result request_id={} lat={} lon={} outcome=success source=hourly_fallback duration_ms={} forecast_fallback_used={}",
+                        com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(),
+                        locationKey.lat(),
+                        locationKey.lon(),
+                        toDurationMs(startedAtNanos),
+                        fallbackSnapshot.forecastFallbackUsed()
+                );
+                return WeatherProviderResult.success(fallbackSnapshot);
+            }
+
+            log.info(
+                    "weather_provider_result request_id={} lat={} lon={} outcome=failure reason=no_usable_payload duration_ms={}",
+                    com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(),
+                    locationKey.lat(),
+                    locationKey.lon(),
+                    toDurationMs(startedAtNanos)
+            );
+            return WeatherProviderResult.failure();
         } catch (RuntimeException exception) {
-            log.warn("weather provider failure lat={} lon={}", locationKey.lat(), locationKey.lon(), exception);
+            log.warn(
+                    "weather provider failure request_id={} lat={} lon={} duration_ms={}",
+                    com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(),
+                    locationKey.lat(),
+                    locationKey.lon(),
+                    toDurationMs(startedAtNanos),
+                    exception
+            );
             return WeatherProviderResult.failure();
         }
     }
@@ -149,5 +215,9 @@ public class OpenMeteoWeatherProvider implements WeatherProviderPort {
         String[] directions = {"북", "북동", "동", "남동", "남", "남서", "서", "북서"};
         int index = (int) Math.round(((degree % 360) / 45.0)) % 8;
         return directions[index];
+    }
+
+    private long toDurationMs(long startedAtNanos) {
+        return (System.nanoTime() - startedAtNanos) / 1_000_000;
     }
 }
