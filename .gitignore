@@ -44,3 +44,6 @@ ops/aws/alb-acm-route53/terraform.tfvars.discovered
 
 # Local verification artifacts
 smoke-check-file-summary.json
+
+# Load test generated artifacts
+ops/loadtest/results/
