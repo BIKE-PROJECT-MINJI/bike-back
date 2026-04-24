@@ -71,7 +71,7 @@
       "properties": {
         "region": "ap-northeast-2",
         "title": "nginx access recent",
-        "query": "SOURCE '/bike/nginx/access' | fields @timestamp, @message | sort @timestamp desc | limit 50",
+      "query": "SOURCE '/bike-back/nginx/access' | fields @timestamp, @message | sort @timestamp desc | limit 50",
         "view": "table"
       }
     },
@@ -84,7 +84,7 @@
       "properties": {
         "region": "ap-northeast-2",
         "title": "backend app recent",
-        "query": "SOURCE '/bike/app/backend' | fields @timestamp, @message | sort @timestamp desc | limit 50",
+      "query": "SOURCE '/bike-back/app' | fields @timestamp, @message | sort @timestamp desc | limit 50",
         "view": "table"
       }
     },
@@ -97,7 +97,7 @@
       "properties": {
         "region": "ap-northeast-2",
         "title": "4xx / 5xx access log filter",
-        "query": "SOURCE '/bike/nginx/access' | filter @message like /\"status\":4/ or @message like /\"status\":5/ | fields @timestamp, @message | sort @timestamp desc | limit 100",
+      "query": "SOURCE '/bike-back/nginx/access' | filter @message like /\"status\":4/ or @message like /\"status\":5/ | fields @timestamp, @message | sort @timestamp desc | limit 100",
         "view": "table"
       }
     },
@@ -110,7 +110,7 @@
       "properties": {
         "region": "ap-northeast-2",
         "title": "fallback / paused / failure app logs",
-        "query": "SOURCE '/bike/app/backend' | filter @message like /fallback/ or @message like /paused/ or @message like /failed/ or @message like /unexpected_error/ | fields @timestamp, @message | sort @timestamp desc | limit 100",
+      "query": "SOURCE '/bike-back/app' | filter @message like /fallback/ or @message like /paused/ or @message like /failed/ or @message like /unexpected_error/ | fields @timestamp, @message | sort @timestamp desc | limit 100",
         "view": "table"
       }
     }

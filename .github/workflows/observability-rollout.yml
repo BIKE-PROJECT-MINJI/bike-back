@@ -16,7 +16,7 @@ on:
       app_log_file:
         description: "Application log file path expected by CloudWatch Agent"
         required: true
-        default: "/var/log/bike-back/application.log"
+        default: "/opt/bike-back/shared/logs/app.log"
         type: string
 
 permissions:

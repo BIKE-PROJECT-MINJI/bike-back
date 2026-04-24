@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: bike-observability
+    orgId: 1
+    folder: BIKE
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards/bike
