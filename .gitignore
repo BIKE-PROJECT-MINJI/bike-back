@@ -35,3 +35,12 @@ out/
 
 ### VS Code ###
 .vscode/
+# Terraform local state
+ops/aws/alb-acm-route53/.terraform/
+ops/aws/alb-acm-route53/.terraform.lock.hcl
+ops/aws/alb-acm-route53/terraform.tfstate
+ops/aws/alb-acm-route53/terraform.tfstate.backup
+ops/aws/alb-acm-route53/terraform.tfvars.discovered
+
+# Local verification artifacts
+smoke-check-file-summary.json
