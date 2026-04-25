@@ -1,0 +1,106 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (uri) (rate(http_server_requests_seconds_count{uri!~\"/health|/health/monitor|UNKNOWN\"}[5m]))", "legendFormat": "{{uri}}", "range": true, "refId": "A" }
+      ],
+      "title": "엔드포인트별 요청량",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (uri,le) (rate(http_server_requests_seconds_bucket{uri!~\"/health|/health/monitor|UNKNOWN\"}[5m])))", "legendFormat": "{{uri}} p95", "range": true, "refId": "A" }
+      ],
+      "title": "엔드포인트별 latency p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum(rate(http_server_requests_seconds_count{status=~\"2..\"}[5m]))", "legendFormat": "2xx 요청량", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum(rate(http_server_requests_seconds_count{status=~\"4..\"}[5m]))", "legendFormat": "4xx 요청량", "range": true, "refId": "B" },
+        { "editorMode": "code", "expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m]))", "legendFormat": "5xx 요청량", "range": true, "refId": "C" }
+      ],
+      "title": "응답 코드별 요청량",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum(rate(http_server_requests_seconds_count{status=~\"4..\"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 0.0001)", "legendFormat": "4xx 비율", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 0.0001)", "legendFormat": "5xx 비율", "range": true, "refId": "B" }
+      ],
+      "title": "오류율",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "jvm_memory_used_bytes{area=\"heap\"}", "legendFormat": "{{id}}", "range": true, "refId": "A" }
+      ],
+      "title": "JVM 힙 사용량",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "jvm_threads_live_threads", "legendFormat": "live", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "jvm_threads_daemon_threads", "legendFormat": "daemon", "range": true, "refId": "B" }
+      ],
+      "title": "JVM 스레드",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "hikaricp_connections_active", "legendFormat": "active", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "hikaricp_connections_pending", "legendFormat": "pending", "range": true, "refId": "B" }
+      ],
+      "title": "커넥션 풀",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["bike", "app", "api"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "BIKE 애플리케이션 대시보드",
+  "version": 1
+}

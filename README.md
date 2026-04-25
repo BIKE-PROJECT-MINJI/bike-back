@@ -103,6 +103,36 @@ com.bikeprojectminji.bikeback
 ./gradlew.bat bootRun
 ```
 
+### Local observability (Grafana + Prometheus)
+
+내부지표 관제용 로컬 기본 경로는 아래다.
+
+1. backend 앱 기동
+   - management port는 기본 `18081`
+   - Prometheus scrape endpoint는 `http://localhost:18081/actuator/prometheus`
+2. observability 스택 기동
+   - `docker-compose.local.yml`의 `prometheus`, `grafana`, `postgres_exporter`, `redis_exporter` 사용
+3. Grafana 접속
+   - 기본 URL: `http://localhost:3000`
+4. Prometheus 접속
+   - 기본 URL: `http://localhost:9090`
+
+#### WSL + Windows Docker Desktop fallback
+
+이 저장소는 WSL 작업을 기본으로 하지만, Docker daemon은 Windows Docker Desktop을 사용할 수 있다.
+
+```bash
+./gradlew bootRun &
+cmd.exe /c docker compose -f docker-compose.local.yml up -d prometheus grafana postgres_exporter redis_exporter
+```
+
+#### 확인 포인트
+
+- `http://localhost:18081/actuator/prometheus`가 열리는가
+- Grafana에 `BIKE API Overview`, `BIKE Data Platform Overview`, `BIKE Load Validation Prep` 대시보드가 보이는가
+- Prometheus target에서 app / postgres_exporter / redis_exporter / prometheus가 `UP`으로 잡히는가
+- `/health`, `/health/monitor`는 기존 운영 확인 경로로 계속 유지되는가
+
 ## Verification policy
 
 - 기능 추가/수정 시 검증 테스트를 함께 작성합니다.

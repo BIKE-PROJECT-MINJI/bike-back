@@ -6,6 +6,7 @@ import static org.mockito.BDDMockito.given;
 import com.bikeprojectminji.bikeback.course.dto.FeaturedCourseResponse;
 import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
+import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
@@ -22,6 +23,9 @@ class FeaturedCourseServiceTest {
 
     @Mock
     private CourseRepository courseRepository;
+
+    @Mock
+    private BikeMetricsRecorder bikeMetricsRecorder;
 
     @InjectMocks
     private CourseService courseService;

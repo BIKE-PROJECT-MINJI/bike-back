@@ -1,0 +1,15 @@
+[Unit]
+Description=BIKE observability stack
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/bike-observability
+ExecStart=/usr/bin/docker compose --env-file /opt/bike-observability/.env -f /opt/bike-observability/docker-compose.observability.yml up -d
+ExecStop=/usr/bin/docker compose --env-file /opt/bike-observability/.env -f /opt/bike-observability/docker-compose.observability.yml down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,67 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "content": "# 로그 탐색 진입면\n현재 BIKE 운영 로그의 원본 탐색은 **CloudWatch Logs Insights** 기준입니다.\nGrafana는 메트릭에서 이상 징후를 먼저 보고, 아래 패턴으로 CloudWatch에서 원인을 좁혀갑니다.\n\n- `request_id` 로 nginx/app 로그 상관 조회\n- `fallback`, `failed`, `undetermined`, `unexpected_error` 검색\n- 4xx/5xx 급증 시 해당 시간대 API와 request_id 흐름 추적\n- `/health`, `/health/monitor` 실패 시 직전 에러 로그 확인",
+        "mode": "markdown"
+      },
+      "title": "운영 로그 탐색 가이드",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum(rate(http_server_requests_seconds_count{status=~\"4..\"}[5m]))", "legendFormat": "4xx 요청량", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m]))", "legendFormat": "5xx 요청량", "range": true, "refId": "B" }
+      ],
+      "title": "에러 요청량 추세",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "id": 3,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (uri) (rate(http_server_requests_seconds_count{status=~\"4..|5..\",uri!~\"/health|/health/monitor|UNKNOWN\"}[5m]))", "legendFormat": "{{uri}}", "range": true, "refId": "A" }
+      ],
+      "title": "에러 응답 엔드포인트",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (reason) (increase(bike_featured_courses_fallback_total[1h]))", "legendFormat": "featured fallback / {{reason}}", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum by (phase, reason) (increase(bike_ride_policy_undetermined_total[1h]))", "legendFormat": "policy / {{phase}} / {{reason}}", "range": true, "refId": "B" },
+        { "editorMode": "code", "expr": "increase(bike_ride_record_finalization_failed_total[1h])", "legendFormat": "기록 확정 실패", "range": true, "refId": "C" }
+      ],
+      "title": "원인 파악용 이상 이벤트",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["bike", "logs", "incident"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "BIKE 로그 탐색 대시보드",
+  "version": 1
+}

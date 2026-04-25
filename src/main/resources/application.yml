@@ -25,6 +25,27 @@ spring:
 server:
   port: ${PORT:8080}
 
+management:
+  server:
+    port: ${MANAGEMENT_PORT:18081}
+    address: ${MANAGEMENT_SERVER_ADDRESS:0.0.0.0}
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http:
+          server:
+            requests: true
+
 auth:
   jwt:
     secret: ${AUTH_JWT_SECRET}

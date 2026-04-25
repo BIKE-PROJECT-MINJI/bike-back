@@ -1,0 +1,62 @@
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: bike-observability-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - postgres_exporter
+      - redis_exporter
+
+  grafana:
+    image: grafana/grafana-oss:12.1.1
+    container_name: bike-observability-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN:?set GRAFANA_DOMAIN}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-https://${GRAFANA_DOMAIN}}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards/bike:ro
+    depends_on:
+      - prometheus
+
+  postgres_exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
+    container_name: bike-observability-postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DSN:?set POSTGRES_EXPORTER_DSN}
+    ports:
+      - "127.0.0.1:9187:9187"
+
+  redis_exporter:
+    image: oliver006/redis_exporter:v1.75.0
+    container_name: bike-observability-redis-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: ${REDIS_EXPORTER_ADDR:?set REDIS_EXPORTER_ADDR}
+      REDIS_EXPORTER_SKIP_TLS_VERIFICATION: ${REDIS_EXPORTER_SKIP_TLS_VERIFICATION:-false}
+    ports:
+      - "127.0.0.1:9121:9121"
+
+volumes:
+  prometheus_data:
+  grafana_data:
