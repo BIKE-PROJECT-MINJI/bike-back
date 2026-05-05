@@ -23,6 +23,14 @@ jobs:
 
       - name: Install k6
         run: |
+          set -euo pipefail
+          K6_VERSION="v0.52.0"
+          ARCH="amd64"
+          mkdir -p /tmp/k6
+          curl -fsSL "https://github.com/grafana/k6/releases/download/${K6_VERSION}/k6-${K6_VERSION}-linux-${ARCH}.tar.gz" | tar -xz -C /tmp/k6 --strip-components=1
+          sudo mv /tmp/k6/k6 /usr/local/bin/k6
+          k6 version
+        run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq gpg
           sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
