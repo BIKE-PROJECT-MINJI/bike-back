@@ -23,7 +23,7 @@ public class OpenMeteoWeatherProvider implements WeatherProviderPort {
 
     private static final Logger log = LoggerFactory.getLogger(OpenMeteoWeatherProvider.class);
     private static final int DEFAULT_CONNECT_TIMEOUT_MS = 300;
-    private static final int DEFAULT_READ_TIMEOUT_MS = 1000;
+    private static final int DEFAULT_READ_TIMEOUT_MS = 1200;
 
     private final RestClient restClient;
     private final Clock clock;
@@ -129,7 +129,7 @@ public class OpenMeteoWeatherProvider implements WeatherProviderPort {
     }
 
     private WeatherSnapshot mapCurrent(OpenMeteoForecastResponse.Current current) {
-        if (current == null || current.temperatureC() == null || current.windSpeedKmh() == null || current.windDirectionDeg() == null) {
+        if (current == null || current.temperatureC() == null || current.windSpeedKmh() == null) {
             return null;
         }
 
@@ -154,15 +154,16 @@ public class OpenMeteoWeatherProvider implements WeatherProviderPort {
             index = 0;
         }
 
-        if (!hasHourlyValue(hourly.temperatureC(), index) || !hasHourlyValue(hourly.windSpeedKmh(), index) || !hasHourlyValue(hourly.windDirectionDeg(), index)) {
+        if (!hasHourlyValue(hourly.temperatureC(), index) || !hasHourlyValue(hourly.windSpeedKmh(), index)) {
             return null;
         }
 
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         Integer weatherCode = hasHourlyValue(hourly.weatherCode(), index) ? hourly.weatherCode().get(index) : null;
+        Integer windDirectionDeg = hasHourlyValue(hourly.windDirectionDeg(), index) ? hourly.windDirectionDeg().get(index) : null;
         return new WeatherSnapshot(
                 new WeatherData((int) Math.round(hourly.temperatureC().get(index)), mapSky(weatherCode), mapPrecipType(weatherCode)),
-                new WindData((int) Math.round(hourly.windSpeedKmh().get(index)), toDirectionText(hourly.windDirectionDeg().get(index)), hourly.windDirectionDeg().get(index)),
+                new WindData((int) Math.round(hourly.windSpeedKmh().get(index)), toDirectionText(windDirectionDeg), windDirectionDeg),
                 true,
                 target,
                 now

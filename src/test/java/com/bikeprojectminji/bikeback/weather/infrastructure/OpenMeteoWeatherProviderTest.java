@@ -63,6 +63,31 @@ class OpenMeteoWeatherProviderTest {
     }
 
     @Test
+    @DisplayName("current 풍향 degree가 비어도 provider는 현재 시점 snapshot을 반환한다")
+    void getCurrentReturnsCurrentSnapshotWhenWindDirectionMissing() {
+        mockServer.expect(requestTo(weatherForecastRequestMatcher()))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {
+                          "current": {
+                            "temperature_2m": 12.4,
+                            "weather_code": 0,
+                            "wind_speed_10m": 14.1
+                          }
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        WeatherProviderResult result = openMeteoWeatherProvider.getCurrent(locationKey());
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.snapshot()).isNotNull();
+        assertThat(result.snapshot().wind().speedKmh()).isEqualTo(14);
+        assertThat(result.snapshot().wind().directionText()).isEqualTo("알 수 없음");
+        assertThat(result.snapshot().wind().directionDeg()).isNull();
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("current 데이터가 비어 있으면 hourly fallback snapshot을 반환한다")
     void getCurrentReturnsHourlyFallbackSnapshot() {
         mockServer.expect(requestTo(weatherForecastRequestMatcher()))
@@ -86,6 +111,34 @@ class OpenMeteoWeatherProviderTest {
         assertThat(result.snapshot()).isNotNull();
         assertThat(result.snapshot().forecastFallbackUsed()).isTrue();
         assertThat(result.snapshot().weather().precipType()).isEqualTo("rain");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("hourly fallback 풍향 degree가 비어도 provider는 fallback snapshot을 반환한다")
+    void getCurrentReturnsHourlyFallbackSnapshotWhenWindDirectionMissing() {
+        mockServer.expect(requestTo(weatherForecastRequestMatcher()))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {
+                          "current": {},
+                          "hourly": {
+                            "time": ["2026-04-23T20:00"],
+                            "temperature_2m": [18.1],
+                            "weather_code": [61],
+                            "wind_speed_10m": [19.2]
+                          }
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        WeatherProviderResult result = openMeteoWeatherProvider.getCurrent(locationKey());
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.snapshot()).isNotNull();
+        assertThat(result.snapshot().forecastFallbackUsed()).isTrue();
+        assertThat(result.snapshot().wind().speedKmh()).isEqualTo(19);
+        assertThat(result.snapshot().wind().directionText()).isEqualTo("알 수 없음");
+        assertThat(result.snapshot().wind().directionDeg()).isNull();
         mockServer.verify();
     }
 
