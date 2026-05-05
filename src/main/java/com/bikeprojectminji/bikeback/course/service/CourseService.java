@@ -57,6 +57,7 @@ public class CourseService {
     private final RideRecordProcessedPointRepository rideRecordProcessedPointRepository;
     private final AuthService authService;
     private final BikeMetricsRecorder bikeMetricsRecorder;
+    private final CourseRouteSnapshotService courseRouteSnapshotService;
 
     public CourseService(
             CourseRepository courseRepository,
@@ -65,7 +66,8 @@ public class CourseService {
             RideRecordPointRepository rideRecordPointRepository,
             RideRecordProcessedPointRepository rideRecordProcessedPointRepository,
             AuthService authService,
-            BikeMetricsRecorder bikeMetricsRecorder
+            BikeMetricsRecorder bikeMetricsRecorder,
+            CourseRouteSnapshotService courseRouteSnapshotService
     ) {
         this.courseRepository = courseRepository;
         this.courseRoutePointRepository = courseRoutePointRepository;
@@ -74,6 +76,7 @@ public class CourseService {
         this.rideRecordProcessedPointRepository = rideRecordProcessedPointRepository;
         this.authService = authService;
         this.bikeMetricsRecorder = bikeMetricsRecorder;
+        this.courseRouteSnapshotService = courseRouteSnapshotService;
     }
 
     public CourseListResponse getCourses(Long cursor, Integer limit) {
@@ -118,13 +121,7 @@ public class CourseService {
         // 경로 포인트 조회도 상세 조회와 같은 읽기 권한 규칙을 그대로 따른다.
         CourseEntity course = findReadableCourse(courseId, subject, shareToken);
 
-        List<CourseRoutePointResponse> points = courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(course.getId()).stream()
-                .map(routePoint -> new CourseRoutePointResponse(
-                        routePoint.getPointOrder(),
-                        routePoint.getLatitude(),
-                        routePoint.getLongitude()
-                ))
-                .toList();
+        List<CourseRoutePointResponse> points = courseRouteSnapshotService.get(course.getId(), "route_points").responsePoints();
 
         return new CourseRoutePointsResponse(course.getId(), points);
     }
@@ -215,6 +212,7 @@ public class CourseService {
                 .map(point -> new CourseRoutePointEntity(savedCourse.getId(), point.getPointOrder(), point.getLatitude(), point.getLongitude()))
                 .toList();
         courseRoutePointRepository.saveAll(courseRoutePoints);
+        courseRouteSnapshotService.evict(savedCourse.getId(), "course_created");
 
         return toCourseWriteResponse(savedCourse);
     }
@@ -236,6 +234,7 @@ public class CourseService {
                     .map(point -> new CourseRoutePointEntity(courseId, point.pointOrder(), point.latitude(), point.longitude()))
                     .toList());
             course.updateStartCoordinates(routePoints.get(0).latitude(), routePoints.get(0).longitude());
+            courseRouteSnapshotService.evict(courseId, "route_points_updated");
         }
 
         return toCourseWriteResponse(courseRepository.save(course));
@@ -275,13 +274,7 @@ public class CourseService {
 
     public CourseDownloadResponse downloadCourse(Long courseId, String subject, String shareToken) {
         CourseEntity course = findReadableCourse(courseId, subject, shareToken);
-        List<CourseRoutePointResponse> routePoints = courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(course.getId()).stream()
-                .map(routePoint -> new CourseRoutePointResponse(
-                        routePoint.getPointOrder(),
-                        routePoint.getLatitude(),
-                        routePoint.getLongitude()
-                ))
-                .toList();
+        List<CourseRoutePointResponse> routePoints = courseRouteSnapshotService.get(course.getId(), "course_download").responsePoints();
 
         return new CourseDownloadResponse(course.getId(), course.getTitle(), course.getVisibility().name(), routePoints);
     }

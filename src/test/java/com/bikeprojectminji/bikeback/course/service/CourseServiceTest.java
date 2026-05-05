@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseShareResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseDownloadResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointResponse;
 import com.bikeprojectminji.bikeback.course.dto.CreateCourseFromRideRecordRequest;
 import com.bikeprojectminji.bikeback.course.dto.UpdateCourseVisibilityRequest;
 import com.bikeprojectminji.bikeback.course.dto.CourseDetailResponse;
@@ -62,6 +63,9 @@ class CourseServiceTest {
     @Mock
     private AuthService authService;
 
+    @Mock
+    private CourseRouteSnapshotService courseRouteSnapshotService;
+
     @InjectMocks
     private CourseService courseService;
 
@@ -103,10 +107,10 @@ class CourseServiceTest {
         ReflectionTestUtils.setField(entity, "id", 7L);
         ReflectionTestUtils.setField(entity, "visibility", CourseVisibility.PUBLIC);
         given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(7L)).willReturn(List.of(
+        given(courseRouteSnapshotService.get(7L, "route_points")).willReturn(snapshot(7L, List.of(
                 new CourseRoutePointEntity(7L, 1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
                 new CourseRoutePointEntity(7L, 2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
-        ));
+        )));
 
         CourseRoutePointsResponse response = courseService.getCourseRoutePoints(7L, null, null);
 
@@ -165,6 +169,17 @@ class CourseServiceTest {
                     return entity;
                 })
                 .toList();
+    }
+
+    private CourseRouteSnapshot snapshot(Long courseId, List<CourseRoutePointEntity> routePoints) {
+        return new CourseRouteSnapshot(
+                courseId,
+                routePoints,
+                routePoints.stream()
+                        .map(routePoint -> new CourseRoutePointResponse(routePoint.getPointOrder(), routePoint.getLatitude(), routePoint.getLongitude()))
+                        .toList(),
+                new com.bikeprojectminji.bikeback.ride.policy.service.RouteProjectionIndex(routePoints)
+        );
     }
 
     @Test
@@ -279,9 +294,9 @@ class CourseServiceTest {
         ReflectionTestUtils.setField(entity, "visibility", CourseVisibility.UNLISTED);
         ReflectionTestUtils.setField(entity, "shareToken", "share-token");
         given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(7L)).willReturn(List.of(
+        given(courseRouteSnapshotService.get(7L, "course_download")).willReturn(snapshot(7L, List.of(
                 new CourseRoutePointEntity(7L, 1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780))
-        ));
+        )));
 
         CourseDownloadResponse response = courseService.downloadCourse(7L, null, "share-token");
 
