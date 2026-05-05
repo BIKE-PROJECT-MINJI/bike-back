@@ -92,6 +92,68 @@
       ],
       "title": "커넥션 풀",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum(rate(http_server_requests_seconds_count{uri=\"/api/v1/courses/{courseId}/ride-policy/evaluate\"}[5m]))", "legendFormat": "ride-policy evaluate", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum(rate(http_server_requests_seconds_count{uri=\"/api/v1/courses/{courseId}/route-points\"}[5m]))", "legendFormat": "route-points", "range": true, "refId": "B" },
+        { "editorMode": "code", "expr": "sum(rate(http_server_requests_seconds_count{uri=\"/api/v1/courses/{courseId}/download\"}[5m]))", "legendFormat": "course download", "range": true, "refId": "C" }
+      ],
+      "title": "route read / ride-policy 요청량",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{uri=\"/api/v1/courses/{courseId}/ride-policy/evaluate\"}[5m])))", "legendFormat": "ride-policy p95", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{uri=\"/api/v1/courses/{courseId}/ride-policy/evaluate\"}[5m])))", "legendFormat": "ride-policy p99", "range": true, "refId": "B" },
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{uri=\"/api/v1/courses/{courseId}/route-points\"}[5m])))", "legendFormat": "route-points p95", "range": true, "refId": "C" }
+      ],
+      "title": "route read / ride-policy latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "id": 10,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum(rate(bike_course_route_cache_hit_total[5m])) / clamp_min(sum(rate(bike_course_route_cache_hit_total[5m])) + sum(rate(bike_course_route_cache_miss_total[5m])), 0.0001)", "legendFormat": "cache hit ratio", "range": true, "refId": "A" }
+      ],
+      "title": "route snapshot cache hit ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (consumer) (rate(bike_course_route_cache_hit_total[5m]))", "legendFormat": "{{consumer}} hit", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum by (consumer) (rate(bike_course_route_cache_miss_total[5m]))", "legendFormat": "{{consumer}} miss", "range": true, "refId": "B" },
+        { "editorMode": "code", "expr": "sum by (consumer) (rate(bike_course_route_snapshot_load_total[5m]))", "legendFormat": "{{consumer}} load", "range": true, "refId": "C" }
+      ],
+      "title": "route snapshot cache consumer별 동작",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 40 },
+      "id": 12,
+      "options": { "content": "# route cache 관측 해석\n- `bike_course_route_cache_hit_total`: warm 요청 재사용이 실제로 발생했는지 본다.\n- `bike_course_route_cache_miss_total`: cold load, TTL 만료, 또는 evict 직후 재조회 빈도를 본다.\n- `bike_course_route_snapshot_load_total`: 실제 DB ordered list load와 projection artifact 재생성 시점을 대체하는 신호로 본다.\n- 현재 대시보드는 cache 동작과 endpoint latency는 보이지만, `ride-policy/evaluate` 1회당 DB query count는 직접 보여주지 않는다. 정밀 before/after 증명은 cold/warm benchmark와 별도 DB telemetry가 더 필요하다.", "mode": "markdown" },
+      "title": "route cache 해석 가이드",
+      "type": "text"
     }
   ],
   "refresh": "30s",
@@ -102,5 +164,5 @@
   "time": { "from": "now-1h", "to": "now" },
   "timezone": "browser",
   "title": "BIKE 애플리케이션 대시보드",
-  "version": 1
+  "version": 2
 }

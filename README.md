@@ -33,6 +33,13 @@ GAJA는 자전거 여행 중 **경로와 상태 정보를 한 화면에서 확�
 - 최근 위치 조회
 - health endpoint
 
+### 최근 보강한 backend 판단/보호 경로
+- `RidePolicyService`는 최근접 route 계산을 `RouteProjectionIndex` 기준으로 재사용하며, `local window + segment projection + full-scan fallback` 구조를 사용합니다.
+- 코스 route read hot path는 `CourseRouteSnapshotService`의 in-process snapshot cache로 재사용합니다.
+- route-points / download / ride-policy evaluate는 같은 코스 route snapshot을 공유하고, 코스 생성/수정 시 명시적으로 cache를 비웁니다.
+- 날씨는 stale-first 보호 전략을 유지하되, provider timeout 직후 grace window 안에 회복되는 응답은 fresh로 살려 사용자 응답과 외부 지연을 분리합니다.
+- route cache hit/miss/load/eviction 메트릭과 weather fallback 메트릭을 함께 남겨 운영에서 보호 동작과 실제 장애 신호를 구분합니다.
+
 ### 다음 단계에서 확장할 범위
 - 회원가입 / 로그인 / JWT 발급
 - 내 인증 상태 조회
@@ -140,6 +147,23 @@ cmd.exe /c docker compose -f docker-compose.local.yml up -d prometheus grafana p
 - 서비스 테스트는 `@SpringBootTest` 기반 통합 테스트를 사용합니다.
 - 작업 보고에는 테스트 체크리스트를 먼저 두고, 실제 통과한 항목만 `[x]`로 표시합니다.
 - README는 계획이 아니라 **실제로 구현된 범위만** 기록합니다.
+
+## Recent technical choices
+
+### 최근접 route 판단
+- route point 순서에 대한 단순 이진탐색 대신, `polyline segment projection`을 source of truth로 유지합니다.
+- 1차 최적화는 `last-matched local window + segment projection + full-scan fallback`으로 적용했습니다.
+- correctness를 우선하기 때문에 local window miss나 저신뢰 상황에서는 전체 scan fallback을 유지합니다.
+
+### route read hot path
+- `course_route_points` row-per-point ordered list는 source of truth로 유지합니다.
+- 대신 반복 조회가 많은 `route-points`, `download`, `ride-policy`에는 in-process route snapshot cache를 둬 ordered list 조회와 `RouteProjectionIndex` 재생성을 줄였습니다.
+- Redis shared cache나 geometry read model은 후속 승격 후보로 남겨 두었습니다.
+
+### weather 보호 전략
+- 외부 provider 성공값을 우선 사용하되, last-success 캐시가 있으면 stale-first로 먼저 응답합니다.
+- provider 지연이 전체 응답을 끌고 가지 않도록 connect/read timeout, 총 요청 시간 제한, timeout grace window를 함께 둡니다.
+- stale serve와 실제 fallback/degradation 신호는 metric과 log에서 구분합니다.
 
 ## CI/CD
 

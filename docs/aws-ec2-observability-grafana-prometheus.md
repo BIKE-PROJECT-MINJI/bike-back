@@ -155,6 +155,23 @@ docker compose --env-file ./.env -f docker-compose.observability.yml up -d
 - `BIKE Data Platform Overview`
 - `BIKE Load Validation Prep`
 
+### 9-4. route cache / ride-policy 전용 관측 확인
+
+- `BIKE 애플리케이션 대시보드`에서 아래 패널이 보이는지 확인한다.
+  - `route read / ride-policy 요청량`
+  - `route read / ride-policy latency`
+  - `route snapshot cache hit ratio`
+  - `route snapshot cache consumer별 동작`
+- 반복 호출 시 아래 신호를 함께 본다.
+  - `bike_course_route_cache_hit_total`
+  - `bike_course_route_cache_miss_total`
+  - `bike_course_route_snapshot_load_total`
+- 해석 기준
+  - cold 요청에서는 miss/load가 먼저 증가한다.
+  - 같은 코스를 반복 호출할 때는 hit가 늘고 load 증가율은 둔화되어야 한다.
+  - `ride-policy/evaluate` p95/p99는 endpoint 자체 지연을 보여주지만, 이 값만으로 DB query 절감량을 직접 증명하지는 못한다.
+  - 정확한 전후 증명은 동일 코스 cold/warm benchmark와 DB telemetry를 함께 본다.
+
 ## 10. 브라우저 접근 경로
 
 사용자 브라우저 접근 경로는 아래 한 줄로 정리한다.
@@ -175,6 +192,7 @@ docker compose --env-file ./.env -f docker-compose.observability.yml up -d
 - Prometheus/Grafana는 먼저 수동 배포로 안정화하고, 이후 필요 시 SSM/Actions 자동화로 확장한다.
 - CloudWatch는 계속 인프라 로그/알람 원본으로 유지한다.
 - Grafana는 운영자 read surface다.
+- route cache 최적화는 현재 cache hit/miss/load와 endpoint latency까지는 Grafana에서 볼 수 있다. 다만 `ride-policy/evaluate`의 per-request DB query count는 아직 별도 telemetry가 없다.
 
 ## 13. 가비아 DNS 입력값 메모
 
