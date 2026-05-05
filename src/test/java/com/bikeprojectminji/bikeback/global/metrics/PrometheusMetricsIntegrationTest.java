@@ -17,6 +17,9 @@ class PrometheusMetricsIntegrationTest {
 
         bikeMetricsRecorder.recordWeatherFallback();
         bikeMetricsRecorder.recordWeatherStaleServed();
+        bikeMetricsRecorder.recordWeatherCacheHit("last_success_stale");
+        bikeMetricsRecorder.recordWeatherProviderTimeout("primary");
+        bikeMetricsRecorder.recordWeatherRefreshSkipped("already_in_progress");
         bikeMetricsRecorder.recordRidePolicyUndetermined("PRE_START", "low_accuracy");
         bikeMetricsRecorder.recordRideRecordFinalizationFailure();
         bikeMetricsRecorder.recordCourseRouteCacheHit("ride_policy");
@@ -26,6 +29,9 @@ class PrometheusMetricsIntegrationTest {
 
         assertThat(scrape).contains("bike_weather_fallback_total");
         assertThat(scrape).contains("bike_weather_stale_served_total");
+        assertThat(scrape).contains("bike_weather_cache_hit_total");
+        assertThat(scrape).contains("bike_weather_provider_timeout_total");
+        assertThat(scrape).contains("bike_weather_refresh_skipped_total");
         assertThat(scrape).contains("bike_ride_policy_undetermined_total");
         assertThat(scrape).contains("bike_ride_record_finalization_failed_total");
         assertThat(scrape).contains("bike_course_route_cache_hit_total");

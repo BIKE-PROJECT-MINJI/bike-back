@@ -16,6 +16,14 @@ class BikeMetricsRecorderTest {
 
         recorder.recordWeatherFallback();
         recorder.recordWeatherStaleServed();
+        recorder.recordWeatherCacheHit("last_success_stale");
+        recorder.recordWeatherCacheMiss();
+        recorder.recordWeatherProviderResult("current", "success");
+        recorder.recordWeatherProviderFailure("grace_timeout");
+        recorder.recordWeatherProviderTimeout("primary");
+        recorder.recordWeatherRequestCoalesced("sync_fetch");
+        recorder.recordWeatherRefreshSkipped("already_in_progress");
+        recorder.recordWeatherUnavailable("provider_failure");
         recorder.recordFeaturedCoursesFallback("missing_location_parameters");
         recorder.recordRidePolicyUndetermined("ACTIVE", "stale_location");
         recorder.recordRideRecordFinalizationFailure();
@@ -27,6 +35,14 @@ class BikeMetricsRecorderTest {
 
         assertThat(meterRegistry.get("bike_weather_fallback_total").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_weather_stale_served_total").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_weather_cache_hit_total").tag("mode", "last_success_stale").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_weather_cache_miss_total").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_weather_provider_result_total").tag("source", "current").tag("outcome", "success").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_weather_provider_failure_total").tag("reason", "grace_timeout").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_weather_provider_timeout_total").tag("phase", "primary").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_weather_request_coalesced_total").tag("path", "sync_fetch").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_weather_refresh_skipped_total").tag("reason", "already_in_progress").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_weather_unavailable_total").tag("reason", "provider_failure").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_featured_courses_fallback_total")
                 .tag("reason", "missing_location_parameters")
                 .counter()

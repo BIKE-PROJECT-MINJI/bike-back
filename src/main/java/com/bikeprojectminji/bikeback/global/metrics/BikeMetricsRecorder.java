@@ -20,6 +20,42 @@ public class BikeMetricsRecorder {
         meterRegistry.counter("bike_weather_stale_served_total").increment();
     }
 
+    public void recordWeatherCacheHit(String mode) {
+        meterRegistry.counter("bike_weather_cache_hit_total", "mode", normalize(mode)).increment();
+    }
+
+    public void recordWeatherCacheMiss() {
+        meterRegistry.counter("bike_weather_cache_miss_total").increment();
+    }
+
+    public void recordWeatherProviderResult(String source, String outcome) {
+        meterRegistry.counter(
+                "bike_weather_provider_result_total",
+                "source", normalize(source),
+                "outcome", normalize(outcome)
+        ).increment();
+    }
+
+    public void recordWeatherProviderFailure(String reason) {
+        meterRegistry.counter("bike_weather_provider_failure_total", "reason", normalize(reason)).increment();
+    }
+
+    public void recordWeatherProviderTimeout(String phase) {
+        meterRegistry.counter("bike_weather_provider_timeout_total", "phase", normalize(phase)).increment();
+    }
+
+    public void recordWeatherRequestCoalesced(String path) {
+        meterRegistry.counter("bike_weather_request_coalesced_total", "path", normalize(path)).increment();
+    }
+
+    public void recordWeatherRefreshSkipped(String reason) {
+        meterRegistry.counter("bike_weather_refresh_skipped_total", "reason", normalize(reason)).increment();
+    }
+
+    public void recordWeatherUnavailable(String reason) {
+        meterRegistry.counter("bike_weather_unavailable_total", "reason", normalize(reason)).increment();
+    }
+
     public void recordFeaturedCoursesFallback(String reason) {
         meterRegistry.counter("bike_featured_courses_fallback_total", "reason", normalize(reason)).increment();
     }
