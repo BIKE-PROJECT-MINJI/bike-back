@@ -35,7 +35,7 @@ jobs:
         run: |
           mkdir -p ops/loadtest/results
           k6 run ops/loadtest/k6/bike-api.js \
-            --env BASE_URL=http://3.35.168.38:8080 \
+            --env BASE_URL=https://api.gajabike.shop \
             --env SCENARIO=smoke \
             --env PERSONAS=home,preRide,inRide,health \
             --env SUMMARY_DIR=ops/loadtest/results
