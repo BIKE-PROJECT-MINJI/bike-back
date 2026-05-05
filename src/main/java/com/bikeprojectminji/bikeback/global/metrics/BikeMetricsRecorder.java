@@ -36,6 +36,26 @@ public class BikeMetricsRecorder {
         meterRegistry.counter("bike_ride_record_finalization_failed_total").increment();
     }
 
+    public void recordCourseRouteCacheHit(String consumer) {
+        meterRegistry.counter("bike_course_route_cache_hit_total", "consumer", normalize(consumer)).increment();
+    }
+
+    public void recordCourseRouteCacheMiss(String consumer) {
+        meterRegistry.counter("bike_course_route_cache_miss_total", "consumer", normalize(consumer)).increment();
+    }
+
+    public void recordCourseRouteCacheBypass(String consumer) {
+        meterRegistry.counter("bike_course_route_cache_bypass_total", "consumer", normalize(consumer)).increment();
+    }
+
+    public void recordCourseRouteSnapshotLoad(String consumer) {
+        meterRegistry.counter("bike_course_route_snapshot_load_total", "consumer", normalize(consumer)).increment();
+    }
+
+    public void recordCourseRouteCacheEviction(String reason) {
+        meterRegistry.counter("bike_course_route_cache_eviction_total", "reason", normalize(reason)).increment();
+    }
+
     private String normalize(String value) {
         if (value == null || value.isBlank()) {
             return "unknown";

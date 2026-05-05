@@ -19,6 +19,11 @@ class BikeMetricsRecorderTest {
         recorder.recordFeaturedCoursesFallback("missing_location_parameters");
         recorder.recordRidePolicyUndetermined("ACTIVE", "stale_location");
         recorder.recordRideRecordFinalizationFailure();
+        recorder.recordCourseRouteCacheHit("ride_policy");
+        recorder.recordCourseRouteCacheMiss("ride_policy");
+        recorder.recordCourseRouteCacheBypass("course_download");
+        recorder.recordCourseRouteSnapshotLoad("route_points");
+        recorder.recordCourseRouteCacheEviction("route_points_updated");
 
         assertThat(meterRegistry.get("bike_weather_fallback_total").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_weather_stale_served_total").counter().count()).isEqualTo(1.0);
@@ -32,5 +37,10 @@ class BikeMetricsRecorderTest {
                 .counter()
                 .count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_ride_record_finalization_failed_total").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_course_route_cache_hit_total").tag("consumer", "ride_policy").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_course_route_cache_miss_total").tag("consumer", "ride_policy").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_course_route_cache_bypass_total").tag("consumer", "course_download").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_course_route_snapshot_load_total").tag("consumer", "route_points").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_course_route_cache_eviction_total").tag("reason", "route_points_updated").counter().count()).isEqualTo(1.0);
     }
 }

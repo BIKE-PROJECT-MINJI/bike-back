@@ -19,6 +19,8 @@ class PrometheusMetricsIntegrationTest {
         bikeMetricsRecorder.recordWeatherStaleServed();
         bikeMetricsRecorder.recordRidePolicyUndetermined("PRE_START", "low_accuracy");
         bikeMetricsRecorder.recordRideRecordFinalizationFailure();
+        bikeMetricsRecorder.recordCourseRouteCacheHit("ride_policy");
+        bikeMetricsRecorder.recordCourseRouteSnapshotLoad("ride_policy");
 
         String scrape = prometheusMeterRegistry.scrape();
 
@@ -26,5 +28,7 @@ class PrometheusMetricsIntegrationTest {
         assertThat(scrape).contains("bike_weather_stale_served_total");
         assertThat(scrape).contains("bike_ride_policy_undetermined_total");
         assertThat(scrape).contains("bike_ride_record_finalization_failed_total");
+        assertThat(scrape).contains("bike_course_route_cache_hit_total");
+        assertThat(scrape).contains("bike_course_route_snapshot_load_total");
     }
 }
