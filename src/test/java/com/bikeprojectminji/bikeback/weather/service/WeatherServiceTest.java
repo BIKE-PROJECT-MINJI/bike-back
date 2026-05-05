@@ -87,6 +87,8 @@ class WeatherServiceTest {
 
         assertThat(response.stale()).isTrue();
         assertThat(response.forecastFallbackUsed()).isTrue();
+        verify(bikeMetricsRecorder).recordWeatherStaleServed();
+        verify(bikeMetricsRecorder).recordWeatherFallback();
     }
 
     @Test
@@ -106,6 +108,20 @@ class WeatherServiceTest {
         assertThat(response.stale()).isTrue();
         assertThat(response.forecastFallbackUsed()).isTrue();
         verify(lastSuccessWeatherStore, timeout(1000)).save(key, refreshedSnapshot);
+    }
+
+    @Test
+    @DisplayName("provider가 forecast fallback snapshot을 반환하면 weather fallback 메트릭을 기록한다")
+    void getCurrentRecordsWeatherFallbackWhenProviderUsesForecastFallback() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        given(weatherProviderPort.getCurrent(key)).willReturn(WeatherProviderResult.success(snapshot(true, "2026-03-29T10:19:00+09:00")));
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.empty());
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.stale()).isFalse();
+        assertThat(response.forecastFallbackUsed()).isTrue();
+        verify(bikeMetricsRecorder).recordWeatherFallback();
     }
 
     @Test
@@ -158,6 +174,37 @@ class WeatherServiceTest {
 
         assertThat(response.stale()).isTrue();
         assertThat(response.forecastFallbackUsed()).isTrue();
+        verify(bikeMetricsRecorder).recordWeatherStaleServed();
+        verify(bikeMetricsRecorder).recordWeatherFallback();
+    }
+
+    @Test
+    @DisplayName("provider가 timeout 직후 짧은 지연 안에 성공하면 fresh 응답으로 회복한다")
+    void getCurrentReturnsFreshResponseWhenProviderCompletesWithinGraceWindow() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        weatherService = new WeatherService(
+                locationKey -> {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        return WeatherProviderResult.failure();
+                    }
+                    return WeatherProviderResult.success(snapshot(false, "2026-03-29T10:19:00+09:00"));
+                },
+                lastSuccessWeatherStore,
+                bikeMetricsRecorder,
+                weatherProviderExecutor,
+                900,
+                Clock.fixed(Instant.parse("2026-03-29T01:20:00Z"), ZoneOffset.UTC)
+        );
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.empty());
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.stale()).isFalse();
+        assertThat(response.forecastFallbackUsed()).isFalse();
+        verify(lastSuccessWeatherStore).save(key, snapshot(false, "2026-03-29T10:19:00+09:00"));
     }
 
     private WeatherSnapshot snapshot(boolean forecastFallbackUsed, String lastSucceededAt) {

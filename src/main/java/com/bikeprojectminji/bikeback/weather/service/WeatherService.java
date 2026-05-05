@@ -27,6 +27,7 @@ public class WeatherService {
     private static final Duration LAST_SUCCESS_TTL = Duration.ofMinutes(60);
     private static final String WEATHER_UNAVAILABLE_MESSAGE = "현재 날씨 정보를 사용할 수 없습니다.";
     private static final long DEFAULT_TOTAL_TIMEOUT_MS = 900;
+    private static final long PROVIDER_TIMEOUT_GRACE_MS = 300;
 
     private final WeatherProviderPort weatherProviderPort;
     private final LastSuccessWeatherStore lastSuccessWeatherStore;
@@ -61,6 +62,7 @@ public class WeatherService {
 
         if (fallback.isPresent()) {
             bikeMetricsRecorder.recordWeatherStaleServed();
+            bikeMetricsRecorder.recordWeatherFallback();
             refreshWeatherAsync(locationKey, RequestLogContext.currentRequestId());
             log.info(
                     "weather_fallback_used request_id={} location_key={} provider_duration_ms={} total_duration_ms={} cache_age_ms={} forecast_fallback_used={} mode=stale_first",
@@ -79,6 +81,9 @@ public class WeatherService {
         long providerDurationMs = toDurationMs(providerStartedAtNanos);
 
         if (providerResult.success() && providerResult.snapshot() != null) {
+            if (providerResult.snapshot().forecastFallbackUsed()) {
+                bikeMetricsRecorder.recordWeatherFallback();
+            }
             lastSuccessWeatherStore.save(locationKey, providerResult.snapshot());
             log.info(
                     "weather_served request_id={} location_key={} source=provider provider_duration_ms={} total_duration_ms={} forecast_fallback_used={}",
@@ -132,14 +137,7 @@ public class WeatherService {
         try {
             return future.get(weatherProviderTotalTimeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException timeoutException) {
-            future.cancel(true);
-            log.warn(
-                    "weather_provider_timeout request_id={} location_key={} timeout_ms={}",
-                    RequestLogContext.currentRequestId(),
-                    locationKey,
-                    weatherProviderTotalTimeoutMs
-            );
-            return WeatherProviderResult.failure();
+            return recoverTimedOutProviderResult(future, locationKey);
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
             log.warn(
@@ -160,10 +158,57 @@ public class WeatherService {
         }
     }
 
+    private WeatherProviderResult recoverTimedOutProviderResult(Future<WeatherProviderResult> future, WeatherLocationKey locationKey) {
+        log.warn(
+                "weather_provider_timeout request_id={} location_key={} timeout_ms={} grace_ms={}",
+                RequestLogContext.currentRequestId(),
+                locationKey,
+                weatherProviderTotalTimeoutMs,
+                PROVIDER_TIMEOUT_GRACE_MS
+        );
+        try {
+            WeatherProviderResult recoveredResult = future.get(PROVIDER_TIMEOUT_GRACE_MS, TimeUnit.MILLISECONDS);
+            if (recoveredResult.success() && recoveredResult.snapshot() != null) {
+                log.info(
+                        "weather_provider_timeout_recovered request_id={} location_key={} grace_ms={}",
+                        RequestLogContext.currentRequestId(),
+                        locationKey,
+                        PROVIDER_TIMEOUT_GRACE_MS
+                );
+            }
+            return recoveredResult;
+        } catch (TimeoutException graceTimeoutException) {
+            future.cancel(true);
+            return WeatherProviderResult.failure();
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            future.cancel(true);
+            log.warn(
+                    "weather_provider_interrupted request_id={} location_key={} timeout_ms={}",
+                    RequestLogContext.currentRequestId(),
+                    locationKey,
+                    weatherProviderTotalTimeoutMs + PROVIDER_TIMEOUT_GRACE_MS
+            );
+            return WeatherProviderResult.failure();
+        } catch (ExecutionException executionException) {
+            future.cancel(true);
+            log.warn(
+                    "weather_provider_execution_failure request_id={} location_key={}",
+                    RequestLogContext.currentRequestId(),
+                    locationKey,
+                    executionException.getCause()
+            );
+            return WeatherProviderResult.failure();
+        }
+    }
+
     private void refreshWeatherAsync(WeatherLocationKey locationKey, String requestId) {
         weatherProviderExecutor.submit(() -> {
             WeatherProviderResult refreshed = weatherProviderPort.getCurrent(locationKey);
             if (refreshed.success() && refreshed.snapshot() != null) {
+                if (refreshed.snapshot().forecastFallbackUsed()) {
+                    bikeMetricsRecorder.recordWeatherFallback();
+                }
                 lastSuccessWeatherStore.save(locationKey, refreshed.snapshot());
                 log.info(
                         "weather_refresh_completed request_id={} location_key={} source=provider forecast_fallback_used={}",
