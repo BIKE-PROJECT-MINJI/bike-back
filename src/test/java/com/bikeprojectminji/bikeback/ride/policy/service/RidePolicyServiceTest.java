@@ -9,10 +9,12 @@ import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationRequest
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationResponse;
 import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
 import com.bikeprojectminji.bikeback.course.entity.CourseRoutePointEntity;
+import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointResponse;
+import com.bikeprojectminji.bikeback.course.service.CourseRouteSnapshot;
+import com.bikeprojectminji.bikeback.course.service.CourseRouteSnapshotService;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
-import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepository;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -36,10 +38,10 @@ class RidePolicyServiceTest {
     private CourseRepository courseRepository;
 
     @Mock
-    private CourseRoutePointRepository courseRoutePointRepository;
+    private BikeMetricsRecorder bikeMetricsRecorder;
 
     @Mock
-    private BikeMetricsRecorder bikeMetricsRecorder;
+    private CourseRouteSnapshotService courseRouteSnapshotService;
 
     private RidePolicyService ridePolicyService;
 
@@ -47,7 +49,7 @@ class RidePolicyServiceTest {
     void setUp() {
         ridePolicyService = new RidePolicyService(
                 courseRepository,
-                courseRoutePointRepository,
+                courseRouteSnapshotService,
                 bikeMetricsRecorder,
                 Clock.fixed(Instant.parse("2026-03-29T01:15:30Z"), ZoneOffset.UTC)
         );
@@ -58,10 +60,10 @@ class RidePolicyServiceTest {
     void evaluateReturnsEligibleAtPreStart() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, List.of(
                 routePoint(courseId, 1, 37.5660, 126.9770),
                 routePoint(courseId, 2, 37.5670, 126.9790)
-        ));
+        )));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("PRE_START", 37.5665, 126.9780, 18.5, "2026-03-29T10:15:19+09:00"));
 
@@ -78,10 +80,10 @@ class RidePolicyServiceTest {
     void evaluateBlocksWhenOnlyNearRouteSegment() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5900, 126.9900)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, List.of(
                 routePoint(courseId, 1, 37.5660, 126.9770),
                 routePoint(courseId, 2, 37.5670, 126.9790)
-        ));
+        )));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("PRE_START", 37.5665, 126.9780, 18.5, "2026-03-29T10:15:19+09:00"));
 
@@ -97,7 +99,7 @@ class RidePolicyServiceTest {
     void evaluateReturnsUndeterminedWhenAccuracyIsLow() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(routePoint(courseId, 1, 37.5665, 126.9780)));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, List.of(routePoint(courseId, 1, 37.5665, 126.9780))));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("PRE_START", 37.5665, 126.9780, 125.0, "2026-03-29T10:15:19+09:00"));
 
@@ -111,7 +113,7 @@ class RidePolicyServiceTest {
     void evaluateReturnsWarningWhenOffRouteCandidatePersistsForFifteenSeconds() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(straightRoute(courseId, 37.5665, 126.9780, 1_000));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, straightRoute(courseId, 37.5665, 126.9780, 1_000)));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
                 courseId,
@@ -140,7 +142,7 @@ class RidePolicyServiceTest {
     void evaluateKeepsOnRouteWithinFortyNineMeters() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(straightRoute(courseId, 37.5665, 126.9780, 1_000));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, straightRoute(courseId, 37.5665, 126.9780, 1_000)));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
                 courseId,
@@ -165,7 +167,7 @@ class RidePolicyServiceTest {
     void evaluateReturnsCandidateBeforeWarningThreshold() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(straightRoute(courseId, 37.5665, 126.9780, 1_000));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, straightRoute(courseId, 37.5665, 126.9780, 1_000)));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
                 courseId,
@@ -192,7 +194,7 @@ class RidePolicyServiceTest {
     void evaluateKeepsWarningUntilRecoveryThresholdIsMet() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(straightRoute(courseId, 37.5665, 126.9780, 1_000));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, straightRoute(courseId, 37.5665, 126.9780, 1_000)));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
                 courseId,
@@ -220,7 +222,7 @@ class RidePolicyServiceTest {
     void evaluateRecoversWhenWithinTwentyNineMeters() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(straightRoute(courseId, 37.5665, 126.9780, 1_000));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, straightRoute(courseId, 37.5665, 126.9780, 1_000)));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
                 courseId,
@@ -248,7 +250,7 @@ class RidePolicyServiceTest {
     void evaluateBlocksNonLoopCompletionWhenCoverageIsSeventyNinePercent() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(straightRoute(courseId, 37.5665, 126.9780, 1_000));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, straightRoute(courseId, 37.5665, 126.9780, 1_000)));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
                 courseId,
@@ -272,7 +274,7 @@ class RidePolicyServiceTest {
     void evaluateAcceptsCoverageAtEightyPercentBoundary() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(straightRoute(courseId, 37.5665, 126.9780, 1_000));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, straightRoute(courseId, 37.5665, 126.9780, 1_000)));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
                 courseId,
@@ -295,7 +297,7 @@ class RidePolicyServiceTest {
     void evaluateReturnsCompletionReadyForNonLoopCourse() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(straightRoute(courseId, 37.5665, 126.9780, 1_000));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, straightRoute(courseId, 37.5665, 126.9780, 1_000)));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
                 courseId,
@@ -321,7 +323,7 @@ class RidePolicyServiceTest {
         Long courseId = 1L;
         List<CourseRoutePointEntity> loopRoute = loopRoute(courseId, 37.5665, 126.9780, 300);
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(loopRoute);
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, loopRoute));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
                 courseId,
@@ -351,7 +353,7 @@ class RidePolicyServiceTest {
     void evaluateReturnsUndeterminedWhenActiveAccuracyExceedsStrictThreshold() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(routePoint(courseId, 1, 37.5665, 126.9780)));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, List.of(routePoint(courseId, 1, 37.5665, 126.9780))));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("ACTIVE", 37.5665, 126.9780, 55.0, "2026-03-29T10:15:19+09:00"));
 
@@ -367,7 +369,7 @@ class RidePolicyServiceTest {
     void evaluateReturnsUndeterminedWhenActiveLocationExceedsStrictStaleThreshold() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(routePoint(courseId, 1, 37.5665, 126.9780)));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, List.of(routePoint(courseId, 1, 37.5665, 126.9780))));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("ACTIVE", 37.5665, 126.9780, 10.0, "2026-03-29T10:15:10+09:00"));
 
@@ -383,7 +385,7 @@ class RidePolicyServiceTest {
     void evaluateKeepsLooserAccuracyThresholdAtPreStart() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(routePoint(courseId, 1, 37.5665, 126.9780)));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, List.of(routePoint(courseId, 1, 37.5665, 126.9780))));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("PRE_START", 37.5665, 126.9780, 55.0, "2026-03-29T10:15:19+09:00"));
 
@@ -397,7 +399,7 @@ class RidePolicyServiceTest {
     void evaluateReturnsUndeterminedWhenLocationIsStale() {
         Long courseId = 1L;
         given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
-        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId)).willReturn(List.of(routePoint(courseId, 1, 37.5665, 126.9780)));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, List.of(routePoint(courseId, 1, 37.5665, 126.9780))));
 
         RidePolicyEvaluationResponse response = ridePolicyService.evaluate(courseId, request("ACTIVE", 37.5665, 126.9780, 10.0, "2026-03-29T10:14:00+09:00"));
 
@@ -473,6 +475,17 @@ class RidePolicyServiceTest {
 
     private CourseRoutePointEntity routePoint(Long courseId, int order, double lat, double lon) {
         return new CourseRoutePointEntity(courseId, order, BigDecimal.valueOf(lat), BigDecimal.valueOf(lon));
+    }
+
+    private CourseRouteSnapshot snapshot(Long courseId, List<CourseRoutePointEntity> routePoints) {
+        return new CourseRouteSnapshot(
+                courseId,
+                routePoints,
+                routePoints.stream()
+                        .map(routePoint -> new CourseRoutePointResponse(routePoint.getPointOrder(), routePoint.getLatitude(), routePoint.getLongitude()))
+                        .toList(),
+                new RouteProjectionIndex(routePoints)
+        );
     }
 
     private List<CourseRoutePointEntity> straightRoute(Long courseId, double startLat, double startLon, int meters) {

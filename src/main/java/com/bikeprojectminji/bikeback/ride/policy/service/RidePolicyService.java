@@ -3,7 +3,8 @@ package com.bikeprojectminji.bikeback.ride.policy.service;
 import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
 import com.bikeprojectminji.bikeback.course.entity.CourseRoutePointEntity;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
-import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepository;
+import com.bikeprojectminji.bikeback.course.service.CourseRouteSnapshot;
+import com.bikeprojectminji.bikeback.course.service.CourseRouteSnapshotService;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
@@ -44,18 +45,18 @@ public class RidePolicyService {
     private static final int LOOP_DETECTION_THRESHOLD_M = 150;
 
     private final CourseRepository courseRepository;
-    private final CourseRoutePointRepository courseRoutePointRepository;
+    private final CourseRouteSnapshotService courseRouteSnapshotService;
     private final BikeMetricsRecorder bikeMetricsRecorder;
     private final Clock clock;
 
     public RidePolicyService(
             CourseRepository courseRepository,
-            CourseRoutePointRepository courseRoutePointRepository,
+            CourseRouteSnapshotService courseRouteSnapshotService,
             BikeMetricsRecorder bikeMetricsRecorder,
             Clock clock
     ) {
         this.courseRepository = courseRepository;
-        this.courseRoutePointRepository = courseRoutePointRepository;
+        this.courseRouteSnapshotService = courseRouteSnapshotService;
         this.bikeMetricsRecorder = bikeMetricsRecorder;
         this.clock = clock;
     }
@@ -65,7 +66,9 @@ public class RidePolicyService {
 
         CourseEntity course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new NotFoundException("코스를 찾을 수 없습니다."));
-        List<CourseRoutePointEntity> routePoints = courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId);
+        CourseRouteSnapshot routeSnapshot = courseRouteSnapshotService.get(courseId, "ride_policy");
+        List<CourseRoutePointEntity> routePoints = routeSnapshot.routePoints();
+        RouteProjectionIndex routeProjectionIndex = routeSnapshot.routeProjectionIndex();
 
         String phase = request.phase();
         RideLocationRequest location = request.location();
@@ -85,7 +88,7 @@ public class RidePolicyService {
             return evaluatePreStart(course, location);
         }
         if ("ACTIVE".equals(phase)) {
-            return evaluateActive(courseId, course, routePoints, request);
+            return evaluateActive(courseId, course, routePoints, routeProjectionIndex, request);
         }
 
         throw new BadRequestException("phase는 PRE_START 또는 ACTIVE여야 합니다.");
@@ -128,6 +131,7 @@ public class RidePolicyService {
             Long courseId,
             CourseEntity course,
             List<CourseRoutePointEntity> routePoints,
+            RouteProjectionIndex routeProjectionIndex,
             RidePolicyEvaluationRequest request
     ) {
         if (routePoints.isEmpty()) {
@@ -144,8 +148,8 @@ public class RidePolicyService {
         }
 
         List<RideLocationRequest> trace = normalizedTrace(request);
-        OffRouteDecision offRouteDecision = evaluateOffRoute(routePoints, trace);
-        CompletionDecision completionDecision = evaluateCompletion(course, routePoints, trace, request.location());
+        OffRouteDecision offRouteDecision = evaluateOffRoute(routeProjectionIndex, trace);
+        CompletionDecision completionDecision = evaluateCompletion(course, routePoints, routeProjectionIndex, trace, request.location());
 
         return new RidePolicyEvaluationResponse(
                 "ACTIVE",
@@ -196,14 +200,17 @@ public class RidePolicyService {
         return trace;
     }
 
-    private OffRouteDecision evaluateOffRoute(List<CourseRoutePointEntity> routePoints, List<RideLocationRequest> trace) {
+    private OffRouteDecision evaluateOffRoute(RouteProjectionIndex routeProjectionIndex, List<RideLocationRequest> trace) {
         OffRouteState state = OffRouteState.ON_ROUTE;
         OffsetDateTime candidateStartedAt = null;
         boolean recovered = false;
+        Integer previousSegmentIndex = null;
 
         int currentDistance = 0;
         for (RideLocationRequest tracePoint : trace) {
-            int distance = minimumRouteDistanceMeters(routePoints, tracePoint).intValue();
+            RouteProjectionIndex.RouteProjectionMatch nearest = routeProjectionIndex.findNearest(tracePoint, previousSegmentIndex);
+            previousSegmentIndex = nearest.segmentIndex();
+            int distance = BigDecimal.valueOf(nearest.distanceToRouteM()).setScale(0, RoundingMode.HALF_UP).intValue();
             currentDistance = distance;
 
             if (state == OffRouteState.ON_ROUTE) {
@@ -274,6 +281,7 @@ public class RidePolicyService {
     private CompletionDecision evaluateCompletion(
             CourseEntity course,
             List<CourseRoutePointEntity> routePoints,
+            RouteProjectionIndex routeProjectionIndex,
             List<RideLocationRequest> trace,
             RideLocationRequest currentLocation
     ) {
@@ -281,9 +289,8 @@ public class RidePolicyService {
             return new CompletionDecision(new RidePolicyCompletionResponse("UNDETERMINED", "COURSE_PATH_INVALID", 0, COMPLETION_COVERAGE_THRESHOLD_PERCENT, false, false, null, COMPLETION_DISTANCE_THRESHOLD_M));
         }
 
-        List<RouteSegment> segments = buildSegments(routePoints);
-        double totalLength = totalLength(segments);
-        int coveragePercent = coveragePercent(segments, trace, totalLength);
+        double totalLength = totalLength(routeProjectionIndex.segments());
+        int coveragePercent = coveragePercent(routeProjectionIndex, trace, totalLength);
         boolean loopCourse = isLoopCourse(routePoints);
         int startDistance = distanceFromStart(course, routePoints, currentLocation);
         int endDistance = distanceFromEnd(routePoints, currentLocation);
@@ -366,23 +373,26 @@ public class RidePolicyService {
         ));
     }
 
-    private int coveragePercent(List<RouteSegment> segments, List<RideLocationRequest> trace, double totalLength) {
+    private int coveragePercent(RouteProjectionIndex routeProjectionIndex, List<RideLocationRequest> trace, double totalLength) {
         if (totalLength <= 0d) {
             return 0;
         }
 
         List<Range> ranges = new ArrayList<>();
         Projection previous = null;
+        Integer previousSegmentIndex = null;
         for (RideLocationRequest tracePoint : trace) {
-            Projection current = projectOntoRoute(segments, tracePoint);
+            Projection current = projectOntoRoute(routeProjectionIndex, tracePoint, previousSegmentIndex);
             if (current == null) {
                 previous = null;
+                previousSegmentIndex = null;
                 continue;
             }
             if (previous != null) {
                 ranges.add(new Range(Math.min(previous.distanceAlongRouteM(), current.distanceAlongRouteM()), Math.max(previous.distanceAlongRouteM(), current.distanceAlongRouteM())));
             }
             previous = current;
+            previousSegmentIndex = current.segmentIndex();
         }
 
         if (ranges.isEmpty()) {
@@ -409,74 +419,16 @@ public class RidePolicyService {
         return (int) Math.floor((covered * 100d) / totalLength);
     }
 
-    private Projection projectOntoRoute(List<RouteSegment> segments, RideLocationRequest tracePoint) {
-        Projection best = null;
-        for (RouteSegment segment : segments) {
-            Projection candidate = projectOntoSegment(segment, tracePoint);
-            if (candidate == null) {
-                continue;
-            }
-            if (best == null || candidate.distanceToRouteM() < best.distanceToRouteM()) {
-                best = candidate;
-            }
+    private Projection projectOntoRoute(RouteProjectionIndex routeProjectionIndex, RideLocationRequest tracePoint, Integer preferredSegmentIndex) {
+        RouteProjectionIndex.RouteProjectionMatch projection = routeProjectionIndex.project(tracePoint, preferredSegmentIndex, OFF_ROUTE_RECOVERY_THRESHOLD_M);
+        if (projection == null) {
+            return null;
         }
-        return best != null && best.distanceToRouteM() <= OFF_ROUTE_RECOVERY_THRESHOLD_M ? best : null;
+        return new Projection(projection.segmentIndex(), projection.distanceAlongRouteM(), projection.distanceToRouteM());
     }
 
-    private Projection projectOntoSegment(RouteSegment segment, RideLocationRequest tracePoint) {
-        double pointLat = tracePoint.lat().doubleValue();
-        double pointLon = tracePoint.lon().doubleValue();
-        double startLat = segment.start().getLatitude().doubleValue();
-        double startLon = segment.start().getLongitude().doubleValue();
-        double endLat = segment.end().getLatitude().doubleValue();
-        double endLon = segment.end().getLongitude().doubleValue();
-
-        double referenceLat = Math.toRadians((startLat + endLat + pointLat) / 3.0);
-        double meterPerDegLat = 111_320d;
-        double meterPerDegLon = Math.cos(referenceLat) * 111_320d;
-
-        double px = pointLon * meterPerDegLon;
-        double py = pointLat * meterPerDegLat;
-        double x1 = startLon * meterPerDegLon;
-        double y1 = startLat * meterPerDegLat;
-        double x2 = endLon * meterPerDegLon;
-        double y2 = endLat * meterPerDegLat;
-        double dx = x2 - x1;
-        double dy = y2 - y1;
-
-        if (dx == 0d && dy == 0d) {
-            double distance = Math.hypot(px - x1, py - y1);
-            return new Projection(segment.cumulativeStartM(), distance);
-        }
-
-        double t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
-        double normalizedT = Math.max(0d, Math.min(1d, t));
-        double closestX = x1 + normalizedT * dx;
-        double closestY = y1 + normalizedT * dy;
-        double distance = Math.hypot(px - closestX, py - closestY);
-        return new Projection(segment.cumulativeStartM() + (segment.lengthM() * normalizedT), distance);
-    }
-
-    private List<RouteSegment> buildSegments(List<CourseRoutePointEntity> routePoints) {
-        List<RouteSegment> segments = new ArrayList<>();
-        double cumulative = 0d;
-        for (int i = 0; i < routePoints.size() - 1; i++) {
-            CourseRoutePointEntity start = routePoints.get(i);
-            CourseRoutePointEntity end = routePoints.get(i + 1);
-            double length = distanceMeters(
-                    start.getLatitude().doubleValue(),
-                    start.getLongitude().doubleValue(),
-                    end.getLatitude().doubleValue(),
-                    end.getLongitude().doubleValue()
-            ).doubleValue();
-            segments.add(new RouteSegment(start, end, cumulative, length));
-            cumulative += length;
-        }
-        return segments;
-    }
-
-    private double totalLength(List<RouteSegment> segments) {
-        return segments.stream().mapToDouble(RouteSegment::lengthM).sum();
+    private double totalLength(List<RouteProjectionIndex.RouteSegment> segments) {
+        return segments.stream().mapToDouble(RouteProjectionIndex.RouteSegment::lengthM).sum();
     }
 
     private boolean isLoopCourse(List<CourseRoutePointEntity> routePoints) {
@@ -580,69 +532,6 @@ public class RidePolicyService {
         );
     }
 
-    private BigDecimal minimumRouteDistanceMeters(List<CourseRoutePointEntity> routePoints, RideLocationRequest location) {
-        if (routePoints.size() == 1) {
-            CourseRoutePointEntity point = routePoints.get(0);
-            return distanceMeters(
-                    location.lat().doubleValue(),
-                    location.lon().doubleValue(),
-                    point.getLatitude().doubleValue(),
-                    point.getLongitude().doubleValue()
-            );
-        }
-
-        double minDistance = Double.MAX_VALUE;
-        for (int i = 0; i < routePoints.size() - 1; i++) {
-            CourseRoutePointEntity start = routePoints.get(i);
-            CourseRoutePointEntity end = routePoints.get(i + 1);
-            minDistance = Math.min(
-                    minDistance,
-                    segmentDistanceMeters(
-                            location.lat().doubleValue(),
-                            location.lon().doubleValue(),
-                            start.getLatitude().doubleValue(),
-                            start.getLongitude().doubleValue(),
-                            end.getLatitude().doubleValue(),
-                            end.getLongitude().doubleValue()
-                    )
-            );
-        }
-        return BigDecimal.valueOf(minDistance).setScale(0, RoundingMode.HALF_UP);
-    }
-
-    private double segmentDistanceMeters(
-            double pointLat,
-            double pointLon,
-            double startLat,
-            double startLon,
-            double endLat,
-            double endLon
-    ) {
-        double referenceLat = Math.toRadians((startLat + endLat + pointLat) / 3.0);
-        double meterPerDegLat = 111_320d;
-        double meterPerDegLon = Math.cos(referenceLat) * 111_320d;
-
-        double px = pointLon * meterPerDegLon;
-        double py = pointLat * meterPerDegLat;
-        double x1 = startLon * meterPerDegLon;
-        double y1 = startLat * meterPerDegLat;
-        double x2 = endLon * meterPerDegLon;
-        double y2 = endLat * meterPerDegLat;
-
-        double dx = x2 - x1;
-        double dy = y2 - y1;
-        if (dx == 0d && dy == 0d) {
-            return Math.hypot(px - x1, py - y1);
-        }
-
-        double t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
-        t = Math.max(0d, Math.min(1d, t));
-
-        double closestX = x1 + t * dx;
-        double closestY = y1 + t * dy;
-        return Math.hypot(px - closestX, py - closestY);
-    }
-
     private BigDecimal distanceMeters(double lat1, double lon1, double lat2, double lon2) {
         double earthRadiusMeters = 6_371_000d;
         double dLat = Math.toRadians(lat2 - lat1);
@@ -678,15 +567,7 @@ public class RidePolicyService {
     private record CompletionDecision(RidePolicyCompletionResponse response) {
     }
 
-    private record RouteSegment(
-            CourseRoutePointEntity start,
-            CourseRoutePointEntity end,
-            double cumulativeStartM,
-            double lengthM
-    ) {
-    }
-
-    private record Projection(double distanceAlongRouteM, double distanceToRouteM) {
+    private record Projection(int segmentIndex, double distanceAlongRouteM, double distanceToRouteM) {
     }
 
     private record Range(double startM, double endM) {
