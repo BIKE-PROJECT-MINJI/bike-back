@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.weather.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
@@ -18,8 +19,12 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -107,6 +112,91 @@ class WeatherServiceTest {
 
         assertThat(response.stale()).isTrue();
         assertThat(response.forecastFallbackUsed()).isTrue();
+        verify(lastSuccessWeatherStore, timeout(1000)).save(key, refreshedSnapshot);
+    }
+
+    @Test
+    @DisplayName("같은 좌표의 동시 cold 요청은 provider 호출을 한 번으로 합친다")
+    void getCurrentCoalescesConcurrentColdRequests() throws Exception {
+        weatherProviderExecutor = Executors.newFixedThreadPool(4);
+        weatherService = new WeatherService(
+                weatherProviderPort,
+                lastSuccessWeatherStore,
+                bikeMetricsRecorder,
+                weatherProviderExecutor,
+                900,
+                Clock.fixed(Instant.parse("2026-03-29T01:20:00Z"), ZoneOffset.UTC)
+        );
+
+        BigDecimal lat = BigDecimal.valueOf(37.5665);
+        BigDecimal lon = BigDecimal.valueOf(126.9780);
+        WeatherLocationKey key = WeatherLocationKey.from(lat, lon);
+        WeatherSnapshot snapshot = snapshot(false, "2026-03-29T10:19:00+09:00");
+        AtomicInteger providerCallCount = new AtomicInteger();
+        CountDownLatch providerStarted = new CountDownLatch(1);
+
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.empty());
+        given(weatherProviderPort.getCurrent(key)).willAnswer(invocation -> {
+            providerCallCount.incrementAndGet();
+            providerStarted.countDown();
+            Thread.sleep(200);
+            return WeatherProviderResult.success(snapshot);
+        });
+
+        ExecutorService callerExecutor = Executors.newFixedThreadPool(2);
+        try {
+            Future<CurrentWeatherResponse> first = callerExecutor.submit(() -> weatherService.getCurrent(lat, lon));
+            providerStarted.await(1, TimeUnit.SECONDS);
+            Future<CurrentWeatherResponse> second = callerExecutor.submit(() -> weatherService.getCurrent(lat, lon));
+
+            CurrentWeatherResponse firstResponse = first.get(2, TimeUnit.SECONDS);
+            CurrentWeatherResponse secondResponse = second.get(2, TimeUnit.SECONDS);
+
+            assertThat(firstResponse.stale()).isFalse();
+            assertThat(secondResponse.stale()).isFalse();
+            assertThat(providerCallCount.get()).isEqualTo(1);
+            verify(lastSuccessWeatherStore, timeout(1000).atLeastOnce()).save(key, snapshot);
+        } finally {
+            callerExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("같은 좌표의 stale refresh는 중복 실행하지 않는다")
+    void getCurrentDeduplicatesStaleRefresh() throws Exception {
+        weatherProviderExecutor = Executors.newFixedThreadPool(4);
+        weatherService = new WeatherService(
+                weatherProviderPort,
+                lastSuccessWeatherStore,
+                bikeMetricsRecorder,
+                weatherProviderExecutor,
+                900,
+                Clock.fixed(Instant.parse("2026-03-29T01:20:00Z"), ZoneOffset.UTC)
+        );
+
+        BigDecimal lat = BigDecimal.valueOf(37.5665);
+        BigDecimal lon = BigDecimal.valueOf(126.9780);
+        WeatherLocationKey key = WeatherLocationKey.from(lat, lon);
+        WeatherSnapshot staleSnapshot = snapshot(true, "2026-03-29T09:40:00+09:00");
+        WeatherSnapshot refreshedSnapshot = snapshot(false, "2026-03-29T10:19:00+09:00");
+        AtomicInteger providerCallCount = new AtomicInteger();
+        CountDownLatch providerStarted = new CountDownLatch(1);
+
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.of(staleSnapshot));
+        given(weatherProviderPort.getCurrent(key)).willAnswer(invocation -> {
+            providerCallCount.incrementAndGet();
+            providerStarted.countDown();
+            Thread.sleep(200);
+            return WeatherProviderResult.success(refreshedSnapshot);
+        });
+
+        CurrentWeatherResponse first = weatherService.getCurrent(lat, lon);
+        providerStarted.await(1, TimeUnit.SECONDS);
+        CurrentWeatherResponse second = weatherService.getCurrent(lat, lon);
+
+        assertThat(first.stale()).isTrue();
+        assertThat(second.stale()).isTrue();
+        assertThat(providerCallCount.get()).isEqualTo(1);
         verify(lastSuccessWeatherStore, timeout(1000)).save(key, refreshedSnapshot);
     }
 
