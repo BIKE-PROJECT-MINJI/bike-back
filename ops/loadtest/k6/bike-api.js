@@ -34,7 +34,13 @@ function isPersonaEnabled(name) {
   return ACTIVE_PERSONAS.includes(name);
 }
 
-function baseRequestTags(extra = {}) {
+function baseRequestTags(extra) {
+  extra = extra || {};
+  return Object.assign(
+    { testid: TEST_ID, scenario_profile: SCENARIO },
+    extra
+  );
+}
   return {
     testid: TEST_ID,
     scenario_profile: SCENARIO,
