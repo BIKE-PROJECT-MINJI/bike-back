@@ -165,8 +165,8 @@ class OpenMeteoWeatherProviderTest {
     private org.hamcrest.Matcher<String> weatherForecastRequestMatcher() {
         return allOf(
                 containsString("https://api.open-meteo.com/v1/forecast"),
-                containsString("latitude=37.5665"),
-                containsString("longitude=126.9780"),
+                containsString("latitude=37.567"),
+                containsString("longitude=126.978"),
                 containsString("current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m"),
                 containsString("hourly=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m"),
                 containsString("wind_speed_unit=kmh"),

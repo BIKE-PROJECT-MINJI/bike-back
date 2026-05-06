@@ -7,10 +7,12 @@ public record WeatherLocationKey(
         BigDecimal lat,
         BigDecimal lon
 ) {
+    private static final int WEATHER_GRID_SCALE = 3;
+
     public static WeatherLocationKey from(BigDecimal lat, BigDecimal lon) {
         return new WeatherLocationKey(
-                lat.setScale(4, RoundingMode.HALF_UP),
-                lon.setScale(4, RoundingMode.HALF_UP)
+                lat.setScale(WEATHER_GRID_SCALE, RoundingMode.HALF_UP),
+                lon.setScale(WEATHER_GRID_SCALE, RoundingMode.HALF_UP)
         );
     }
 }
