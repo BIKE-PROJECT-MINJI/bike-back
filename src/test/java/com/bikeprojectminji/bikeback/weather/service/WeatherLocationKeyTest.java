@@ -9,15 +9,15 @@ import org.junit.jupiter.api.Test;
 class WeatherLocationKeyTest {
 
     @Test
-    @DisplayName("날씨 위치 키는 위경도를 소수 셋째 자리까지 반올림한다")
-    void fromRoundsLatLonToThreeDecimals() {
+    @DisplayName("날씨 위치 키는 위경도를 소수 둘째 자리까지 반올림한다")
+    void fromRoundsLatLonToTwoDecimals() {
         WeatherLocationKey key = WeatherLocationKey.from(
                 new BigDecimal("37.56654"),
                 new BigDecimal("126.97844")
         );
 
-        assertThat(key.lat()).isEqualByComparingTo("37.567");
-        assertThat(key.lon()).isEqualByComparingTo("126.978");
+        assertThat(key.lat()).isEqualByComparingTo("37.57");
+        assertThat(key.lon()).isEqualByComparingTo("126.98");
     }
 
     @Test

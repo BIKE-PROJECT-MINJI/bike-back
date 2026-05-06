@@ -7,7 +7,7 @@ public record WeatherLocationKey(
         BigDecimal lat,
         BigDecimal lon
 ) {
-    private static final int WEATHER_GRID_SCALE = 3;
+    private static final int WEATHER_GRID_SCALE = 2;
 
     public static WeatherLocationKey from(BigDecimal lat, BigDecimal lon) {
         return new WeatherLocationKey(
