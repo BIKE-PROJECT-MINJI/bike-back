@@ -35,6 +35,12 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Environment ###
+.env
+.env.*
+!.env.example
+
 # Terraform local state
 ops/aws/alb-acm-route53/.terraform/
 ops/aws/alb-acm-route53/.terraform.lock.hcl
