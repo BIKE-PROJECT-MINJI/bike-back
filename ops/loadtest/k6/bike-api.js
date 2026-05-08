@@ -6,6 +6,7 @@ var SCENARIO = __ENV.SCENARIO || 'smoke';
 var ACTIVE_PERSONAS = parsePersonaFilter(__ENV.PERSONAS || 'home,preRide,inRide,write,health');
 var TEST_ID = __ENV.TEST_ID || 'bike-' + SCENARIO;
 var SUMMARY_DIR = (__ENV.SUMMARY_DIR || 'ops/loadtest/results').replace(/\/$/, '');
+var ENABLE_WEATHER_READ = ((__ENV.ENABLE_WEATHER_READ || 'true') + '').toLowerCase() !== 'false';
 
 if (!BASE_URL) {
   throw new Error('BASE_URL 환경변수는 필수입니다. 예: BASE_URL=http://localhost:8080');
@@ -311,6 +312,9 @@ function runRoutePointsRead(setupData) {
 }
 
 function runWeatherRead() {
+  if (!ENABLE_WEATHER_READ) {
+    return;
+  }
   group('weather current', function() {
     var lat = stringEnv('WEATHER_LAT', '37.5665');
     var lon = stringEnv('WEATHER_LON', '126.9780');
