@@ -1,240 +1,195 @@
-# bike-back
+# GAJA Backend
 
-`bike-back`은 GAJA 프로젝트의 Spring Boot API 서버입니다.
+## 1. 한 줄 요약
 
-GAJA는 **가벼운 자전거 여행을 위한 주행 HUD 프로젝트**이고,
-이 저장소는 그중 코스, 정책, 날씨, 인증/프로필, 주행 기록, 이벤트 수집 같은 backend 책임을 맡습니다.
+자전거 주행 중 경로, 날씨, 주행 상태를 한 화면에서 확인하도록 돕는 GAJA 서비스의 Spring Boot 백엔드입니다.
 
-> Organization: [BIKE-PROJECT-MINJI](https://github.com/BIKE-PROJECT-MINJI)  
-> Related repositories: [bike-front](https://github.com/BIKE-PROJECT-MINJI/bike-front)
+## 2. 내가 맡은 역할
 
-## What this repository does
 
-GAJA는 자전거 여행 중 **경로와 상태 정보를 한 화면에서 확인하게 해 외부 앱 재진입을 줄이는 주행 HUD 앱**입니다.
+- 코스 조회, route point 조회, 코스 공유/다운로드 API 구현
+- 주행 시작 가능 여부와 경로 이탈 판단 정책 구현
+- 자유 주행 기록 저장, finalization 상태 전이, 기록 기반 코스 생성 구현
+- 외부 날씨 API 연동과 stale/fallback 정책 구현
+- `/health`, `/health/monitor`, request id 기반 요청 추적 구성
+- k6 smoke/baseline/stress 부하 검증 스크립트 작성
 
-`bike-back`은 아래 책임을 가집니다.
-- 홈 추천 코스 / 전체 코스 목록 / 코스 상세 / 경로 좌표 제공
-- ride 시작 가능 여부 및 이탈 경고 계산
-- 날씨 / 풍향 / 풍속 조회와 fallback 정책 제공
-- 최소 인증 / 프로필 / owner 판정
-- 자유 주행 기록 저장과 기록 기반 코스 생성
-- 클라이언트 행동 이벤트 수집과 ride telemetry 저장
-- 코스 공개 범위 / 공유 / 다운로드 제어
+## 3. 문제 정의
 
-## Current scope
+자전거 주행 중 사용자가 지도, 날씨, 주행 상태를 여러 앱에서 번갈아 확인하면 주행 집중도가 떨어집니다. 백엔드는 코스 경로와 현재 위치를 기준으로 주행 가능 여부와 이탈 상태를 판단하고, 외부 날씨 API가 느리거나 실패해도 앱 응답이 흔들리지 않도록 보호해야 했습니다.
 
-### 현재 구현/연결 범위
-- 추천 코스 조회
-- 전체 코스 목록 조회
-- 코스 상세 조회
-- 코스 경로 좌표 조회
-- ride 시작 가능 여부 평가
-- 현재 날씨 조회
-- 최근 위치 조회
-- health endpoint
+## 4. 핵심 기능
 
-### 최근 보강한 backend 판단/보호 경로
-- `RidePolicyService`는 최근접 route 계산을 `RouteProjectionIndex` 기준으로 재사용하며, `local window + segment projection + full-scan fallback` 구조를 사용합니다.
-- 코스 route read hot path는 `CourseRouteSnapshotService`의 in-process snapshot cache로 재사용합니다.
-- route-points / download / ride-policy evaluate는 같은 코스 route snapshot을 공유하고, 코스 생성/수정 시 명시적으로 cache를 비웁니다.
-- 날씨는 stale-first 보호 전략을 유지하되, provider timeout 직후 grace window 안에 회복되는 응답은 fresh로 살려 사용자 응답과 외부 지연을 분리합니다.
-- route cache hit/miss/load/eviction 메트릭과 weather fallback 메트릭을 함께 남겨 운영에서 보호 동작과 실제 장애 신호를 구분합니다.
+- 추천/전체 코스, 코스 상세, 경로 좌표 조회
+- local window + segment projection 기반 최근접 경로 계산
+- 경로 이탈 후보/경고/복귀 상태 판단
+- route snapshot cache로 route-points/download/ride-policy hot path 재사용
+- 자유 주행 기록 저장과 `FINALIZING -> READY/FAILED` 상태 전이
+- Open-Meteo current weather + hourly fallback + stale cache fallback
+- `/health`, `/health/monitor`, Prometheus/Grafana 관측 지점
+- k6 시나리오 기반 API 부하 검증
 
-### 다음 단계에서 확장할 범위
-- 회원가입 / 로그인 / JWT 발급
-- 내 인증 상태 조회
-- 내 프로필 조회 / 수정
-- 자유 주행 기록 저장
-- 자유 주행 finalization 상태 조회 / 재생성
-- 기록 기반 코스 생성
-- 코스 수정 / 공개 범위 변경
-- 공개 코스 검색
-- 코스 공유 / 다운로드
-- 이벤트 수집 API
-- `PUBLIC / UNLISTED / PRIVATE` 접근 제어
+## 5. 핵심 코드 바로가기
 
-## Core API surface
+| 보여줄 코드 | 링크 | 이유 |
+| --- | --- | --- |
+| 주행 상태 전이 | [`RideRecordEntity.markFinalizing/markReady/markFailed`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/ride/entity/RideRecordEntity.java#L116-L138) | 주행 종료 후 저장 상태를 명확히 분리한 도메인 판단입니다. |
+| 주행 기록 finalization | [`RideRecordFinalizationService.finalizeRideRecord`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/ride/service/RideRecordFinalizationService.java#L72-L100) | raw point를 처리해 기록을 확정하고 실패 상태를 남깁니다. |
+| 경로 이탈 판단 | [`RidePolicyService.evaluateOffRoute`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/ride/policy/service/RidePolicyService.java#L203-L279) | `ON_ROUTE -> CANDIDATE -> WARNING` 판단과 복귀 처리를 확인할 수 있습니다. |
+| 경로 투영 | [`RouteProjectionIndex`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/ride/policy/service/RouteProjectionIndex.java#L20-L38) | 단순 point 비교가 아니라 segment projection 기준으로 최근접 지점을 찾습니다. |
+| route snapshot | [`CourseRouteSnapshotService`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/course/service/CourseRouteSnapshotService.java#L40-L94) | ordered route list와 projection index를 snapshot으로 재사용합니다. |
+| 외부 날씨 fallback | [`OpenMeteoWeatherProvider`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/weather/infrastructure/OpenMeteoWeatherProvider.java#L56-L171) | current payload 실패 시 hourly forecast snapshot으로 fallback합니다. |
+| stale weather fallback | [`WeatherService.getCurrent`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/weather/service/WeatherService.java#L63-L124) | 외부 지연과 사용자 응답을 분리하는 stale-first 보호 전략입니다. |
+| `/health` | [`HealthController`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/global/health/HealthController.java#L8-L20) | public smoke check 기준입니다. |
+| `/health/monitor` | [`MonitoringController`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/global/monitor/MonitoringController.java#L7-L19) | DB/Redis 상태를 포함한 운영 확인 경로입니다. |
+| request id 추적 | [`HttpRequestLoggingFilter`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/global/logging/HttpRequestLoggingFilter.java#L14-L44) | `X-Request-Id`를 MDC와 응답 헤더에 연결합니다. |
+| k6 부하 테스트 | [`ops/loadtest/k6/bike-api.js`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/ops/loadtest/k6/bike-api.js#L83-L169) | persona 기반 시나리오와 p95/error-rate threshold가 있습니다. |
 
-| Domain | Endpoints |
-|---|---|
-| Auth / Profile | `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `GET /api/v1/auth/me`, `GET/PATCH /api/v1/profile/me` |
-| Course Discovery | `GET /api/v1/courses`, `GET /api/v1/courses/featured`, `GET /api/v1/courses/{courseId}`, `GET /api/v1/courses/{courseId}/route-points` |
-| Course Create / Share | `POST /api/v1/courses`, `PUT /api/v1/courses/{courseId}`, `PATCH /api/v1/courses/{courseId}/visibility`, `POST /api/v1/courses/{courseId}/share`, `GET /api/v1/courses/search`, `GET /api/v1/courses/{courseId}/download` |
-| Ride | `POST /api/v1/courses/{courseId}/ride-policy/evaluate`, `POST /api/v1/ride-records`, `GET /api/v1/ride-records/{rideRecordId}`, `POST /api/v1/ride-records/{rideRecordId}/regenerate` |
-| Event | `POST /api/v1/events`, `POST /api/v1/events/batch` |
-| Weather / Ops | `GET /api/v1/weather/current`, `GET /health` |
+## 6. 아키텍처
 
-## Stack
+```mermaid
+flowchart LR
+    Client[Mobile / Frontend] --> API[Spring Boot API]
+    API --> Auth[Auth / Profile]
+    API --> Course[Course Domain]
+    API --> Ride[Ride Domain]
+    API --> Weather[Weather Domain]
+    API --> Event[Client Event Domain]
 
-- Java 17
-- Spring Boot 3.5.7
-- Spring Web
-- Spring Security / JWT
-- Spring Data JPA
-- Spring Data Redis
-- Flyway
-- PostgreSQL + PostGIS
-- Gradle Wrapper
+    Course --> Snapshot[CourseRouteSnapshotService]
+    Snapshot --> Projection[RouteProjectionIndex]
+    Ride --> Policy[RidePolicyService]
+    Policy --> Projection
+    Ride --> Finalize[RideRecordFinalizationService]
+    Weather --> Provider[OpenMeteoWeatherProvider]
+    Weather --> Cache[Last Success Weather Cache]
 
-## Project structure
-
-```text
-com.bikeprojectminji.bikeback
-├─ auth/
-├─ course/
-├─ event/
-├─ location/
-├─ profile/
-├─ ride/
-├─ weather/
-└─ global/
+    API --> Postgres[(PostgreSQL / PostGIS)]
+    API --> Redis[(Redis)]
+    Provider --> OpenMeteo[Open-Meteo API]
+    API --> Health[/health]
+    API --> Monitor[/health/monitor]
 ```
 
-- 도메인 기준 최상단 패키지 구조를 사용합니다.
-- 각 도메인 아래에는 `controller / service / repository / entity / dto / infrastructure` 중 필요한 레이어만 둡니다.
-- `global/`은 공통 설정, 예외, 응답, Redis, health 같은 기술 레이어만 둡니다.
+```mermaid
+sequenceDiagram
+    participant App as Client
+    participant API as Spring Boot API
+    participant Snapshot as CourseRouteSnapshotService
+    participant Policy as RidePolicyService
+    participant DB as PostgreSQL
 
-## Local development
+    App->>API: POST /api/v1/courses/{courseId}/ride-policy/evaluate
+    API->>Snapshot: get(courseId)
+    alt cache miss
+        Snapshot->>DB: load ordered route points
+        Snapshot->>Snapshot: build RouteProjectionIndex
+    end
+    API->>Policy: evaluate current location
+    Policy->>Policy: local window + segment projection + fallback
+    Policy-->>API: ON_ROUTE / CANDIDATE / WARNING
+    API-->>App: ride policy response
+```
 
-### WSL / bash
+## 7. ERD
+
+```mermaid
+erDiagram
+    USERS ||--o{ COURSES : owns
+    USERS ||--o{ RIDE_RECORDS : records
+    USERS ||--o{ CLIENT_EVENTS : sends
+    COURSES ||--o{ COURSE_ROUTE_POINTS : has
+    COURSES ||--o{ RIDE_RECORDS : source_course
+    RIDE_RECORDS ||--o{ RIDE_POINTS : has
+    RIDE_RECORDS ||--o| COURSES : creates
+
+    USERS {
+        bigint id PK
+        string email
+        string display_name
+    }
+    COURSES {
+        bigint id PK
+        bigint owner_user_id FK
+        bigint source_ride_record_id FK
+        string title
+        string visibility
+    }
+    COURSE_ROUTE_POINTS {
+        bigint id PK
+        bigint course_id FK
+        int sequence
+        decimal latitude
+        decimal longitude
+    }
+    RIDE_RECORDS {
+        bigint id PK
+        bigint user_id FK
+        bigint course_id FK
+        string finalization_status
+        timestamp started_at
+        timestamp ended_at
+    }
+    RIDE_POINTS {
+        bigint id PK
+        bigint ride_record_id FK
+        int sequence
+        decimal latitude
+        decimal longitude
+    }
+    CLIENT_EVENTS {
+        bigint id PK
+        bigint user_id FK
+        bigint course_id FK
+        string event_name
+    }
+```
+
+## 8. API 명세
+
+| Domain | Endpoints |
+| --- | --- |
+| Auth/Profile | `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `GET /api/v1/auth/me`, `GET/PATCH /api/v1/profile/me` |
+| Course | `GET /api/v1/courses`, `GET /api/v1/courses/featured`, `GET /api/v1/courses/{courseId}`, `GET /api/v1/courses/{courseId}/route-points` |
+| Course Write/Share | `POST /api/v1/courses`, `PUT /api/v1/courses/{courseId}`, `PATCH /api/v1/courses/{courseId}/visibility`, `POST /api/v1/courses/{courseId}/share`, `GET /api/v1/courses/search`, `GET /api/v1/courses/{courseId}/download` |
+| Ride | `POST /api/v1/courses/{courseId}/ride-policy/evaluate`, `POST /api/v1/ride-records`, `GET /api/v1/ride-records/{rideRecordId}`, `POST /api/v1/ride-records/{rideRecordId}/regenerate` |
+| Event | `POST /api/v1/events`, `POST /api/v1/events/batch` |
+| Weather/Ops | `GET /api/v1/weather/current`, `GET /health`, `GET /health/monitor` |
+
+## 9. 실행 방법
+
 ```bash
-./gradlew test
-./gradlew build
+cp .env.example .env
+set -a && source .env && set +a
 ./gradlew bootRun
 ```
 
-### Windows PowerShell
-```powershell
-./gradlew.bat test
-./gradlew.bat build
-./gradlew.bat bootRun
-```
-
-### Local observability (Grafana + Prometheus)
-
-내부지표 관제용 로컬 기본 경로는 아래다.
-
-1. backend 앱 기동
-   - management port는 기본 `18081`
-   - Prometheus scrape endpoint는 `http://localhost:18081/actuator/prometheus`
-2. observability 스택 기동
-   - `docker-compose.local.yml`의 `prometheus`, `grafana`, `postgres_exporter`, `redis_exporter` 사용
-3. Grafana 접속
-   - 기본 URL: `http://localhost:3000`
-4. Prometheus 접속
-   - 기본 URL: `http://localhost:9090`
-
-#### WSL + Windows Docker Desktop fallback
-
-이 저장소는 WSL 작업을 기본으로 하지만, Docker daemon은 Windows Docker Desktop을 사용할 수 있다.
+## 10. 테스트/검증
 
 ```bash
-./gradlew bootRun &
-cmd.exe /c docker compose -f docker-compose.local.yml up -d prometheus grafana postgres_exporter redis_exporter
+./gradlew --no-daemon clean check build
 ```
 
-#### 확인 포인트
-
-- `http://localhost:18081/actuator/prometheus`가 열리는가
-- Grafana에 `BIKE API Overview`, `BIKE Data Platform Overview`, `BIKE Load Validation Prep` 대시보드가 보이는가
-- Prometheus target에서 app / postgres_exporter / redis_exporter / prometheus가 `UP`으로 잡히는가
-- `/health`, `/health/monitor`는 기존 운영 확인 경로로 계속 유지되는가
-
-## Verification policy
-
-- 기능 추가/수정 시 검증 테스트를 함께 작성합니다.
-- 엔티티 테스트는 순수 단위 테스트로 작성합니다.
-- 서비스 테스트는 `@SpringBootTest` 기반 통합 테스트를 사용합니다.
-- 작업 보고에는 테스트 체크리스트를 먼저 두고, 실제 통과한 항목만 `[x]`로 표시합니다.
-- README는 계획이 아니라 **실제로 구현된 범위만** 기록합니다.
-
-## Recent technical choices
-
-### 최근접 route 판단
-- route point 순서에 대한 단순 이진탐색 대신, `polyline segment projection`을 source of truth로 유지합니다.
-- 1차 최적화는 `last-matched local window + segment projection + full-scan fallback`으로 적용했습니다.
-- correctness를 우선하기 때문에 local window miss나 저신뢰 상황에서는 전체 scan fallback을 유지합니다.
-
-### route read hot path
-- `course_route_points` row-per-point ordered list는 source of truth로 유지합니다.
-- 대신 반복 조회가 많은 `route-points`, `download`, `ride-policy`에는 in-process route snapshot cache를 둬 ordered list 조회와 `RouteProjectionIndex` 재생성을 줄였습니다.
-- Redis shared cache나 geometry read model은 후속 승격 후보로 남겨 두었습니다.
-
-### weather 보호 전략
-- 외부 provider 성공값을 우선 사용하되, last-success 캐시가 있으면 stale-first로 먼저 응답합니다.
-- provider 지연이 전체 응답을 끌고 가지 않도록 connect/read timeout, 총 요청 시간 제한, timeout grace window를 함께 둡니다.
-- stale serve와 실제 fallback/degradation 신호는 metric과 log에서 구분합니다.
-
-## CI/CD
-
-- GitHub Actions CI: `.github/workflows/backend-ci.yml`
-- GitHub Actions CD: `.github/workflows/backend-cd.yml`
-- 기본 CD 경로: GitHub OIDC -> AWS IAM role -> S3 artifact -> SSM Run Command -> app EC2 `systemd` restart
-- 자세한 서버 준비 조건과 GitHub 설정값은 `docs/aws-ec2-github-actions-cicd.md`를 따릅니다.
-
-## Public API / operational note
-
-- 현재 배포 smoke 기준 public health endpoint는 `/health`입니다.
-- API는 앱과 내부 운영 검증을 함께 지원하지만, README에는 실제로 열려 있는 현재 surface만 기록합니다.
-- 이벤트 수집 API는 로그인 사용자 기준으로 저장되며, 민감 키는 저장 전에 제거합니다.
-
-## Current docs
-
-- `DOCS/00_기준/프로젝트_헌법.md`
-- `DOCS/00_기준/통합_개발_테스트_방법론.md`
-- `DOCS/00_기준/기술판단_변경_기록_작성_원칙.md`
-- `DOCS/15_기능명세/backend/백엔드_기능명세_통합.md`
-- `DOCS/15_기능명세/backend/인증_프로필_백엔드_계약_및_요구사항.md`
-- `DOCS/15_기능명세/backend/코스_생성_공유_백엔드_계약_및_요구사항.md`
-
-## Analysis SQL examples
-
-```sql
--- 코스 퍼널
-select event_name, count(*)
-from client_events
-where event_name in (
-  'course_list_viewed',
-  'course_selected',
-  'course_detail_viewed',
-  'ride_start_clicked',
-  'ride_started',
-  'ride_completed'
-)
-group by event_name
-order by event_name;
-
--- 주행 시작 차단 사유
-select properties_json ->> 'reason' as reason, count(*)
-from client_events
-where event_name = 'ride_start_blocked'
-group by properties_json ->> 'reason'
-order by count(*) desc;
-
--- 코스별 클릭률
-select course_id,
-       sum(case when event_name = 'course_impression' then 1 else 0 end) as impressions,
-       sum(case when event_name = 'course_selected' then 1 else 0 end) as selections
-from client_events
-where course_id is not null
-group by course_id;
-
--- 코스별 완료율
-select course_id,
-       sum(case when event_name = 'ride_started' then 1 else 0 end) as started,
-       sum(case when event_name = 'ride_completed' then 1 else 0 end) as completed
-from client_events
-where course_id is not null
-group by course_id;
-
--- 저장 실패율
-select
-  sum(case when event_name = 'ride_end_clicked' then 1 else 0 end) as ride_end_clicked,
-  sum(case when event_name = 'ride_record_save_failed' then 1 else 0 end) as ride_record_save_failed
-from client_events;
+```bash
+cp ops/loadtest/k6.env.example ops/loadtest/k6.env
+k6 run ops/loadtest/k6/bike-api.js
 ```
 
-## Notes
+- 대표 로컬 k6 결과 후보에서 route-read p95 약 `15.7ms`, health p95 약 `271.7ms`를 확인했습니다.
+- raw 결과 디렉터리는 기본적으로 git에 올리지 않고, README에는 실패한 단일 요청 결과를 성능 근거로 쓰지 않습니다.
 
-- 기능이 추가되거나 제거되면 **Current scope**와 **Core API surface**를 함께 갱신합니다.
-- current 문서와 구현이 어긋나면 README보다 current 문서를 먼저 바로잡습니다.
+## 11. 트러블슈팅
+
+| 문제 | 원인 | 해결 | 배운 점 |
+| --- | --- | --- | --- |
+| 경로 이탈 판단 흔들림 | 단일 point 거리 비교 한계 | segment projection + local window + full-scan fallback | 위치 기반 로직은 correctness 기준을 먼저 고정해야 함 |
+| route-points 반복 조회 비용 | 여러 API가 같은 route ordered list 반복 로드 | snapshot cache와 projection index 재사용 | source of truth와 read hot path 최적화를 분리할 수 있음 |
+| 외부 날씨 API 지연/실패 | provider 응답 지연 또는 payload 누락 | hourly fallback, stale cache, timeout grace window | 외부 API 장애와 사용자 응답 장애를 분리해야 함 |
+| CD 실패 | SSM 대상 EC2가 valid managed instance 상태가 아님 | EC2 running, SSM Agent, instance profile, `APP_INSTANCE_ID` 확인 | 코드 실패와 인프라 설정 실패를 분리해야 함 |
+
+## 12. 한계와 개선점
+
+- route snapshot은 현재 in-process cache라 다중 인스턴스 운영에서는 shared cache 승격을 검토해야 합니다.
+- 경로 이탈 threshold는 실제 주행 데이터가 쌓이면 보정이 필요합니다.
+- Swagger/OpenAPI 정적 문서는 아직 없습니다. 현재는 controller/DTO와 README 표를 기준으로 API를 확인합니다.
+- k6 raw result는 로컬 보관이며, 포트폴리오에는 선별 요약만 남깁니다.
