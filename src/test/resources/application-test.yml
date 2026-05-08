@@ -19,6 +19,6 @@ spring:
 
 auth:
   jwt:
-    secret: 01234567890123456789012345678901
+    secret: test-only-jwt-secret-32-byte-key!
     issuer: bike-back-test
     token-validity-sec: 900
