@@ -16,7 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(HealthController.class)
 @Import(SecurityConfig.class)
 @TestPropertySource(properties = {
-        "auth.jwt.secret=01234567890123456789012345678901",
+    "auth.jwt.secret=test-only-jwt-secret-32-byte-key!",
         "auth.jwt.issuer=bike-back-test",
         "auth.jwt.token-validity-sec=3600"
 })
