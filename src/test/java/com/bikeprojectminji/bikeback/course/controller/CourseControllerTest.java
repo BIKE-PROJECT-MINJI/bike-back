@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseReportRequest;
+import com.bikeprojectminji.bikeback.course.dto.CourseReportResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseShareResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseDownloadResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseDetailResponse;
@@ -21,6 +23,8 @@ import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointsResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.course.entity.CourseReportReason;
+import com.bikeprojectminji.bikeback.course.service.CourseReportService;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
 import java.math.BigDecimal;
 import java.util.List;
@@ -48,6 +52,9 @@ class CourseControllerTest {
 
     @MockitoBean
     private CourseService courseService;
+
+    @MockitoBean
+    private CourseReportService courseReportService;
 
     @Test
     @DisplayName("코스 상세 API는 success 래퍼로 응답한다")
@@ -197,6 +204,39 @@ class CourseControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.visibility").value("PUBLIC"));
+    }
+
+    @Test
+    @DisplayName("코스 신고 API는 인증된 사용자의 신고 결과를 success 래퍼로 응답한다")
+    void reportCourseReturnsWrappedResponse() throws Exception {
+        given(courseReportService.reportCourse("2", 2001L, CourseReportReason.PRIVATE_PROPERTY_OR_CLOSED_ROAD))
+                .willReturn(new CourseReportResponse(2001L, 1, true, "PRIVATE_PROPERTY_OR_CLOSED_ROAD"));
+
+        mockMvc.perform(post("/api/v1/courses/2001/reports")
+                        .with(jwt().jwt(jwt -> jwt.subject("2")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "reason": "PRIVATE_PROPERTY_OR_CLOSED_ROAD"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.courseId").value(2001))
+                .andExpect(jsonPath("$.data.reportCount").value(1))
+                .andExpect(jsonPath("$.data.reportHidden").value(true));
+    }
+
+    @Test
+    @DisplayName("코스 신고 API는 신고 사유가 없으면 400을 반환한다")
+    void reportCourseReturnsBadRequestWithoutReason() throws Exception {
+        mockMvc.perform(post("/api/v1/courses/2001/reports")
+                        .with(jwt().jwt(jwt -> jwt.subject("2")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("reason은 비어 있을 수 없습니다."));
     }
 
     @Test

@@ -18,11 +18,21 @@ public interface CourseRepository extends JpaRepository<CourseEntity, Long>, Cou
 
     Optional<CourseEntity> findTopByOwnerUserIdAndSourceRideRecordIdOrderByIdDesc(Long ownerUserId, Long sourceRideRecordId);
 
+    List<CourseEntity> findByOwnerUserId(Long ownerUserId);
+
     List<CourseEntity> findByOwnerUserIdAndSourceRideRecordIdIn(Long ownerUserId, List<Long> sourceRideRecordIds);
 
-    List<CourseEntity> findTop20ByVisibilityOrderByIdDesc(CourseVisibility visibility);
+    List<CourseEntity> findTop20ByVisibilityAndReportHiddenFalseOrderByIdDesc(CourseVisibility visibility);
 
-    List<CourseEntity> findTop20ByVisibilityAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility visibility, String title);
+    List<CourseEntity> findTop20ByVisibilityAndReportHiddenFalseAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility visibility, String title);
+
+    default List<CourseEntity> findTop20ByVisibilityOrderByIdDesc(CourseVisibility visibility) {
+        return findTop20ByVisibilityAndReportHiddenFalseOrderByIdDesc(visibility);
+    }
+
+    default List<CourseEntity> findTop20ByVisibilityAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility visibility, String title) {
+        return findTop20ByVisibilityAndReportHiddenFalseAndTitleContainingIgnoreCaseOrderByIdDesc(visibility, title);
+    }
 
     @Query("select count(c) from CourseEntity c where c.ownerUserId = :ownerUserId")
     long countByOwnerUserId(Long ownerUserId);
@@ -31,6 +41,8 @@ public interface CourseRepository extends JpaRepository<CourseEntity, Long>, Cou
     long countByOwnerUserIdAndCreatedAtBetween(Long ownerUserId, OffsetDateTime start, OffsetDateTime end);
 
     default List<CourseEntity> findFeaturedCourses() {
-        return findByCuratedTrueOrderByFeaturedRankAscIdAsc();
+        return findByCuratedTrueAndVisibilityAndReportHiddenFalseOrderByFeaturedRankAscIdAsc(CourseVisibility.PUBLIC);
     }
+
+    List<CourseEntity> findByCuratedTrueAndVisibilityAndReportHiddenFalseOrderByFeaturedRankAscIdAsc(CourseVisibility visibility);
 }

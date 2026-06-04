@@ -2,10 +2,13 @@ package com.bikeprojectminji.bikeback.course.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.bikeprojectminji.bikeback.course.dto.FeaturedCourseResponse;
 import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
+import com.bikeprojectminji.bikeback.course.repository.FeaturedCourseDistanceCandidate;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import java.math.BigDecimal;
 import java.util.Collections;
@@ -50,6 +53,8 @@ class FeaturedCourseServiceTest {
     @Test
     @DisplayName("위치가 있으면 거리순으로 정렬하고 거리 동률은 featuredRank를 보조 기준으로 사용한다")
     void getFeaturedCoursesReturnsDistanceSortedCourses() {
+        given(courseRepository.findFeaturedCoursesNear(BigDecimal.valueOf(37.5000000), BigDecimal.valueOf(127.0000000), 3))
+                .willReturn(List.of());
         given(courseRepository.findFeaturedCourses()).willReturn(List.of(
                 featuredCourse(1L, "먼 코스", 2, 37.7000000, 127.2000000),
                 featuredCourse(2L, "가까운 코스 A", 2, 37.5001000, 127.0001000),
@@ -66,6 +71,44 @@ class FeaturedCourseServiceTest {
         assertThat(response.courses()).hasSize(3);
         assertThat(response.courses()).extracting("id").containsExactly(3L, 2L, 4L);
         assertThat(response.courses().get(0).distanceFromUserM()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("위치가 있으면 PostGIS 거리 후보를 우선 사용한다")
+    void getFeaturedCoursesUsesPostgisDistanceCandidatesFirst() {
+        BigDecimal lat = BigDecimal.valueOf(37.5000000);
+        BigDecimal lon = BigDecimal.valueOf(127.0000000);
+        CourseEntity nearest = featuredCourse(2L, "PostGIS 가까운 코스", 2, 37.5001000, 127.0001000);
+        CourseEntity second = featuredCourse(4L, "PostGIS 중간 코스", 4, 37.5400000, 127.0500000);
+        given(courseRepository.findFeaturedCoursesNear(lat, lon, 3)).willReturn(List.of(
+                new FeaturedCourseDistanceCandidate(nearest, 16),
+                new FeaturedCourseDistanceCandidate(second, 6120)
+        ));
+
+        FeaturedCourseResponse response = courseService.getFeaturedCourses(lat, lon);
+
+        assertThat(response.sortingMode()).isEqualTo("distance");
+        assertThat(response.courses()).hasSize(2);
+        assertThat(response.courses()).extracting("id").containsExactly(2L, 4L);
+        assertThat(response.courses()).extracting("distanceFromUserM").containsExactly(16, 6120);
+        verify(courseRepository, never()).findFeaturedCourses();
+    }
+
+    @Test
+    @DisplayName("PostGIS 거리 조회가 실패하면 기존 Java 거리 정렬로 fallback한다")
+    void getFeaturedCoursesFallsBackWhenPostgisDistanceQueryFails() {
+        BigDecimal lat = BigDecimal.valueOf(37.5000000);
+        BigDecimal lon = BigDecimal.valueOf(127.0000000);
+        given(courseRepository.findFeaturedCoursesNear(lat, lon, 3)).willThrow(new IllegalStateException("postgis down"));
+        given(courseRepository.findFeaturedCourses()).willReturn(List.of(
+                featuredCourse(1L, "먼 코스", 2, 37.7000000, 127.2000000),
+                featuredCourse(2L, "가까운 코스", 1, 37.5001000, 127.0001000)
+        ));
+
+        FeaturedCourseResponse response = courseService.getFeaturedCourses(lat, lon);
+
+        assertThat(response.sortingMode()).isEqualTo("distance");
+        assertThat(response.courses()).extracting("id").containsExactly(2L, 1L);
     }
 
     @Test

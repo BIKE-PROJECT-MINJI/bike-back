@@ -33,13 +33,14 @@ Prometheus + Grafana + exporter로 **운영 앱 내부지표를 브라우저에�
 
 ### 3-2. private scrape 경로
 
-- Prometheus -> `app EC2:18081/actuator/prometheus`
+- Prometheus -> app internal metrics scrape는 현재 비활성화
 - Prometheus -> local `postgres_exporter:9187`
 - Prometheus -> local `redis_exporter:9121`
 - `postgres_exporter` -> `db EC2:5432`
 - `redis_exporter` -> `REDIS_URL` 대상
 
 즉 browser는 Grafana만 보고, 내부 scrape는 private IP/SG로 제한한다.
+다만 `/actuator/prometheus`는 현재 인증 없는 접근을 401로 막으므로, app metrics scrape는 인증 방식 또는 network-only 허용 방식이 별도로 확정되기 전까지 Prometheus 설정에서 제외한다.
 
 ## 5. 보안 그룹 기준
 
@@ -66,7 +67,7 @@ Prometheus + Grafana + exporter로 **운영 앱 내부지표를 브라우저에�
 
 Spring Boot에는 이미 아래가 들어가 있다.
 
-- `/actuator/prometheus`
+- `/actuator/prometheus` endpoint 노출
 - custom business metric
 - management port `18081`
 
@@ -75,6 +76,8 @@ Spring Boot에는 이미 아래가 들어가 있다.
 - app `.env`에 `MANAGEMENT_PORT=18081`
 - security group으로 `18081`을 observability EC2에서만 허용
 - 필요 시 `MANAGEMENT_SERVER_ADDRESS=0.0.0.0`
+- 현재 release cleanup 기준에서는 `/actuator/prometheus`가 인증 없이는 401을 반환하므로, Prometheus app scrape job은 비활성화한다.
+- 후속으로 app metrics를 다시 켤 때는 Prometheus가 안전하게 인증할 수 있는 bearer token/basic auth 모델을 먼저 정하거나, management port를 private network 전용으로 고정한 뒤 해당 endpoint만 내부 scrape에 허용하는 별도 보안 설계를 문서화한다.
 
 ## 7. observability EC2 파일 위치
 
@@ -108,7 +111,7 @@ Spring Boot에는 이미 아래가 들어가 있다.
 
 1. backend env에 `MANAGEMENT_PORT=18081` 반영
 2. app 재기동
-3. observability EC2에서 `curl http://<app-private-ip>:18081/actuator/prometheus` 확인
+3. observability EC2에서 `curl http://<app-private-ip>:18081/actuator/prometheus`가 무인증 401을 반환하는지 확인
 
 ### 7-3. stack 기동
 
@@ -138,9 +141,12 @@ docker compose --env-file ./.env -f docker-compose.observability.yml up -d
 
 ### 8-1. private target 검증
 
-- app endpoint: `curl http://<app-private-ip>:18081/actuator/prometheus`
+- app endpoint: `curl http://<app-private-ip>:18081/actuator/prometheus` 무인증 401 확인
 - postgres exporter: `curl http://127.0.0.1:9187/metrics`
 - redis exporter: `curl http://127.0.0.1:9121/metrics`
+
+현재 Prometheus 설정에는 app endpoint scrape job을 넣지 않는다.
+`/actuator/prometheus` scrape를 다시 켜려면 인증 포함 scrape smoke 또는 private-only 허용 smoke를 먼저 통과시킨 뒤 template에 job을 복구한다.
 
 ### 8-2. Prometheus 검증
 
@@ -203,5 +209,6 @@ docker compose --env-file ./.env -f docker-compose.observability.yml up -d
 
 ## 14. 변경 이력
 
+- 2026-05-22: `/actuator/prometheus` 인증 경계 강화와 맞추기 위해 인증 없는 app metrics scrape job을 비활성화하고, 후속 secure scrape 모델 확정 전까지 Prometheus template에서 제외했다.
 - 2026-04-24: 실제 운영 도메인 `observability.gajabike.shop` 기준으로 DNS와 브라우저 접근 경로를 구체화했다.
 - 2026-04-24: observability 전용 EC2 + Prometheus + Grafana + exporter + nginx reverse proxy 기준을 추가했다.

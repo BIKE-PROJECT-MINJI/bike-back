@@ -1,20 +1,28 @@
 package com.bikeprojectminji.bikeback.auth.service;
 
 import com.bikeprojectminji.bikeback.auth.dto.AuthMeResponse;
+import com.bikeprojectminji.bikeback.auth.dto.KakaoLoginRequest;
 import com.bikeprojectminji.bikeback.auth.dto.LoginRequest;
 import com.bikeprojectminji.bikeback.auth.dto.LoginResponse;
 import com.bikeprojectminji.bikeback.auth.dto.RefreshTokenRequest;
 import com.bikeprojectminji.bikeback.auth.dto.RegisterRequest;
+import com.bikeprojectminji.bikeback.auth.entity.KakaoAccountLinkEntity;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
+import com.bikeprojectminji.bikeback.auth.entity.UserConsentEntity;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.UnauthorizedException;
+import com.bikeprojectminji.bikeback.auth.repository.KakaoAccountLinkRepository;
+import com.bikeprojectminji.bikeback.auth.repository.UserConsentRepository;
 import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.Period;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -26,6 +34,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AuthService {
@@ -38,7 +47,11 @@ public class AuthService {
     // 다른 도메인은 현재 사용자 식별/조회가 필요할 때 이 서비스를 통해 접근한다.
 
     private final UserRepository userRepository;
+    private final KakaoAccountLinkRepository kakaoAccountLinkRepository;
+    private final UserConsentRepository userConsentRepository;
+    private final AccountDeletionService accountDeletionService;
     private final RefreshTokenStore refreshTokenStore;
+    private final KakaoAccountClient kakaoAccountClient;
     private final JwtEncoder jwtEncoder;
     private final JwtDecoder jwtDecoder;
     private final PasswordEncoder passwordEncoder;
@@ -49,7 +62,11 @@ public class AuthService {
 
     public AuthService(
             UserRepository userRepository,
+            KakaoAccountLinkRepository kakaoAccountLinkRepository,
+            UserConsentRepository userConsentRepository,
+            AccountDeletionService accountDeletionService,
             RefreshTokenStore refreshTokenStore,
+            KakaoAccountClient kakaoAccountClient,
             JwtEncoder jwtEncoder,
             JwtDecoder jwtDecoder,
             PasswordEncoder passwordEncoder,
@@ -59,7 +76,11 @@ public class AuthService {
             @Value("${auth.jwt.refresh-token-validity-sec:1209600}") long refreshTokenValiditySec
     ) {
         this.userRepository = userRepository;
+        this.kakaoAccountLinkRepository = kakaoAccountLinkRepository;
+        this.userConsentRepository = userConsentRepository;
+        this.accountDeletionService = accountDeletionService;
         this.refreshTokenStore = refreshTokenStore;
+        this.kakaoAccountClient = kakaoAccountClient;
         this.jwtEncoder = jwtEncoder;
         this.jwtDecoder = jwtDecoder;
         this.passwordEncoder = passwordEncoder;
@@ -69,6 +90,7 @@ public class AuthService {
         this.refreshTokenValiditySec = refreshTokenValiditySec;
     }
 
+    @Transactional
     public LoginResponse register(RegisterRequest request) {
         // 회원가입은 이메일 중복을 먼저 막고,
         // 정상 사용자면 저장 직후 바로 access token까지 발급해 앱이 추가 로그인 없이 진입하도록 한다.
@@ -80,6 +102,7 @@ public class AuthService {
         return issueLoginResponse(savedUser);
     }
 
+    @Transactional(readOnly = true)
     public LoginResponse login(LoginRequest request) {
         // 로그인은 이메일로 사용자를 찾고, 저장된 passwordHash와 현재 입력 비밀번호를 비교한다.
         // 한쪽이라도 맞지 않으면 같은 예외 메시지로 응답해 계정 존재 여부를 노출하지 않는다.
@@ -93,6 +116,18 @@ public class AuthService {
         return issueLoginResponse(user);
     }
 
+    @Transactional
+    public LoginResponse kakaoLogin(KakaoLoginRequest request) {
+        String ageBand = resolveAgeBand(request.birthDate());
+        KakaoAccountProfile profile = kakaoAccountClient.fetchProfile(request.kakaoAccessToken());
+        UserEntity user = kakaoAccountLinkRepository.findByProviderUserId(profile.providerUserId())
+                .map(link -> updateLinkedKakaoUser(link, profile))
+                .orElseGet(() -> createKakaoUser(profile));
+        upsertUserConsent(user.getId(), request, ageBand);
+        return issueLoginResponse(user);
+    }
+
+    @Transactional(readOnly = true)
     public LoginResponse refresh(RefreshTokenRequest request) {
         // refresh 요청은 서명/만료 검증을 통과한 refresh token만 받아야 하므로,
         // decode 단계에서 실패하거나 tokenType이 다르면 동일한 401 계약으로 끊는다.
@@ -107,6 +142,7 @@ public class AuthService {
         }
     }
 
+    @Transactional(readOnly = true)
     public AuthMeResponse getCurrentUser(String subject) {
         // 이미 인증된 subject를 현재 사용자 aggregate로 해석하고,
         // 앱에서 바로 쓸 수 있는 최소 프로필 정보로 축약해 반환한다.
@@ -114,6 +150,22 @@ public class AuthService {
         return new AuthMeResponse(user.getId(), user.getEmail(), user.getDisplayName(), true, "USER");
     }
 
+    public void logout(String subject) {
+        UserEntity user = findUserBySubject(subject);
+        refreshTokenStore.delete(String.valueOf(user.getId()));
+    }
+
+    @Transactional
+    public void deleteCurrentUser(String subject) {
+        UserEntity user = findUserBySubject(subject);
+        accountDeletionService.deleteOwnedData(user.getId());
+        kakaoAccountLinkRepository.deleteByUserId(user.getId());
+        userConsentRepository.deleteByUserId(user.getId());
+        refreshTokenStore.delete(String.valueOf(user.getId()));
+        user.markDeleted(clock);
+    }
+
+    @Transactional(readOnly = true)
     public UserEntity findUserBySubject(String subject) {
         // 현재 토큰 subject는 숫자 userId일 수도 있고, 레거시 externalId일 수도 있다.
         // 두 경로를 모두 허용해 이전 토큰과 새 토큰의 연속성을 유지한다.
@@ -144,6 +196,65 @@ public class AuthService {
         );
     }
 
+    private UserEntity updateLinkedKakaoUser(KakaoAccountLinkEntity link, KakaoAccountProfile profile) {
+        UserEntity user = userRepository.findById(link.getUserId())
+                .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다."));
+        if (user.isDeleted()) {
+            throw new UnauthorizedException("삭제된 계정입니다.");
+        }
+        user.updateKakaoProfile(resolveKakaoDisplayName(profile), profile.profileImageUrl());
+        return user;
+    }
+
+    private UserEntity createKakaoUser(KakaoAccountProfile profile) {
+        UserEntity user = userRepository.save(new UserEntity(
+                "kakao:" + profile.providerUserId(),
+                null,
+                null,
+                resolveKakaoDisplayName(profile),
+                profile.profileImageUrl()
+        ));
+        kakaoAccountLinkRepository.save(new KakaoAccountLinkEntity(user.getId(), profile.providerUserId(), clock));
+        return user;
+    }
+
+    private void upsertUserConsent(Long userId, KakaoLoginRequest request, String ageBand) {
+        UserConsentEntity consent = userConsentRepository.findByUserId(userId)
+                .orElseGet(() -> new UserConsentEntity(
+                        userId,
+                        request.privacyPolicyVersion(),
+                        request.termsVersion(),
+                        request.locationTermsVersion(),
+                        ageBand,
+                        clock
+                ));
+        consent.updateVersions(request.privacyPolicyVersion(), request.termsVersion(), request.locationTermsVersion(), ageBand, clock);
+        userConsentRepository.save(consent);
+    }
+
+    private String resolveAgeBand(String birthDateText) {
+        if (birthDateText == null || birthDateText.isBlank()) {
+            throw new BadRequestException("birthDate는 비어 있을 수 없습니다.");
+        }
+        try {
+            LocalDate birthDate = LocalDate.parse(birthDateText);
+            int age = Period.between(birthDate, LocalDate.now(clock)).getYears();
+            if (age < 14) {
+                throw new BadRequestException("만 14세 이상만 가입할 수 있습니다.");
+            }
+            return age >= 19 ? "ADULT" : "TEEN";
+        } catch (DateTimeException exception) {
+            throw new BadRequestException("birthDate는 yyyy-MM-dd 형식이어야 합니다.");
+        }
+    }
+
+    private String resolveKakaoDisplayName(KakaoAccountProfile profile) {
+        if (profile.nickname() != null && !profile.nickname().isBlank()) {
+            return profile.nickname();
+        }
+        return "gaja-rider";
+    }
+
     private String issueToken(UserEntity user, String tokenType, long validitySec) {
         // 토큰은 현재 userId를 subject로 고정하고,
         // 앱이 자주 쓰는 email/displayName과 토큰 타입만 claim으로 최소 포함한다.
@@ -160,8 +271,10 @@ public class AuthService {
                 .expiresAt(expiresAt)
                 .subject(String.valueOf(user.getId()))
                 .claim("tokenType", tokenType)
-                .claim("email", user.getEmail())
                 .claim("displayName", user.getDisplayName());
+        if (user.getEmail() != null) {
+            claimsBuilder.claim("email", user.getEmail());
+        }
 
         if (TOKEN_TYPE_REFRESH.equals(tokenType)) {
             claimsBuilder.claim("jti", UUID.randomUUID().toString());

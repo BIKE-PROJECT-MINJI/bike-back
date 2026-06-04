@@ -13,6 +13,7 @@ import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusRespon
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordListItemResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordListResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
+import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.DisplayName;
@@ -137,5 +138,18 @@ class RideRecordControllerTest {
                 .andExpect(jsonPath("$.data.distanceM").value(18250))
                 .andExpect(jsonPath("$.data.durationSec").value(3600))
                 .andExpect(jsonPath("$.data.linkedCourseId").value(2001));
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 상세 API는 기록이 없으면 404를 반환한다")
+    void getRideRecordStatusReturnsNotFoundWhenRecordMissing() throws Exception {
+        given(rideRecordService.getRideRecordStatus("1", 999L))
+                .willThrow(new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
+
+        mockMvc.perform(get("/api/v1/ride-records/999")
+                        .with(jwt().jwt(jwt -> jwt.subject("1"))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.message").value("자유 주행 기록을 찾을 수 없습니다."));
     }
 }

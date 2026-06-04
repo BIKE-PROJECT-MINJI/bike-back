@@ -8,4 +8,6 @@ public interface RefreshTokenStore {
     Optional<RefreshTokenSession> findBySubject(String subject);
 
     void save(String subject, RefreshTokenSession session, Duration ttl);
+
+    void delete(String subject);
 }

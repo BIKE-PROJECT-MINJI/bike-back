@@ -9,6 +9,7 @@ import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyCompletionRespons
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationResponse;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyGateResponse;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyOffRouteResponse;
+import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyProgressResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.ride.policy.service.RidePolicyService;
 import org.junit.jupiter.api.DisplayName;
@@ -39,12 +40,18 @@ class RidePolicyControllerTest {
     @Test
     @DisplayName("주행 정책 평가는 기존 course path 계약을 유지한 채 success 래퍼로 응답한다")
     void evaluateRidePolicyReturnsWrappedResponse() throws Exception {
-        given(ridePolicyService.evaluate(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.any()))
+        given(ridePolicyService.evaluate(
+                org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any()
+        ))
                 .willReturn(new RidePolicyEvaluationResponse(
                         "PRE_START",
                         new RidePolicyGateResponse("ELIGIBLE", "WITHIN_START_POINT_THRESHOLD", 12, 50),
                         new RidePolicyOffRouteResponse("UNDETERMINED", "NOT_ACTIVE_YET", null, 50, 15, 30, null),
                         new RidePolicyCompletionResponse("UNDETERMINED", "NOT_ACTIVE_YET", null, 80, null, null, null, null),
+                        new RidePolicyProgressResponse(400, 600, 40, 3),
                         "PRE_START_ELIGIBLE",
                         "주행을 시작할 수 있습니다."
                 ));
@@ -70,6 +77,10 @@ class RidePolicyControllerTest {
                 .andExpect(jsonPath("$.data.offRoute.status").value("UNDETERMINED"))
                 .andExpect(jsonPath("$.data.completion.status").value("UNDETERMINED"))
                 .andExpect(jsonPath("$.data.startGate.distanceM").value(12))
-                .andExpect(jsonPath("$.data.startGate.thresholdM").value(50));
+                .andExpect(jsonPath("$.data.startGate.thresholdM").value(50))
+                .andExpect(jsonPath("$.data.progress.distanceAlongRouteM").value(400))
+                .andExpect(jsonPath("$.data.progress.remainingDistanceM").value(600))
+                .andExpect(jsonPath("$.data.progress.progressPercent").value(40))
+                .andExpect(jsonPath("$.data.progress.nearestSegmentIndex").value(3));
     }
 }

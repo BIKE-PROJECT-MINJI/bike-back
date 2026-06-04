@@ -8,13 +8,20 @@ import com.bikeprojectminji.bikeback.profile.dto.ProfileActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileOverallActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileMeResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileWeeklyActivitySummaryResponse;
+import com.bikeprojectminji.bikeback.profile.dto.UpdatePreferenceRequest;
+import com.bikeprojectminji.bikeback.profile.dto.UserPreferenceResponse;
+import com.bikeprojectminji.bikeback.profile.entity.BikeRoadPriority;
+import com.bikeprojectminji.bikeback.profile.entity.UserPreferenceEntity;
+import com.bikeprojectminji.bikeback.profile.repository.UserPreferenceRepository;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
 import com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.TemporalAdjusters;
 import org.springframework.stereotype.Service;
 
@@ -29,19 +36,25 @@ public class ProfileService {
 
     private final AuthService authService;
     private final UserRepository userRepository;
+    private final UserPreferenceRepository userPreferenceRepository;
     private final RideRecordRepository rideRecordRepository;
     private final CourseRepository courseRepository;
+    private final Clock clock;
 
     public ProfileService(
             AuthService authService,
             UserRepository userRepository,
+            UserPreferenceRepository userPreferenceRepository,
             RideRecordRepository rideRecordRepository,
-            CourseRepository courseRepository
+            CourseRepository courseRepository,
+            Clock clock
     ) {
         this.authService = authService;
         this.userRepository = userRepository;
+        this.userPreferenceRepository = userPreferenceRepository;
         this.rideRecordRepository = rideRecordRepository;
         this.courseRepository = courseRepository;
+        this.clock = clock;
     }
 
     public ProfileMeResponse getMyProfile(String subject) {
@@ -60,6 +73,36 @@ public class ProfileService {
         return toResponse(savedUser);
     }
 
+    public UserPreferenceResponse getMyPreference(String subject) {
+        UserEntity user = authService.findUserBySubject(subject);
+        return userPreferenceRepository.findByUserId(user.getId())
+                .map(this::toPreferenceResponse)
+                .orElseGet(this::defaultPreferenceResponse);
+    }
+
+    public UserPreferenceResponse updateMyPreference(String subject, UpdatePreferenceRequest request) {
+        UserEntity user = authService.findUserBySubject(subject);
+        UserPreferenceEntity preference = userPreferenceRepository.findByUserId(user.getId())
+                .orElseGet(() -> UserPreferenceEntity.create(
+                        user.getId(),
+                        request.scenic(),
+                        request.bikeRoadPriority(),
+                        request.avoidDust(),
+                        request.avoidUnsafeSurface(),
+                        clock
+                ));
+        if (preference.getId() != null) {
+            preference.update(
+                    request.scenic(),
+                    request.bikeRoadPriority(),
+                    request.avoidDust(),
+                    request.avoidUnsafeSurface(),
+                    clock
+            );
+        }
+        return toPreferenceResponse(userPreferenceRepository.save(preference));
+    }
+
     public ProfileActivitySummaryResponse getMyActivitySummary(String subject) {
         // 활동 요약은 profile use case가 auth로 현재 사용자를 식별한 뒤,
         // ride/course 도메인의 집계 seam만 호출해 홈/내 정보가 함께 쓰는 canonical DTO로 묶어 반환한다.
@@ -73,6 +116,19 @@ public class ProfileService {
     private ProfileMeResponse toResponse(UserEntity user) {
         // 앱에서 필요한 최소 프로필 형태로만 잘라 응답해 도메인 entity가 직접 외부로 새지 않게 한다.
         return new ProfileMeResponse(user.getId(), user.getEmail(), user.getDisplayName(), user.getProfileImageUrl());
+    }
+
+    private UserPreferenceResponse toPreferenceResponse(UserPreferenceEntity preference) {
+        return new UserPreferenceResponse(
+                preference.isScenic(),
+                preference.getBikeRoadPriority(),
+                preference.isAvoidDust(),
+                preference.isAvoidUnsafeSurface()
+        );
+    }
+
+    private UserPreferenceResponse defaultPreferenceResponse() {
+        return new UserPreferenceResponse(false, BikeRoadPriority.MEDIUM, false, false);
     }
 
     private ProfileWeeklyActivitySummaryResponse buildWeeklySummary(Long userId, ActivitySummaryWindow window) {
@@ -117,7 +173,7 @@ public class ProfileService {
     }
 
     private ActivitySummaryWindow resolveCurrentWeekWindow() {
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.ofHours(9));
         OffsetDateTime weekStart = now.toLocalDate()
                 .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
                 .atStartOfDay()

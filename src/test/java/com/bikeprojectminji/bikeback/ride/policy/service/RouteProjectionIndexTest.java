@@ -33,6 +33,49 @@ class RouteProjectionIndexTest {
         assertThat(nearest.distanceToRouteM()).isLessThan(5d);
     }
 
+    @Test
+    @DisplayName("현재 위치를 경로 누적거리와 잔여거리로 변환한다")
+    void progressAtReturnsDistanceRemainingAndNearestSegment() {
+        Long courseId = 1L;
+        RouteProjectionIndex index = new RouteProjectionIndex(List.of(
+                routePoint(courseId, 1, 37.5665, 126.9780),
+                routePoint(courseId, 2, offsetLatitudeMeters(37.5665, 500), 126.9780),
+                routePoint(courseId, 3, offsetLatitudeMeters(37.5665, 1_000), 126.9780)
+        ));
+
+        RouteProjectionIndex.RouteProgress progress = index.progressAt(
+                tracePoint(offsetLatitudeMeters(37.5665, 400), 126.9780),
+                null
+        );
+
+        assertThat(progress.distanceAlongRouteM()).isBetween(395, 405);
+        assertThat(progress.remainingDistanceM()).isBetween(595, 605);
+        assertThat(progress.progressPercent()).isEqualTo(40);
+        assertThat(progress.nearestSegmentIndex()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("폐회로 종점 좌표는 이전 segment 힌트가 있으면 마지막 진행률로 계산한다")
+    void progressAtUsesPreviousSegmentHintForLoopFinishPoint() {
+        Long courseId = 1L;
+        RouteProjectionIndex index = new RouteProjectionIndex(List.of(
+                routePoint(courseId, 1, 37.5665, 126.9780),
+                routePoint(courseId, 2, offsetLatitudeMeters(37.5665, 300), 126.9780),
+                routePoint(courseId, 3, offsetLatitudeMeters(37.5665, 300), offsetLongitudeMeters(offsetLatitudeMeters(37.5665, 300), 126.9780, 300)),
+                routePoint(courseId, 4, 37.5665, offsetLongitudeMeters(37.5665, 126.9780, 300)),
+                routePoint(courseId, 5, 37.5665, 126.9780)
+        ));
+
+        RouteProjectionIndex.RouteProgress progress = index.progressAt(
+                tracePoint(37.5665, 126.9780),
+                2
+        );
+
+        assertThat(progress.progressPercent()).isEqualTo(100);
+        assertThat(progress.remainingDistanceM()).isEqualTo(0);
+        assertThat(progress.nearestSegmentIndex()).isEqualTo(3);
+    }
+
     private RideLocationRequest tracePoint(double lat, double lon) {
         return new RideLocationRequest(
                 BigDecimal.valueOf(lat),

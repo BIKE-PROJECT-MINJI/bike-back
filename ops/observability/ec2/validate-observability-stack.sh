@@ -9,8 +9,12 @@ set -a
 source "$ENV_FILE"
 set +a
 
-printf '[INFO] checking actuator endpoint\n'
-curl -fsS "http://${APP_PRIVATE_HOST}:18081/actuator/prometheus" >/tmp/bike-app-prometheus.txt
+printf '[INFO] checking actuator endpoint rejects unauthenticated access\n'
+ACTUATOR_STATUS="$(curl -sS -o /tmp/bike-app-prometheus.txt -w '%{http_code}' "http://${APP_PRIVATE_HOST}:18081/actuator/prometheus")"
+if [ "$ACTUATOR_STATUS" != "401" ]; then
+  printf '[ERROR] expected unauthenticated actuator prometheus status 401, got %s\n' "$ACTUATOR_STATUS" >&2
+  exit 1
+fi
 
 printf '[INFO] checking prometheus readiness\n'
 curl -fsS http://127.0.0.1:9090/-/ready >/tmp/bike-prometheus-ready.txt

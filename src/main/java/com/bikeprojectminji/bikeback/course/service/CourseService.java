@@ -1,5 +1,8 @@
 package com.bikeprojectminji.bikeback.course.service;
 
+import com.bikeprojectminji.bikeback.achievement.service.AchievementCompletionSignal;
+import com.bikeprojectminji.bikeback.achievement.service.AchievementRoutePoint;
+import com.bikeprojectminji.bikeback.achievement.service.AchievementService;
 import com.bikeprojectminji.bikeback.course.dto.CourseListItemResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseListResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseDownloadResponse;
@@ -26,9 +29,12 @@ import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
+import com.bikeprojectminji.bikeback.global.validation.CoordinateValidator;
 import java.math.RoundingMode;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
+import com.bikeprojectminji.bikeback.course.repository.CourseRouteGeometryRepository;
 import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepository;
+import com.bikeprojectminji.bikeback.course.repository.FeaturedCourseDistanceCandidate;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordProcessedPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
@@ -48,9 +54,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class CourseService {
 
     private static final int DEFAULT_LIMIT = 10;
+    private static final int FEATURED_LIMIT = 3;
+    private static final int MAX_LIMIT = 50;
     private static final Logger log = LoggerFactory.getLogger(CourseService.class);
 
     private final CourseRepository courseRepository;
+    private final CourseRouteGeometryRepository courseRouteGeometryRepository;
     private final CourseRoutePointRepository courseRoutePointRepository;
     private final RideRecordRepository rideRecordRepository;
     private final RideRecordPointRepository rideRecordPointRepository;
@@ -58,18 +67,23 @@ public class CourseService {
     private final AuthService authService;
     private final BikeMetricsRecorder bikeMetricsRecorder;
     private final CourseRouteSnapshotService courseRouteSnapshotService;
+    private final AchievementService achievementService;
+    private final CourseAccessPolicy courseAccessPolicy = new CourseAccessPolicy();
 
     public CourseService(
             CourseRepository courseRepository,
+            CourseRouteGeometryRepository courseRouteGeometryRepository,
             CourseRoutePointRepository courseRoutePointRepository,
             RideRecordRepository rideRecordRepository,
             RideRecordPointRepository rideRecordPointRepository,
             RideRecordProcessedPointRepository rideRecordProcessedPointRepository,
             AuthService authService,
             BikeMetricsRecorder bikeMetricsRecorder,
-            CourseRouteSnapshotService courseRouteSnapshotService
+            CourseRouteSnapshotService courseRouteSnapshotService,
+            AchievementService achievementService
     ) {
         this.courseRepository = courseRepository;
+        this.courseRouteGeometryRepository = courseRouteGeometryRepository;
         this.courseRoutePointRepository = courseRoutePointRepository;
         this.rideRecordRepository = rideRecordRepository;
         this.rideRecordPointRepository = rideRecordPointRepository;
@@ -77,6 +91,7 @@ public class CourseService {
         this.authService = authService;
         this.bikeMetricsRecorder = bikeMetricsRecorder;
         this.courseRouteSnapshotService = courseRouteSnapshotService;
+        this.achievementService = achievementService;
     }
 
     public CourseListResponse getCourses(Long cursor, Integer limit) {
@@ -127,8 +142,17 @@ public class CourseService {
     }
 
     public FeaturedCourseResponse getFeaturedCourses(BigDecimal lat, BigDecimal lon) {
-        // 추천 코스는 curated 후보를 먼저 읽고,
-        // 위치가 있으면 거리 기준 정렬, 없으면 fallback 순서로 제한된 개수만 노출한다.
+        // 위치가 있으면 PostGIS 거리 후보를 먼저 사용하고, 실패하거나 비어 있으면 Java fallback으로 내려간다.
+        boolean distanceMode = lat != null && lon != null;
+        if (distanceMode) {
+            List<FeaturedCourseDistanceCandidate> postgisCandidates = findFeaturedCoursesNear(lat, lon);
+            if (!postgisCandidates.isEmpty()) {
+                return new FeaturedCourseResponse("distance", postgisCandidates.stream()
+                        .map(this::toFeaturedResponse)
+                        .toList());
+            }
+        }
+
         List<CourseEntity> featuredCourses = courseRepository.findFeaturedCourses();
         if (featuredCourses.isEmpty()) {
             bikeMetricsRecorder.recordFeaturedCoursesFallback("no_curated_courses");
@@ -136,32 +160,47 @@ public class CourseService {
             return new FeaturedCourseResponse("fallback", List.of());
         }
 
-        boolean distanceMode = lat != null && lon != null;
         if (!distanceMode) {
             bikeMetricsRecorder.recordFeaturedCoursesFallback("missing_location_parameters");
             log.info("featured_courses_fallback request_id={} reason=missing_location_parameters", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId());
         }
+
         List<FeaturedCourseItemResponse> items = (distanceMode ? featuredCourses.stream()
                 .map(course -> toFeaturedResponse(course, lat, lon))
                 .sorted(Comparator
                         .comparing(FeaturedCourseItemResponse::distanceFromUserM, Comparator.nullsLast(Integer::compareTo))
                         .thenComparing(FeaturedCourseItemResponse::featuredRank, Comparator.nullsLast(Integer::compareTo))
                         .thenComparing(FeaturedCourseItemResponse::id))
-                .limit(3)
+                .limit(FEATURED_LIMIT)
                 .toList() : featuredCourses.stream()
                 .map(course -> toFeaturedResponse(course, null, null))
-                .limit(3)
+                .limit(FEATURED_LIMIT)
                 .toList());
 
         return new FeaturedCourseResponse(distanceMode ? "distance" : "fallback", items);
+    }
+
+    private List<FeaturedCourseDistanceCandidate> findFeaturedCoursesNear(BigDecimal lat, BigDecimal lon) {
+        try {
+            List<FeaturedCourseDistanceCandidate> candidates = courseRepository.findFeaturedCoursesNear(lat, lon, FEATURED_LIMIT);
+            if (candidates == null || candidates.isEmpty()) {
+                bikeMetricsRecorder.recordFeaturedCoursesFallback("postgis_distance_query_empty");
+                return List.of();
+            }
+            return candidates;
+        } catch (RuntimeException exception) {
+            bikeMetricsRecorder.recordFeaturedCoursesFallback("postgis_distance_query_failed");
+            log.warn("featured_courses_postgis_fallback request_id={} reason=postgis_distance_query_failed", com.bikeprojectminji.bikeback.global.logging.RequestLogContext.currentRequestId(), exception);
+            return List.of();
+        }
     }
 
     public CourseListResponse searchPublicCourses(String query, String sort) {
         validateSearchSort(sort);
 
         List<CourseEntity> courses = isBlank(query)
-                ? courseRepository.findTop20ByVisibilityOrderByIdDesc(CourseVisibility.PUBLIC)
-                : courseRepository.findTop20ByVisibilityAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility.PUBLIC, query.trim());
+                ? courseRepository.findTop20ByVisibilityAndReportHiddenFalseOrderByIdDesc(CourseVisibility.PUBLIC)
+                : courseRepository.findTop20ByVisibilityAndReportHiddenFalseAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility.PUBLIC, query.trim());
 
         List<CourseListItemResponse> items = courses.stream()
                 .map(course -> new CourseListItemResponse(
@@ -186,6 +225,10 @@ public class CourseService {
         if (rideRecord.getFinalizationStatus() != RideRecordFinalizationStatus.READY) {
             throw new BadRequestException("경로 보정이 아직 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
         }
+        courseRepository.findTopByOwnerUserIdAndSourceRideRecordIdOrderByIdDesc(user.getId(), rideRecord.getId())
+                .ifPresent(course -> {
+                    throw new BadRequestException("이미 코스로 저장된 자유 주행 기록입니다.");
+                });
         List<RideRecordProcessedPointEntity> rideRecordPoints = rideRecordProcessedPointRepository.findByRideRecordIdOrderByPointOrderAsc(rideRecord.getId());
         if (rideRecordPoints.isEmpty()) {
             throw new BadRequestException("최종 경로가 비어 있어 코스를 생성할 수 없습니다.");
@@ -212,7 +255,17 @@ public class CourseService {
                 .map(point -> new CourseRoutePointEntity(savedCourse.getId(), point.getPointOrder(), point.getLatitude(), point.getLongitude()))
                 .toList();
         courseRoutePointRepository.saveAll(courseRoutePoints);
+        courseRoutePointRepository.flush();
+        courseRouteGeometryRepository.refreshRouteLine(savedCourse.getId());
         courseRouteSnapshotService.evict(savedCourse.getId(), "course_created");
+        achievementService.grantForCompletedCourse(new AchievementCompletionSignal(
+                user.getId(),
+                savedCourse.getId(),
+                rideRecord.getId(),
+                courseRoutePoints.stream()
+                        .map(point -> new AchievementRoutePoint(point.getLatitude(), point.getLongitude()))
+                        .toList()
+        ));
 
         return toCourseWriteResponse(savedCourse);
     }
@@ -233,7 +286,9 @@ public class CourseService {
             courseRoutePointRepository.saveAll(routePoints.stream()
                     .map(point -> new CourseRoutePointEntity(courseId, point.pointOrder(), point.latitude(), point.longitude()))
                     .toList());
+            courseRoutePointRepository.flush();
             course.updateStartCoordinates(routePoints.get(0).latitude(), routePoints.get(0).longitude());
+            courseRouteGeometryRepository.refreshRouteLine(courseId);
             courseRouteSnapshotService.evict(courseId, "route_points_updated");
         }
 
@@ -283,7 +338,7 @@ public class CourseService {
         if (limit == null || limit < 1) {
             return DEFAULT_LIMIT;
         }
-        return limit;
+        return Math.min(limit, MAX_LIMIT);
     }
 
     private FeaturedCourseItemResponse toFeaturedResponse(CourseEntity course, BigDecimal lat, BigDecimal lon) {
@@ -294,6 +349,18 @@ public class CourseService {
                 course.getDistanceKm(),
                 course.getEstimatedDurationMin(),
                 distanceFromUserM,
+                course.getFeaturedRank()
+        );
+    }
+
+    private FeaturedCourseItemResponse toFeaturedResponse(FeaturedCourseDistanceCandidate candidate) {
+        CourseEntity course = candidate.course();
+        return new FeaturedCourseItemResponse(
+                course.getId(),
+                course.getTitle(),
+                course.getDistanceKm(),
+                course.getEstimatedDurationMin(),
+                candidate.distanceFromUserM(),
                 course.getFeaturedRank()
         );
     }
@@ -345,9 +412,7 @@ public class CourseService {
     private CourseEntity findOwnedCourse(Long courseId, Long ownerUserId) {
         CourseEntity course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new NotFoundException("코스를 찾을 수 없습니다."));
-        if (course.getOwnerUserId() == null || !course.getOwnerUserId().equals(ownerUserId)) {
-            throw new ForbiddenException("이 코스를 수정할 권한이 없습니다.");
-        }
+        courseAccessPolicy.assertOwned(course, ownerUserId);
         return course;
     }
 
@@ -355,26 +420,9 @@ public class CourseService {
         CourseEntity course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new NotFoundException("코스를 찾을 수 없습니다."));
 
-        if (course.getVisibility() == CourseVisibility.PUBLIC) {
-            return course;
-        }
-
-        if (course.getVisibility() == CourseVisibility.UNLISTED) {
-            if (!isBlank(shareToken) && shareToken.equals(course.getShareToken())) {
-                return course;
-            }
-            throw new ForbiddenException("이 코스에 접근할 권한이 없습니다.");
-        }
-
-        if (subject == null || subject.isBlank()) {
-            throw new ForbiddenException("이 코스는 공개되지 않았습니다.");
-        }
-
-        UserEntity user = authService.findUserBySubject(subject);
-        if (course.getOwnerUserId() == null || !course.getOwnerUserId().equals(user.getId())) {
-            throw new ForbiddenException("이 코스는 공개되지 않았습니다.");
-        }
-
+        UserEntity user = isBlank(subject) ? null : authService.findUserBySubject(subject);
+        courseAccessPolicy.assertNotReportHidden(course, user);
+        courseAccessPolicy.assertReadable(course, user, shareToken);
         return course;
     }
 
@@ -428,6 +476,12 @@ public class CourseService {
             if (routePoint.latitude() == null || routePoint.longitude() == null) {
                 throw new BadRequestException("routePoints의 latitude와 longitude는 비어 있을 수 없습니다.");
             }
+            CoordinateValidator.validateLatLon(
+                    "routePoints.latitude",
+                    routePoint.latitude(),
+                    "routePoints.longitude",
+                    routePoint.longitude()
+            );
             if (!pointOrders.add(routePoint.pointOrder())) {
                 throw new BadRequestException("routePoints의 pointOrder는 중복될 수 없습니다.");
             }

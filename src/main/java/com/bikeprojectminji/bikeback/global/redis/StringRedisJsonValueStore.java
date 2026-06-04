@@ -47,4 +47,9 @@ public class StringRedisJsonValueStore implements RedisJsonValueStore {
             throw new IllegalStateException("Redis payload 직렬화에 실패했습니다.", exception);
         }
     }
+
+    @Override
+    public void delete(String key) {
+        stringRedisTemplate.delete(key);
+    }
 }

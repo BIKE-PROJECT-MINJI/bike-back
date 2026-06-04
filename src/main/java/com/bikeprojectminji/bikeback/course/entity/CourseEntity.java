@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.OffsetDateTime;
 
 @Entity
@@ -58,6 +59,15 @@ public class CourseEntity {
 
     @Column(name = "share_token", length = 64)
     private String shareToken;
+
+    @Column(name = "report_hidden", nullable = false)
+    private boolean reportHidden;
+
+    @Column(name = "report_hidden_reason", length = 60)
+    private String reportHiddenReason;
+
+    @Column(name = "report_hidden_at")
+    private OffsetDateTime reportHiddenAt;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -158,6 +168,21 @@ public class CourseEntity {
         this.shareToken = shareToken;
     }
 
+    public void hideByReport(String reportHiddenReason, Clock clock) {
+        if (reportHiddenReason == null || reportHiddenReason.isBlank()) {
+            throw new IllegalArgumentException("reportHiddenReason은 비어 있을 수 없습니다.");
+        }
+        this.reportHidden = true;
+        this.reportHiddenReason = reportHiddenReason;
+        this.reportHiddenAt = OffsetDateTime.now(clock);
+    }
+
+    public void anonymizeOwner() {
+        this.ownerUserId = null;
+        this.sourceRideRecordId = null;
+        this.shareToken = null;
+    }
+
     public Long getId() {
         return id;
     }
@@ -220,5 +245,17 @@ public class CourseEntity {
 
     public String getShareToken() {
         return shareToken;
+    }
+
+    public boolean isReportHidden() {
+        return reportHidden;
+    }
+
+    public String getReportHiddenReason() {
+        return reportHiddenReason;
+    }
+
+    public OffsetDateTime getReportHiddenAt() {
+        return reportHiddenAt;
     }
 }

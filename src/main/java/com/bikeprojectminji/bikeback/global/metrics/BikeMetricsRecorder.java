@@ -92,6 +92,14 @@ public class BikeMetricsRecorder {
         meterRegistry.counter("bike_course_route_cache_eviction_total", "reason", normalize(reason)).increment();
     }
 
+    public void recordRoutingProviderFailure(String provider, String reason) {
+        meterRegistry.counter(
+                "bike_routing_provider_failure_total",
+                "provider", normalize(provider),
+                "reason", normalize(reason)
+        ).increment();
+    }
+
     private String normalize(String value) {
         if (value == null || value.isBlank()) {
             return "unknown";

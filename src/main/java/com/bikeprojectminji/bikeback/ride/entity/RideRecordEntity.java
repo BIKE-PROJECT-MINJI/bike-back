@@ -19,6 +19,9 @@ public class RideRecordEntity {
     @Column(name = "owner_user_id", nullable = false)
     private Long ownerUserId;
 
+    @Column(name = "client_ride_id", length = 80)
+    private String clientRideId;
+
     @Column(name = "started_at", nullable = false)
     private OffsetDateTime startedAt;
 
@@ -56,7 +59,12 @@ public class RideRecordEntity {
     }
 
     public RideRecordEntity(Long ownerUserId, OffsetDateTime startedAt, OffsetDateTime endedAt, Integer distanceM, Integer durationSec) {
+        this(ownerUserId, null, startedAt, endedAt, distanceM, durationSec);
+    }
+
+    public RideRecordEntity(Long ownerUserId, String clientRideId, OffsetDateTime startedAt, OffsetDateTime endedAt, Integer distanceM, Integer durationSec) {
         this.ownerUserId = ownerUserId;
+        this.clientRideId = clientRideId;
         this.startedAt = startedAt;
         this.endedAt = endedAt;
         this.distanceM = distanceM;
@@ -71,6 +79,10 @@ public class RideRecordEntity {
 
     public Long getOwnerUserId() {
         return ownerUserId;
+    }
+
+    public String getClientRideId() {
+        return clientRideId;
     }
 
     public OffsetDateTime getStartedAt() {

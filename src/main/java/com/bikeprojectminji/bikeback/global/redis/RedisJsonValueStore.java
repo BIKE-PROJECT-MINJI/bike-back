@@ -8,4 +8,6 @@ public interface RedisJsonValueStore {
     <T> Optional<T> get(String key, Class<T> type);
 
     void set(String key, Object value, Duration ttl);
+
+    void delete(String key);
 }

@@ -27,7 +27,35 @@ public class ClientEventService {
     private static final int MAX_BATCH_SIZE = 50;
     private static final int MAX_PROPERTIES_JSON_LENGTH = 4000;
     private static final Set<String> SENSITIVE_KEYS = Set.of(
-            "password", "token", "accesstoken", "refreshtoken", "authorization", "jwt", "secret"
+            "password",
+            "token",
+            "accesstoken",
+            "refreshtoken",
+            "authorization",
+            "jwt",
+            "secret",
+            "apikey",
+            "appkey",
+            "kakaoaccesstoken",
+            "clientsecret",
+            "lat",
+            "latitude",
+            "lon",
+            "lng",
+            "longitude",
+            "address",
+            "roadaddress",
+            "roadaddressname",
+            "addressname",
+            "query",
+            "searchquery",
+            "route",
+            "routes",
+            "routetrace",
+            "routepoints",
+            "coordinates",
+            "coordinate",
+            "polyline"
     );
 
     private final ClientEventRepository clientEventRepository;
@@ -130,7 +158,7 @@ public class ClientEventService {
             var fieldNames = objectNode.fieldNames();
             while (fieldNames.hasNext()) {
                 String fieldName = fieldNames.next();
-                if (SENSITIVE_KEYS.contains(fieldName.toLowerCase(Locale.ROOT))) {
+                if (SENSITIVE_KEYS.contains(normalizeSensitiveKey(fieldName))) {
                     keysToRemove.add(fieldName);
                     continue;
                 }
@@ -142,6 +170,13 @@ public class ClientEventService {
                 sanitizeNode(child);
             }
         }
+    }
+
+    private String normalizeSensitiveKey(String fieldName) {
+        return fieldName.toLowerCase(Locale.ROOT)
+                .replace("_", "")
+                .replace("-", "")
+                .replace(" ", "");
     }
 
     private ClientEventEntity toEntity(Long userId, CreateClientEventRequest request) {

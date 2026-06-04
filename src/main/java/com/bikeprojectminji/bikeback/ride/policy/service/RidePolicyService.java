@@ -3,17 +3,22 @@ package com.bikeprojectminji.bikeback.ride.policy.service;
 import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
 import com.bikeprojectminji.bikeback.course.entity.CourseRoutePointEntity;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
+import com.bikeprojectminji.bikeback.course.service.CourseAccessPolicy;
 import com.bikeprojectminji.bikeback.course.service.CourseRouteSnapshot;
 import com.bikeprojectminji.bikeback.course.service.CourseRouteSnapshotService;
+import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
+import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
+import com.bikeprojectminji.bikeback.global.validation.CoordinateValidator;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RideLocationRequest;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyCompletionResponse;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationRequest;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationResponse;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyGateResponse;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyOffRouteResponse;
+import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyProgressResponse;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -46,26 +51,33 @@ public class RidePolicyService {
 
     private final CourseRepository courseRepository;
     private final CourseRouteSnapshotService courseRouteSnapshotService;
+    private final AuthService authService;
     private final BikeMetricsRecorder bikeMetricsRecorder;
     private final Clock clock;
+    private final CourseAccessPolicy courseAccessPolicy = new CourseAccessPolicy();
 
     public RidePolicyService(
             CourseRepository courseRepository,
             CourseRouteSnapshotService courseRouteSnapshotService,
+            AuthService authService,
             BikeMetricsRecorder bikeMetricsRecorder,
             Clock clock
     ) {
         this.courseRepository = courseRepository;
         this.courseRouteSnapshotService = courseRouteSnapshotService;
+        this.authService = authService;
         this.bikeMetricsRecorder = bikeMetricsRecorder;
         this.clock = clock;
     }
 
     public RidePolicyEvaluationResponse evaluate(Long courseId, RidePolicyEvaluationRequest request) {
+        return evaluate(courseId, null, null, request);
+    }
+
+    public RidePolicyEvaluationResponse evaluate(Long courseId, String subject, String shareToken, RidePolicyEvaluationRequest request) {
         validateRequest(request);
 
-        CourseEntity course = courseRepository.findById(courseId)
-                .orElseThrow(() -> new NotFoundException("코스를 찾을 수 없습니다."));
+        CourseEntity course = findReadableCourse(courseId, subject, shareToken);
         CourseRouteSnapshot routeSnapshot = courseRouteSnapshotService.get(courseId, "ride_policy");
         List<CourseRoutePointEntity> routePoints = routeSnapshot.routePoints();
         RouteProjectionIndex routeProjectionIndex = routeSnapshot.routeProjectionIndex();
@@ -92,6 +104,18 @@ public class RidePolicyService {
         }
 
         throw new BadRequestException("phase는 PRE_START 또는 ACTIVE여야 합니다.");
+    }
+
+    private CourseEntity findReadableCourse(Long courseId, String subject, String shareToken) {
+        CourseEntity course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new NotFoundException("코스를 찾을 수 없습니다."));
+        UserEntity user = isBlank(subject) ? null : authService.findUserBySubject(subject);
+        courseAccessPolicy.assertReadable(course, user, shareToken);
+        return course;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private RidePolicyEvaluationResponse evaluatePreStart(CourseEntity course, RideLocationRequest location) {
@@ -150,15 +174,40 @@ public class RidePolicyService {
         List<RideLocationRequest> trace = normalizedTrace(request);
         OffRouteDecision offRouteDecision = evaluateOffRoute(routeProjectionIndex, trace);
         CompletionDecision completionDecision = evaluateCompletion(course, routePoints, routeProjectionIndex, trace, request.location());
+        RidePolicyProgressResponse progress = progressResponse(routeProjectionIndex, trace, request.location());
 
         return new RidePolicyEvaluationResponse(
                 "ACTIVE",
                 new RidePolicyGateResponse("ELIGIBLE", "ALREADY_ACTIVE"),
                 offRouteDecision.response(),
                 completionDecision.response(),
+                progress,
                 overallState(offRouteDecision.response(), completionDecision.response()),
                 defaultMessage(offRouteDecision.response(), completionDecision.response())
         );
+    }
+
+    private RidePolicyProgressResponse progressResponse(
+            RouteProjectionIndex routeProjectionIndex,
+            List<RideLocationRequest> trace,
+            RideLocationRequest location
+    ) {
+        RouteProjectionIndex.RouteProgress progress = routeProjectionIndex.progressAt(location, progressSegmentHint(routeProjectionIndex, trace));
+        return new RidePolicyProgressResponse(
+                progress.distanceAlongRouteM(),
+                progress.remainingDistanceM(),
+                progress.progressPercent(),
+                progress.nearestSegmentIndex()
+        );
+    }
+
+    private Integer progressSegmentHint(RouteProjectionIndex routeProjectionIndex, List<RideLocationRequest> trace) {
+        Integer previousSegmentIndex = null;
+        for (int i = 0; i < trace.size() - 1; i++) {
+            RouteProjectionIndex.RouteProjectionMatch nearest = routeProjectionIndex.findNearest(trace.get(i), previousSegmentIndex);
+            previousSegmentIndex = nearest.segmentIndex();
+        }
+        return previousSegmentIndex;
     }
 
     private RidePolicyEvaluationResponse undeterminedResponse(String phase, String reasonCode, String message) {
@@ -187,6 +236,10 @@ public class RidePolicyService {
     private void validateLocation(RideLocationRequest location) {
         if (location.lat() == null || location.lon() == null || location.accuracyM() == null || location.capturedAt() == null) {
             throw new BadRequestException("location.lat, location.lon, location.accuracyM, location.capturedAt는 필수입니다.");
+        }
+        CoordinateValidator.validateLatLon("location.lat", location.lat(), "location.lon", location.lon());
+        if (location.accuracyM().signum() < 0) {
+            throw new BadRequestException("location.accuracyM은 0 이상이어야 합니다.");
         }
     }
 

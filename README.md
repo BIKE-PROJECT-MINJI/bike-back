@@ -158,11 +158,47 @@ erDiagram
 
 ## 9. 실행 방법
 
+### 9-1. 로컬 PostGIS/Redis 실행
+
+`docker-compose.local.yml`은 로컬 개발용 PostGIS와 Redis를 호스트 포트 `5433`, `6380`에 노출합니다.
+`.env.example`도 이 포트 기준으로 맞춰져 있으므로 그대로 복사해 실행할 수 있습니다.
+
 ```bash
 cp .env.example .env
+docker compose -f docker-compose.local.yml up -d postgres redis
 set -a && source .env && set +a
 ./gradlew bootRun
 ```
+
+### 9-2. Ngrok + Expo Go smoke
+
+휴대폰의 Expo Go에서 로컬 백엔드를 호출해야 할 때는 Spring Boot를 `PORT=8080`으로 실행한 뒤 별도 터미널에서 Ngrok HTTP 터널을 엽니다.
+Ngrok은 검증된 계정의 authtoken이 필요하므로 `.env`에 `NGROK_AUTHTOKEN`을 채운 뒤 실행합니다.
+
+```bash
+set -a && source .env && set +a
+npx --yes ngrok http 8080 --authtoken "$NGROK_AUTHTOKEN"
+```
+
+Ngrok이 발급한 `https://...ngrok...` 주소는 RN 프로젝트의 `EXPO_PUBLIC_API_BASE_URL`에 넣습니다.
+
+```bash
+cd ../bike-rn
+printf 'EXPO_PUBLIC_API_BASE_URL=https://example.ngrok.app\n' > .env.local
+npx expo start
+```
+
+터널 연결 확인은 아래 순서로 봅니다.
+
+```bash
+curl -i https://example.ngrok.app/health
+curl -i https://example.ngrok.app/health/monitor
+curl -i -X POST https://example.ngrok.app/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"smoke@example.com","password":"Password123!","displayName":"Smoke"}'
+```
+
+상세 절차는 [`RN_Expo_Go_Ngrok_백엔드_스모크_런북.md`](../../DOCS/15_기능명세/backend/RN_Expo_Go_Ngrok_백엔드_스모크_런북.md)를 기준으로 합니다.
 
 ## 10. 테스트/검증
 

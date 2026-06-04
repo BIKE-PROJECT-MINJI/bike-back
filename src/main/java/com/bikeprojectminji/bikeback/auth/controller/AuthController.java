@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.auth.controller;
 
 import com.bikeprojectminji.bikeback.auth.dto.AuthMeResponse;
+import com.bikeprojectminji.bikeback.auth.dto.KakaoLoginRequest;
 import com.bikeprojectminji.bikeback.auth.dto.LoginRequest;
 import com.bikeprojectminji.bikeback.auth.dto.LoginResponse;
 import com.bikeprojectminji.bikeback.auth.dto.RefreshTokenRequest;
@@ -10,6 +11,7 @@ import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -38,15 +40,33 @@ public class AuthController {
         return ApiResponse.success(authService.login(request));
     }
 
+    @PostMapping("/kakao/login")
+    public ApiResponse<LoginResponse> kakaoLogin(@RequestBody KakaoLoginRequest request) {
+        validateKakaoLoginRequest(request);
+        return ApiResponse.success(authService.kakaoLogin(request));
+    }
+
     @PostMapping("/refresh")
     public ApiResponse<LoginResponse> refresh(@RequestBody RefreshTokenRequest request) {
         validateRefreshRequest(request);
         return ApiResponse.success(authService.refresh(request));
     }
 
+    @PostMapping("/logout")
+    public ApiResponse<Void> logout(@AuthenticationPrincipal Jwt jwt) {
+        authService.logout(jwt.getSubject());
+        return ApiResponse.success(null);
+    }
+
     @GetMapping("/me")
     public ApiResponse<AuthMeResponse> getMyAuth(@AuthenticationPrincipal Jwt jwt) {
         return ApiResponse.success(authService.getCurrentUser(jwt.getSubject()));
+    }
+
+    @DeleteMapping("/me")
+    public ApiResponse<Void> deleteMyAccount(@AuthenticationPrincipal Jwt jwt) {
+        authService.deleteCurrentUser(jwt.getSubject());
+        return ApiResponse.success(null);
     }
 
     private void validateRegisterRequest(RegisterRequest request) {
@@ -73,6 +93,27 @@ public class AuthController {
         }
         if (isBlank(request.password())) {
             throw new BadRequestException("password는 비어 있을 수 없습니다.");
+        }
+    }
+
+    private void validateKakaoLoginRequest(KakaoLoginRequest request) {
+        if (request == null) {
+            throw new BadRequestException("카카오 로그인 요청 본문이 필요합니다.");
+        }
+        if (isBlank(request.kakaoAccessToken())) {
+            throw new BadRequestException("kakaoAccessToken은 비어 있을 수 없습니다.");
+        }
+        if (isBlank(request.privacyPolicyVersion())) {
+            throw new BadRequestException("privacyPolicyVersion은 비어 있을 수 없습니다.");
+        }
+        if (isBlank(request.termsVersion())) {
+            throw new BadRequestException("termsVersion은 비어 있을 수 없습니다.");
+        }
+        if (isBlank(request.locationTermsVersion())) {
+            throw new BadRequestException("locationTermsVersion은 비어 있을 수 없습니다.");
+        }
+        if (isBlank(request.birthDate())) {
+            throw new BadRequestException("birthDate는 비어 있을 수 없습니다.");
         }
     }
 

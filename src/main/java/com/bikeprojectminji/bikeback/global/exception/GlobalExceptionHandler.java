@@ -43,6 +43,13 @@ public class GlobalExceptionHandler {
                 .body(new ApiResponse<>(403, exception.getMessage(), null));
     }
 
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTooManyRequests(TooManyRequestsException exception, HttpServletRequest request) {
+        log.warn("too_many_requests request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(new ApiResponse<>(429, exception.getMessage(), null));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception exception, HttpServletRequest request) {
         log.error("unexpected_error request_id={} method={} path={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception);

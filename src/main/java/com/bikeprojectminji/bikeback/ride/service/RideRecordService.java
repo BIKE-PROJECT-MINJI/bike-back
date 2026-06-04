@@ -4,6 +4,8 @@ import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.validation.CoordinateValidator;
 import com.bikeprojectminji.bikeback.location.service.RecentLocationCacheService;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusResponse;
@@ -64,9 +66,24 @@ public class RideRecordService {
         // point와 summary는 항상 DB가 원본이고, 캐시는 후속 조회 최적화 용도로만 갱신한다.
         validateCreateRequest(request);
         UserEntity user = authService.findUserBySubject(subject);
+        String clientRideId = normalizeClientRideId(request.clientRideId());
+        if (clientRideId != null) {
+            java.util.Optional<RideRecordEntity> existingRideRecord = rideRecordRepository.findByOwnerUserIdAndClientRideId(user.getId(), clientRideId);
+            if (existingRideRecord.isPresent()) {
+                RideRecordEntity existing = existingRideRecord.get();
+                long routePointCount = rideRecordPointRepository.countByRideRecordId(existing.getId());
+                return new RideRecordResponse(
+                        existing.getId(),
+                        existing.getOwnerUserId(),
+                        Math.toIntExact(routePointCount),
+                        existing.getFinalizationStatus().name()
+                );
+            }
+        }
 
         RideRecordEntity rideRecord = rideRecordRepository.save(new RideRecordEntity(
                 user.getId(),
+                clientRideId,
                 request.startedAt(),
                 request.endedAt(),
                 request.summary().distanceM(),
@@ -125,7 +142,7 @@ public class RideRecordService {
     public RideRecordFinalizationStatusResponse getRideRecordStatus(String subject, Long rideRecordId) {
         UserEntity user = authService.findUserBySubject(subject);
         RideRecordEntity rideRecord = rideRecordRepository.findByIdAndOwnerUserId(rideRecordId, user.getId())
-                .orElseThrow(() -> new BadRequestException("자유 주행 기록을 찾을 수 없습니다."));
+                .orElseThrow(() -> new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
         RideRecordFinalizationStatusResponse status = rideRecordFinalizationService.getStatus(rideRecord);
 
         return new RideRecordFinalizationStatusResponse(
@@ -147,7 +164,7 @@ public class RideRecordService {
     public RideRecordFinalizationStatusResponse regenerateRideRecord(String subject, Long rideRecordId) {
         UserEntity user = authService.findUserBySubject(subject);
         RideRecordEntity rideRecord = rideRecordRepository.findByIdAndOwnerUserId(rideRecordId, user.getId())
-                .orElseThrow(() -> new BadRequestException("자유 주행 기록을 찾을 수 없습니다."));
+                .orElseThrow(() -> new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
         rideRecordFinalizationService.markForRegeneration(rideRecord);
         rideRecordFinalizationService.requestFinalization(rideRecordId);
         return rideRecordFinalizationService.getStatus(rideRecord);
@@ -185,6 +202,9 @@ public class RideRecordService {
         }
         if (request.summary() == null) {
             throw new BadRequestException("summary는 비어 있을 수 없습니다.");
+        }
+        if (request.clientRideId() != null && request.clientRideId().length() > 80) {
+            throw new BadRequestException("clientRideId는 80자 이하여야 합니다.");
         }
         if (request.summary().distanceM() == null || request.summary().distanceM() < 0) {
             throw new BadRequestException("distanceM은 0 이상이어야 합니다.");
@@ -237,6 +257,12 @@ public class RideRecordService {
             if (routePoint.latitude() == null || routePoint.longitude() == null) {
                 throw new BadRequestException("routePoints의 latitude와 longitude는 비어 있을 수 없습니다.");
             }
+            CoordinateValidator.validateLatLon(
+                    "routePoints.latitude",
+                    routePoint.latitude(),
+                    "routePoints.longitude",
+                    routePoint.longitude()
+            );
             if (routePoint.accuracyM() != null && routePoint.accuracyM().signum() < 0) {
                 throw new BadRequestException("accuracyM은 0 이상이어야 합니다.");
             }
@@ -259,6 +285,13 @@ public class RideRecordService {
         return routePoints.stream()
                 .sorted(Comparator.comparing(RideRecordPointRequest::pointOrder))
                 .toList();
+    }
+
+    private String normalizeClientRideId(String clientRideId) {
+        if (clientRideId == null || clientRideId.isBlank()) {
+            return null;
+        }
+        return clientRideId.trim();
     }
 
     private void registerFinalizationAfterCommit(Long rideRecordId) {

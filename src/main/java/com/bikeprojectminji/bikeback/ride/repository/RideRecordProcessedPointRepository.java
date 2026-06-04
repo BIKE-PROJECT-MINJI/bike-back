@@ -8,5 +8,9 @@ public interface RideRecordProcessedPointRepository extends JpaRepository<RideRe
 
     List<RideRecordProcessedPointEntity> findByRideRecordIdOrderByPointOrderAsc(Long rideRecordId);
 
+    long countByRideRecordId(Long rideRecordId);
+
     void deleteByRideRecordId(Long rideRecordId);
+
+    void deleteByRideRecordIdIn(List<Long> rideRecordIds);
 }

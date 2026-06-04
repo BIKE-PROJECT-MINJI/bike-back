@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.bikeprojectminji.bikeback.auth.dto.AuthMeResponse;
+import com.bikeprojectminji.bikeback.auth.dto.KakaoLoginRequest;
 import com.bikeprojectminji.bikeback.auth.dto.LoginRequest;
 import com.bikeprojectminji.bikeback.auth.dto.LoginResponse;
 import com.bikeprojectminji.bikeback.auth.dto.RefreshTokenRequest;
@@ -89,6 +90,50 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.data.refreshToken").value("refresh-token"))
                 .andExpect(jsonPath("$.data.accessExpiresInSec").value(900))
                 .andExpect(jsonPath("$.data.refreshExpiresInSec").value(1209600));
+    }
+
+    @Test
+    @DisplayName("카카오 로그인 API는 success 래퍼로 JWT 응답을 반환한다")
+    void kakaoLoginReturnsWrappedResponse() throws Exception {
+        KakaoLoginRequest request = new KakaoLoginRequest("kakao-access-token", "privacy-v1", "terms-v1", "location-v1", "2000-01-01");
+        given(authService.kakaoLogin(request))
+                .willReturn(new LoginResponse("Bearer", "access-token", "refresh-token", 900, 1209600, 1L, "gaja-rider"));
+
+        mockMvc.perform(post("/api/v1/auth/kakao/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "kakaoAccessToken": "kakao-access-token",
+                                  "privacyPolicyVersion": "privacy-v1",
+                                  "termsVersion": "terms-v1",
+                                  "locationTermsVersion": "location-v1",
+                                  "birthDate": "2000-01-01"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.accessToken").value("access-token"))
+                .andExpect(jsonPath("$.data.refreshToken").value("refresh-token"))
+                .andExpect(jsonPath("$.data.userId").value(1))
+                .andExpect(jsonPath("$.data.displayName").value("gaja-rider"));
+    }
+
+    @Test
+    @DisplayName("카카오 로그인 API는 생년월일이 없으면 400을 반환한다")
+    void kakaoLoginReturnsBadRequestWithoutBirthDate() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/kakao/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "kakaoAccessToken": "kakao-access-token",
+                                  "privacyPolicyVersion": "privacy-v1",
+                                  "termsVersion": "terms-v1",
+                                  "locationTermsVersion": "location-v1"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("birthDate는 비어 있을 수 없습니다."));
     }
 
     @Test

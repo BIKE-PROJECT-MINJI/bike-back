@@ -21,7 +21,7 @@ ALB/ACM 생성 자체는 AWS/Terraform 쪽 작업이다.
 Terraform 1차 apply 후 아래 명령으로 값을 확인한다.
 
 ```bash
-cd /mnt/c/Users/alswl/Desktop/bike/dev/bike-back/ops/aws/alb-acm-route53
+cd "/mnt/c/Users/alswl/Desktop/BIKE - 복사본/dev/bike-back/ops/aws/alb-acm-route53"
 terraform output -json certificate_validation_records
 ```
 
@@ -61,7 +61,7 @@ ACM이 `ISSUED` 된 뒤 2차 apply를 마치면,
 아래 명령으로 ALB DNS 이름을 확인한다.
 
 ```bash
-cd /mnt/c/Users/alswl/Desktop/bike/dev/bike-back/ops/aws/alb-acm-route53
+cd "/mnt/c/Users/alswl/Desktop/BIKE - 복사본/dev/bike-back/ops/aws/alb-acm-route53"
 terraform output alb_dns_name
 ```
 

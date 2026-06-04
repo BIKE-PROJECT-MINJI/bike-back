@@ -77,6 +77,10 @@ class WeatherServiceTest {
         CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
 
         assertThat(response.stale()).isFalse();
+        assertThat(response.freshnessStatus()).isEqualTo("FRESH_PROVIDER");
+        assertThat(response.staleReason()).isNull();
+        assertThat(response.observedAt()).isEqualTo(OffsetDateTime.parse("2026-03-29T10:19:00+09:00"));
+        assertThat(response.cacheAgeSec()).isZero();
         assertThat(response.forecastFallbackUsed()).isFalse();
         verify(lastSuccessWeatherStore).save(key, snapshot);
     }
@@ -91,6 +95,9 @@ class WeatherServiceTest {
         CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
 
         assertThat(response.stale()).isTrue();
+        assertThat(response.freshnessStatus()).isEqualTo("STALE_LAST_SUCCESS");
+        assertThat(response.staleReason()).isEqualTo("LAST_SUCCESS_CACHE");
+        assertThat(response.cacheAgeSec()).isEqualTo(2400);
         assertThat(response.forecastFallbackUsed()).isTrue();
         verify(bikeMetricsRecorder).recordWeatherStaleServed();
         verify(bikeMetricsRecorder).recordWeatherFallback();

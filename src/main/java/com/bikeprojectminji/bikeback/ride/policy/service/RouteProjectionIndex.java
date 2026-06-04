@@ -29,7 +29,7 @@ public final class RouteProjectionIndex {
         if (localBest != null && isInsideWindow(preferredSegmentIndex, localBest.segmentIndex())) {
             return localBest;
         }
-        return findNearestAcrossAllSegments(tracePoint);
+        return findNearestAcrossAllSegments(tracePoint, preferredSegmentIndex);
     }
 
     public RouteProjectionMatch project(RideLocationRequest tracePoint, Integer preferredSegmentIndex, double maxDistanceM) {
@@ -37,8 +37,27 @@ public final class RouteProjectionIndex {
         return nearest.distanceToRouteM() <= maxDistanceM ? nearest : null;
     }
 
+    public RouteProgress progressAt(RideLocationRequest tracePoint, Integer preferredSegmentIndex) {
+        RouteProjectionMatch nearest = findNearest(tracePoint, preferredSegmentIndex);
+        double totalLengthM = totalLengthM();
+        int distanceAlongRouteM = roundedMeters(Math.max(0d, Math.min(totalLengthM, nearest.distanceAlongRouteM())));
+        int remainingDistanceM = roundedMeters(Math.max(0d, totalLengthM - distanceAlongRouteM));
+        int progressPercent = totalLengthM <= 0d
+                ? 0
+                : Math.min(100, (int) Math.round((distanceAlongRouteM * 100d) / totalLengthM));
+        return new RouteProgress(distanceAlongRouteM, remainingDistanceM, progressPercent, nearest.segmentIndex());
+    }
+
     public List<RouteSegment> segments() {
         return segments;
+    }
+
+    private double totalLengthM() {
+        return segments.stream().mapToDouble(RouteSegment::lengthM).sum();
+    }
+
+    private int roundedMeters(double meters) {
+        return BigDecimal.valueOf(meters).setScale(0, RoundingMode.HALF_UP).intValue();
     }
 
     private RouteProjectionMatch findNearestWithinWindow(RideLocationRequest tracePoint, int preferredSegmentIndex) {
@@ -51,19 +70,45 @@ public final class RouteProjectionIndex {
         return Math.abs(preferredSegmentIndex - nearestSegmentIndex) < LOCAL_WINDOW_RADIUS;
     }
 
-    private RouteProjectionMatch findNearestAcrossAllSegments(RideLocationRequest tracePoint) {
-        return findNearest(tracePoint, 0, segments.size() - 1);
+    private RouteProjectionMatch findNearestAcrossAllSegments(RideLocationRequest tracePoint, Integer preferredSegmentIndex) {
+        return findNearest(tracePoint, 0, segments.size() - 1, preferredSegmentIndex);
     }
 
     private RouteProjectionMatch findNearest(RideLocationRequest tracePoint, int startIndex, int endIndex) {
+        return findNearest(tracePoint, startIndex, endIndex, null);
+    }
+
+    private RouteProjectionMatch findNearest(RideLocationRequest tracePoint, int startIndex, int endIndex, Integer preferredSegmentIndex) {
         RouteProjectionMatch best = null;
         for (int index = startIndex; index <= endIndex; index++) {
             RouteProjectionMatch candidate = projectOntoSegment(index, segments.get(index), tracePoint);
-            if (best == null || candidate.distanceToRouteM() < best.distanceToRouteM()) {
+            if (best == null || isBetterCandidate(candidate, best, preferredSegmentIndex)) {
                 best = candidate;
             }
         }
         return best;
+    }
+
+    private boolean isBetterCandidate(RouteProjectionMatch candidate, RouteProjectionMatch best, Integer preferredSegmentIndex) {
+        double distanceDelta = candidate.distanceToRouteM() - best.distanceToRouteM();
+        if (Math.abs(distanceDelta) > 0.001d) {
+            return distanceDelta < 0d;
+        }
+        if (preferredSegmentIndex == null) {
+            return false;
+        }
+        if (candidate.segmentIndex() >= preferredSegmentIndex && best.segmentIndex() < preferredSegmentIndex) {
+            return true;
+        }
+        if (candidate.segmentIndex() < preferredSegmentIndex && best.segmentIndex() >= preferredSegmentIndex) {
+            return false;
+        }
+        int candidateDistance = Math.abs(candidate.segmentIndex() - preferredSegmentIndex);
+        int bestDistance = Math.abs(best.segmentIndex() - preferredSegmentIndex);
+        if (candidateDistance != bestDistance) {
+            return candidateDistance < bestDistance;
+        }
+        return candidate.segmentIndex() > best.segmentIndex();
     }
 
     private RouteProjectionMatch projectOntoSegment(int segmentIndex, RouteSegment segment, RideLocationRequest tracePoint) {
@@ -143,6 +188,14 @@ public final class RouteProjectionIndex {
             int segmentIndex,
             double distanceAlongRouteM,
             double distanceToRouteM
+    ) {
+    }
+
+    public record RouteProgress(
+            int distanceAlongRouteM,
+            int remainingDistanceM,
+            int progressPercent,
+            int nearestSegmentIndex
     ) {
     }
 }

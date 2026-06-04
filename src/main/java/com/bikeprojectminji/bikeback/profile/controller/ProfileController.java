@@ -2,7 +2,9 @@ package com.bikeprojectminji.bikeback.profile.controller;
 
 import com.bikeprojectminji.bikeback.profile.dto.ProfileActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileMeResponse;
+import com.bikeprojectminji.bikeback.profile.dto.UpdatePreferenceRequest;
 import com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest;
+import com.bikeprojectminji.bikeback.profile.dto.UserPreferenceResponse;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import com.bikeprojectminji.bikeback.profile.service.ProfileService;
@@ -34,6 +36,11 @@ public class ProfileController {
         return ApiResponse.success(profileService.getMyActivitySummary(jwt.getSubject()));
     }
 
+    @GetMapping("/me/preferences")
+    public ApiResponse<UserPreferenceResponse> getMyPreference(@AuthenticationPrincipal Jwt jwt) {
+        return ApiResponse.success(profileService.getMyPreference(jwt.getSubject()));
+    }
+
     @PatchMapping("/me")
     public ApiResponse<ProfileMeResponse> updateMyProfile(
             @AuthenticationPrincipal Jwt jwt,
@@ -43,12 +50,30 @@ public class ProfileController {
         return ApiResponse.success(profileService.updateMyProfile(jwt.getSubject(), request));
     }
 
+    @PatchMapping("/me/preferences")
+    public ApiResponse<UserPreferenceResponse> updateMyPreference(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestBody UpdatePreferenceRequest request
+    ) {
+        validatePreferenceRequest(request);
+        return ApiResponse.success(profileService.updateMyPreference(jwt.getSubject(), request));
+    }
+
     private void validateUpdateRequest(UpdateProfileRequest request) {
         if (request == null) {
             throw new BadRequestException("프로필 수정 요청 본문이 필요합니다.");
         }
         if (request.displayName() == null || request.displayName().isBlank()) {
             throw new BadRequestException("displayName은 비어 있을 수 없습니다.");
+        }
+    }
+
+    private void validatePreferenceRequest(UpdatePreferenceRequest request) {
+        if (request == null) {
+            throw new BadRequestException("선호경로 설정 요청 본문이 필요합니다.");
+        }
+        if (request.bikeRoadPriority() == null) {
+            throw new BadRequestException("bikeRoadPriority는 비어 있을 수 없습니다.");
         }
     }
 }

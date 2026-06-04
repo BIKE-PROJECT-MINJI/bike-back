@@ -12,9 +12,13 @@ import com.bikeprojectminji.bikeback.course.entity.CourseRoutePointEntity;
 import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointResponse;
 import com.bikeprojectminji.bikeback.course.service.CourseRouteSnapshot;
 import com.bikeprojectminji.bikeback.course.service.CourseRouteSnapshotService;
+import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
+import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
+import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -43,6 +47,9 @@ class RidePolicyServiceTest {
     @Mock
     private CourseRouteSnapshotService courseRouteSnapshotService;
 
+    @Mock
+    private AuthService authService;
+
     private RidePolicyService ridePolicyService;
 
     @BeforeEach
@@ -50,6 +57,7 @@ class RidePolicyServiceTest {
         ridePolicyService = new RidePolicyService(
                 courseRepository,
                 courseRouteSnapshotService,
+                authService,
                 bikeMetricsRecorder,
                 Clock.fixed(Instant.parse("2026-03-29T01:15:30Z"), ZoneOffset.UTC)
         );
@@ -73,6 +81,61 @@ class RidePolicyServiceTest {
         assertThat(response.startGate().thresholdM()).isEqualTo(50);
         assertThat(response.offRoute().reasonCode()).isEqualTo("NOT_ACTIVE_YET");
         assertThat(response.overallState()).isEqualTo("PRE_START_ELIGIBLE");
+    }
+
+    @Test
+    @DisplayName("주행 정책 평가는 PRIVATE 코스를 비소유자에게 노출하지 않는다")
+    void evaluateRejectsPrivateCourseForNonOwner() {
+        Long courseId = 1L;
+        CourseEntity privateCourse = course(courseId, 37.5665, 126.9780);
+        ReflectionTestUtils.setField(privateCourse, "visibility", com.bikeprojectminji.bikeback.course.entity.CourseVisibility.PRIVATE);
+        ReflectionTestUtils.setField(privateCourse, "ownerUserId", 99L);
+        UserEntity user = new UserEntity(null, "rider@example.com", "encoded", "rider", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        given(courseRepository.findById(courseId)).willReturn(Optional.of(privateCourse));
+        given(authService.findUserBySubject("1")).willReturn(user);
+
+        assertThatThrownBy(() -> ridePolicyService.evaluate(
+                courseId,
+                "1",
+                null,
+                request("PRE_START", 37.5665, 126.9780, 18.5, "2026-03-29T10:15:19+09:00")
+        ))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("이 코스는 공개되지 않았습니다.");
+    }
+
+    @Test
+    @DisplayName("정책 평가는 위치 위도 범위를 검증한다")
+    void evaluateRejectsInvalidLatitude() {
+        assertThatThrownBy(() -> ridePolicyService.evaluate(
+                1L,
+                request("PRE_START", 91.0, 126.9780, 18.5, "2026-03-29T10:15:19+09:00")
+        ))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("location.lat는 -90 이상 90 이하여야 합니다.");
+    }
+
+    @Test
+    @DisplayName("정책 평가는 위치 경도 범위를 검증한다")
+    void evaluateRejectsInvalidLongitude() {
+        assertThatThrownBy(() -> ridePolicyService.evaluate(
+                1L,
+                request("PRE_START", 37.5665, 181.0, 18.5, "2026-03-29T10:15:19+09:00")
+        ))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("location.lon는 -180 이상 180 이하여야 합니다.");
+    }
+
+    @Test
+    @DisplayName("정책 평가는 음수 정확도를 거절한다")
+    void evaluateRejectsNegativeAccuracy() {
+        assertThatThrownBy(() -> ridePolicyService.evaluate(
+                1L,
+                request("PRE_START", 37.5665, 126.9780, -1.0, "2026-03-29T10:15:19+09:00")
+        ))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("location.accuracyM은 0 이상이어야 합니다.");
     }
 
     @Test
@@ -160,6 +223,31 @@ class RidePolicyServiceTest {
         assertThat(response.offRoute().distanceM()).isEqualTo(49);
         assertThat(response.offRoute().durationSec()).isEqualTo(0);
         assertThat(response.overallState()).isEqualTo("ACTIVE_ON_ROUTE");
+    }
+
+    @Test
+    @DisplayName("ACTIVE 응답은 RN HUD용 경로 진행률과 잔여거리를 포함한다")
+    void evaluateActiveIncludesRouteProgressForHud() {
+        Long courseId = 1L;
+        given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, straightRoute(courseId, 37.5665, 126.9780, 1_000)));
+
+        RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
+                courseId,
+                activeRequest(
+                        offsetLatitudeMeters(37.5665, 400),
+                        126.9780,
+                        18.5,
+                        "2026-03-29T10:15:19+09:00",
+                        straightTrace(37.5665, 126.9780, 0, 400, 4)
+                )
+        );
+
+        assertThat(response.progress()).isNotNull();
+        assertThat(response.progress().distanceAlongRouteM()).isBetween(395, 405);
+        assertThat(response.progress().remainingDistanceM()).isBetween(595, 605);
+        assertThat(response.progress().progressPercent()).isEqualTo(40);
+        assertThat(response.progress().nearestSegmentIndex()).isBetween(3, 4);
     }
 
     @Test
@@ -346,6 +434,35 @@ class RidePolicyServiceTest {
         assertThat(response.completion().loopCourse()).isTrue();
         assertThat(response.completion().leftStartZone()).isTrue();
         assertThat(response.completion().coveragePercent()).isLessThan(80);
+    }
+
+    @Test
+    @DisplayName("ACTIVE loop 코스 종점 progress는 trace 진행 방향을 따라 100으로 응답한다")
+    void evaluateLoopFinishProgressUsesTraceDirection() {
+        Long courseId = 1L;
+        List<CourseRoutePointEntity> loopRoute = loopRoute(courseId, 37.5665, 126.9780, 300);
+        given(courseRepository.findById(courseId)).willReturn(Optional.of(course(courseId, 37.5665, 126.9780)));
+        given(courseRouteSnapshotService.get(courseId, "ride_policy")).willReturn(snapshot(courseId, loopRoute));
+
+        RidePolicyEvaluationResponse response = ridePolicyService.evaluate(
+                courseId,
+                activeRequest(
+                        37.5665,
+                        126.9780,
+                        18.5,
+                        "2026-03-29T10:20:00+09:00",
+                        List.of(
+                                tracePoint(37.5665, 126.9780, 18.5, "2026-03-29T10:00:00+09:00"),
+                                tracePoint(offsetLatitudeMeters(37.5665, 300), 126.9780, 18.5, "2026-03-29T10:05:00+09:00"),
+                                tracePoint(offsetLatitudeMeters(37.5665, 300), offsetLongitudeMeters(offsetLatitudeMeters(37.5665, 300), 126.9780, 300), 18.5, "2026-03-29T10:10:00+09:00"),
+                                tracePoint(37.5665, offsetLongitudeMeters(37.5665, 126.9780, 300), 18.5, "2026-03-29T10:15:00+09:00")
+                        )
+                )
+        );
+
+        assertThat(response.progress().progressPercent()).isEqualTo(100);
+        assertThat(response.progress().remainingDistanceM()).isEqualTo(0);
+        assertThat(response.progress().nearestSegmentIndex()).isEqualTo(3);
     }
 
     @Test

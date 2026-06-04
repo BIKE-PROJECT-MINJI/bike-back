@@ -99,6 +99,81 @@ class ClientEventServiceTest {
     }
 
     @Test
+    @DisplayName("민감 키 제거는 구분자와 대소문자가 달라도 적용된다")
+    void saveEventRemovesSensitiveKeysWithSeparatorsAndCase() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(clientEventRepository.save(any(ClientEventEntity.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+        var nested = objectMapper.createObjectNode();
+        nested.put("kakaoAccessToken", "kakao-secret");
+        nested.put("api_key", "api-secret");
+        nested.put("client-secret", "client-secret");
+        nested.put("visibleReason", "LOCATION_PERMISSION_DENIED");
+        var properties = objectMapper.createObjectNode();
+        properties.put("access_token", "access-secret");
+        properties.put("Refresh-Token", "refresh-secret");
+        properties.set("nested", nested);
+
+        clientEventService.saveEvent("1", new CreateClientEventRequest(
+                "ride_start_blocked", 1, "sess_001", null, "course_detail", 12L, null,
+                "1.0.0", "android", "mobile", "denied", properties
+        ));
+
+        ArgumentCaptor<ClientEventEntity> captor = ArgumentCaptor.forClass(ClientEventEntity.class);
+        org.mockito.Mockito.verify(clientEventRepository).save(captor.capture());
+        assertThat(captor.getValue().getPropertiesJson().has("access_token")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().has("Refresh-Token")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().get("nested").has("kakaoAccessToken")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().get("nested").has("api_key")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().get("nested").has("client-secret")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().get("nested").get("visibleReason").asText()).isEqualTo("LOCATION_PERMISSION_DENIED");
+    }
+
+    @Test
+    @DisplayName("이벤트 properties는 원본 위치, 주소, 검색어, 경로 trace를 제거한다")
+    void saveEventRemovesLocationAddressQueryAndRouteTrace() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(clientEventRepository.save(any(ClientEventEntity.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+        var routePoint = objectMapper.createObjectNode();
+        routePoint.put("lat", 37.5665);
+        routePoint.put("lon", 126.9780);
+        routePoint.put("safeLabel", "removed route point");
+        var routeTrace = objectMapper.createArrayNode().add(routePoint);
+        var nested = objectMapper.createObjectNode();
+        nested.put("roadAddressName", "서울시 중구 세종대로");
+        nested.put("search_query", "한강 자전거길");
+        nested.set("coordinates", objectMapper.createArrayNode().add(126.9780).add(37.5665));
+        var properties = objectMapper.createObjectNode();
+        properties.put("latitude", 37.5665);
+        properties.put("longitude", 126.9780);
+        properties.put("address", "서울시 중구 세종대로");
+        properties.set("routeTrace", routeTrace);
+        properties.set("nested", nested);
+        properties.put("visibleReason", "USER_TAPPED_AI_ROUTE");
+
+        clientEventService.saveEvent("1", new CreateClientEventRequest(
+                "ai_route_requested", 1, "sess_001", null, "ai_route", null, null,
+                "1.0.0", "android", "mobile", "granted", properties
+        ));
+
+        ArgumentCaptor<ClientEventEntity> captor = ArgumentCaptor.forClass(ClientEventEntity.class);
+        org.mockito.Mockito.verify(clientEventRepository).save(captor.capture());
+        assertThat(captor.getValue().getPropertiesJson().has("latitude")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().has("longitude")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().has("address")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().has("routeTrace")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().get("nested").has("roadAddressName")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().get("nested").has("search_query")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().get("nested").has("coordinates")).isFalse();
+        assertThat(captor.getValue().getPropertiesJson().get("visibleReason").asText()).isEqualTo("USER_TAPPED_AI_ROUTE");
+    }
+
+    @Test
     @DisplayName("batch size가 50개를 넘으면 저장을 거부한다")
     void saveEventsRejectsOversizedBatch() {
         List<CreateClientEventRequest> events = java.util.stream.IntStream.range(0, 51)

@@ -24,6 +24,7 @@ spring:
 
 server:
   port: ${PORT:8080}
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:framework}
 
 management:
   server:
@@ -51,3 +52,24 @@ auth:
     secret: ${AUTH_JWT_SECRET}
     issuer: ${AUTH_JWT_ISSUER:bike-back}
     token-validity-sec: ${AUTH_JWT_TOKEN_VALIDITY_SEC:900}
+
+address:
+  search:
+    provider: ${ADDRESS_SEARCH_PROVIDER:fake}
+    kakao:
+      base-url: ${KAKAO_LOCAL_BASE_URL:https://dapi.kakao.com}
+      rest-api-key: ${KAKAO_LOCAL_REST_API_KEY:}
+
+routing:
+  bicycle:
+    provider: ${BICYCLE_ROUTING_PROVIDER:graphhopper}
+    fake:
+      enabled: ${BICYCLE_ROUTING_FAKE_ENABLED:false}
+    kakao:
+      base-url: ${KAKAO_MOBILITY_BASE_URL:https://apis-navi.kakaomobility.com}
+      rest-api-key: ${KAKAO_MOBILITY_REST_API_KEY:}
+    graphhopper:
+      base-url: ${GRAPHHOPPER_BASE_URL:http://127.0.0.1:8989}
+      hosted-base-url: ${GRAPHHOPPER_HOSTED_BASE_URL:}
+      api-key: ${GRAPHHOPPER_API_KEY:}
+      retry-max-attempts: ${GRAPHHOPPER_RETRY_MAX_ATTEMPTS:2}

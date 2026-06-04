@@ -35,4 +35,13 @@ class HealthControllerTest {
                 .andExpect(jsonPath("$.data.status").value("ok"))
                 .andExpect(jsonPath("$.data.service").value("bike-back"));
     }
+
+    @Test
+    @DisplayName("Prometheus metric endpoint는 공개 smoke 경로가 아니므로 인증 없이는 401을 반환한다")
+    void prometheusEndpointRequiresAuthentication() throws Exception {
+        mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401))
+                .andExpect(jsonPath("$.message").value("로그인 정보가 필요합니다."));
+    }
 }

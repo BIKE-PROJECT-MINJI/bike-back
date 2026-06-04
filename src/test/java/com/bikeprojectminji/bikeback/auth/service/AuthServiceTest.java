@@ -13,6 +13,8 @@ import com.bikeprojectminji.bikeback.auth.dto.RegisterRequest;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.UnauthorizedException;
+import com.bikeprojectminji.bikeback.auth.repository.KakaoAccountLinkRepository;
+import com.bikeprojectminji.bikeback.auth.repository.UserConsentRepository;
 import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -46,6 +48,15 @@ class AuthServiceTest {
     private UserRepository userRepository;
 
     @Mock
+    private KakaoAccountLinkRepository kakaoAccountLinkRepository;
+
+    @Mock
+    private UserConsentRepository userConsentRepository;
+
+    @Mock
+    private KakaoAccountClient kakaoAccountClient;
+
+    @Mock
     private JwtEncoder jwtEncoder;
 
     @Mock
@@ -53,6 +64,9 @@ class AuthServiceTest {
 
     @Mock
     private RefreshTokenStore refreshTokenStore;
+
+    @Mock
+    private AccountDeletionService accountDeletionService;
 
     private final Clock clock = Clock.fixed(Instant.parse("2026-04-02T00:00:00Z"), ZoneOffset.UTC);
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
@@ -394,7 +408,21 @@ class AuthServiceTest {
     }
 
     private AuthService createAuthService(RefreshTokenStore store) {
-        return new AuthService(userRepository, store, jwtEncoder, jwtDecoder, passwordEncoder, clock, "bike-back-test", 900L, 1209600L);
+        return new AuthService(
+                userRepository,
+                kakaoAccountLinkRepository,
+                userConsentRepository,
+                accountDeletionService,
+                store,
+                kakaoAccountClient,
+                jwtEncoder,
+                jwtDecoder,
+                passwordEncoder,
+                clock,
+                "bike-back-test",
+                900L,
+                1209600L
+        );
     }
 
     private String tokenHash(String token) {
@@ -423,6 +451,11 @@ class AuthServiceTest {
         @Override
         public void save(String subject, RefreshTokenSession session, Duration ttl) {
             sessions.put(subject, session);
+        }
+
+        @Override
+        public void delete(String subject) {
+            sessions.remove(subject);
         }
     }
 }

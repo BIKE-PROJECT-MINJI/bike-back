@@ -53,3 +53,7 @@ smoke-check-file-summary.json
 
 # Load test generated artifacts
 ops/loadtest/results/
+
+# Python generated artifacts
+__pycache__/
+*.pyc

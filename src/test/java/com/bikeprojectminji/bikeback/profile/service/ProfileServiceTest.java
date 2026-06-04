@@ -4,20 +4,27 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileActivitySummaryResponse;
+import com.bikeprojectminji.bikeback.profile.repository.UserPreferenceRepository;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -32,13 +39,27 @@ class ProfileServiceTest {
     private UserRepository userRepository;
 
     @Mock
+    private UserPreferenceRepository userPreferenceRepository;
+
+    @Mock
     private RideRecordRepository rideRecordRepository;
 
     @Mock
     private CourseRepository courseRepository;
 
-    @InjectMocks
     private ProfileService profileService;
+
+    @BeforeEach
+    void setUp() {
+        profileService = new ProfileService(
+                authService,
+                userRepository,
+                userPreferenceRepository,
+                rideRecordRepository,
+                courseRepository,
+                Clock.fixed(Instant.parse("2026-05-26T15:30:00Z"), ZoneOffset.UTC)
+        );
+    }
 
     @Test
     @DisplayName("내 프로필 조회는 현재 사용자의 최소 프로필을 응답한다")
@@ -107,6 +128,27 @@ class ProfileServiceTest {
         assertThat(response.overallSummary().totalRides()).isEqualTo(12);
         assertThat(response.overallSummary().avgSpeedKmh()).isEqualByComparingTo("18.1");
         assertThat(response.overallSummary().totalElevationM()).isZero();
+    }
+
+    @Test
+    @DisplayName("내 활동 요약 주간 범위는 한국 시간 월요일 00시부터 계산한다")
+    void getMyActivitySummaryUsesKoreaWeekWindow() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        given(authService.findUserBySubject("1")).willReturn(user);
+
+        profileService.getMyActivitySummary("1");
+
+        ArgumentCaptor<OffsetDateTime> startCaptor = ArgumentCaptor.forClass(OffsetDateTime.class);
+        ArgumentCaptor<OffsetDateTime> endCaptor = ArgumentCaptor.forClass(OffsetDateTime.class);
+        verify(rideRecordRepository).countByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
+                eq(1L),
+                eq(RideRecordFinalizationStatus.READY.name()),
+                startCaptor.capture(),
+                endCaptor.capture()
+        );
+        assertThat(startCaptor.getValue()).isEqualTo(OffsetDateTime.parse("2026-05-25T00:00:00+09:00"));
+        assertThat(endCaptor.getValue()).isEqualTo(OffsetDateTime.parse("2026-05-31T23:59:59.999999999+09:00"));
     }
 
     @Test

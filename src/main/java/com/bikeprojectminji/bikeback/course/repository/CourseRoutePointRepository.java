@@ -9,4 +9,6 @@ public interface CourseRoutePointRepository extends JpaRepository<CourseRoutePoi
     List<CourseRoutePointEntity> findByCourseIdOrderByPointOrderAsc(Long courseId);
 
     void deleteByCourseId(Long courseId);
+
+    void deleteByCourseIdIn(List<Long> courseIds);
 }

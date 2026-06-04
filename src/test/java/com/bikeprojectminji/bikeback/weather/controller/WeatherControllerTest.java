@@ -12,6 +12,7 @@ import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
 import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
 import com.bikeprojectminji.bikeback.weather.dto.WindData;
 import com.bikeprojectminji.bikeback.weather.service.WeatherService;
+import java.time.OffsetDateTime;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,7 +44,11 @@ class WeatherControllerTest {
                 new WeatherData(12, "clear", "none"),
                 new WindData(14, "북서", 315),
                 false,
-                false
+                false,
+                "FRESH_PROVIDER",
+                null,
+                OffsetDateTime.parse("2026-05-26T10:00:00+09:00"),
+                0
         );
         given(weatherService.getCurrent(any(), any())).willReturn(response);
 
@@ -56,7 +61,10 @@ class WeatherControllerTest {
                 .andExpect(jsonPath("$.data.weather.temperatureC").value(12))
                 .andExpect(jsonPath("$.data.wind.speedKmh").value(14))
                 .andExpect(jsonPath("$.data.stale").value(false))
-                .andExpect(jsonPath("$.data.forecastFallbackUsed").value(false));
+                .andExpect(jsonPath("$.data.forecastFallbackUsed").value(false))
+                .andExpect(jsonPath("$.data.freshnessStatus").value("FRESH_PROVIDER"))
+                .andExpect(jsonPath("$.data.observedAt").value("2026-05-26T10:00:00+09:00"))
+                .andExpect(jsonPath("$.data.cacheAgeSec").value(0));
     }
 
     @Test

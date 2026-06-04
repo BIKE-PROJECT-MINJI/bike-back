@@ -11,7 +11,13 @@ public interface RideRecordRepository extends JpaRepository<RideRecordEntity, Lo
 
     Optional<RideRecordEntity> findByIdAndOwnerUserId(Long id, Long ownerUserId);
 
+    Optional<RideRecordEntity> findByOwnerUserIdAndClientRideId(Long ownerUserId, String clientRideId);
+
+    List<RideRecordEntity> findByOwnerUserId(Long ownerUserId);
+
     List<RideRecordEntity> findTop20ByOwnerUserIdOrderByEndedAtDescIdDesc(Long ownerUserId);
+
+    Optional<RideRecordEntity> findFirstByOwnerUserIdAndFinalizationStatusOrderByEndedAtDescIdDesc(Long ownerUserId, String finalizationStatus);
 
     @Query("select count(r) from RideRecordEntity r where r.ownerUserId = :ownerUserId and r.finalizationStatus = :finalizationStatus")
     long countByOwnerUserIdAndFinalizationStatus(Long ownerUserId, String finalizationStatus);

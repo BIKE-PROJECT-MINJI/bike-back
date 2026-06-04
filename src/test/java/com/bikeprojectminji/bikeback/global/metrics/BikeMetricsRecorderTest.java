@@ -32,6 +32,7 @@ class BikeMetricsRecorderTest {
         recorder.recordCourseRouteCacheBypass("course_download");
         recorder.recordCourseRouteSnapshotLoad("route_points");
         recorder.recordCourseRouteCacheEviction("route_points_updated");
+        recorder.recordRoutingProviderFailure("GraphHopper", "http_429");
 
         assertThat(meterRegistry.get("bike_weather_fallback_total").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_weather_stale_served_total").counter().count()).isEqualTo(1.0);
@@ -58,5 +59,10 @@ class BikeMetricsRecorderTest {
         assertThat(meterRegistry.get("bike_course_route_cache_bypass_total").tag("consumer", "course_download").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_course_route_snapshot_load_total").tag("consumer", "route_points").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_course_route_cache_eviction_total").tag("reason", "route_points_updated").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_routing_provider_failure_total")
+                .tag("provider", "graphhopper")
+                .tag("reason", "http_429")
+                .counter()
+                .count()).isEqualTo(1.0);
     }
 }

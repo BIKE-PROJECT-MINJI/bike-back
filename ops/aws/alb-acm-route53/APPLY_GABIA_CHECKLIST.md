@@ -1,6 +1,6 @@
 # ALB + ACM + Gabia 적용 체크리스트
 
-이 체크리스트는 `/mnt/c/Users/alswl/Desktop/bike/dev/bike-back/ops/aws/alb-acm-route53/terraform.tfvars.discovered` 기준이다.
+이 체크리스트는 `/mnt/c/Users/alswl/Desktop/BIKE - 복사본/dev/bike-back/ops/aws/alb-acm-route53/terraform.tfvars.discovered` 기준이다.
 
 ## 0. 현재 확인된 실제 값
 
@@ -18,7 +18,7 @@
 ## 1. 1차 apply
 
 ```bash
-cd /mnt/c/Users/alswl/Desktop/bike/dev/bike-back/ops/aws/alb-acm-route53
+cd "/mnt/c/Users/alswl/Desktop/BIKE - 복사본/dev/bike-back/ops/aws/alb-acm-route53"
 terraform init
 terraform plan -var-file=terraform.tfvars.discovered
 terraform apply -var-file=terraform.tfvars.discovered
@@ -36,7 +36,7 @@ terraform apply -var-file=terraform.tfvars.discovered
 
 가비아 화면에서 실제로 무엇을 넣는지는 아래 문서를 같이 본다.
 
-- `/mnt/c/Users/alswl/Desktop/bike/dev/bike-back/docs/gabia-dns-alb-acm-guide.md`
+- `/mnt/c/Users/alswl/Desktop/BIKE - 복사본/dev/bike-back/docs/gabia-dns-alb-acm-guide.md`
 
 아래 명령으로 ACM 검증용 레코드를 확인한다.
 

@@ -11,6 +11,9 @@ import com.bikeprojectminji.bikeback.profile.dto.ProfileActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileOverallActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileMeResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileWeeklyActivitySummaryResponse;
+import com.bikeprojectminji.bikeback.profile.dto.UpdatePreferenceRequest;
+import com.bikeprojectminji.bikeback.profile.dto.UserPreferenceResponse;
+import com.bikeprojectminji.bikeback.profile.entity.BikeRoadPriority;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.profile.service.ProfileService;
 import java.math.BigDecimal;
@@ -74,9 +77,69 @@ class ProfileControllerTest {
     }
 
     @Test
+    @DisplayName("내 선호경로 저장 API는 current path에서 success 래퍼로 응답한다")
+    void updateMyPreferenceReturnsWrappedResponse() throws Exception {
+        given(profileService.updateMyPreference("1", new UpdatePreferenceRequest(true, BikeRoadPriority.HIGH, true, true)))
+                .willReturn(new UserPreferenceResponse(true, BikeRoadPriority.HIGH, true, true));
+
+        mockMvc.perform(patch("/api/v1/profile/me/preferences")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "scenic": true,
+                                  "bikeRoadPriority": "HIGH",
+                                  "avoidDust": true,
+                                  "avoidUnsafeSurface": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.scenic").value(true))
+                .andExpect(jsonPath("$.data.bikeRoadPriority").value("HIGH"))
+                .andExpect(jsonPath("$.data.avoidDust").value(true))
+                .andExpect(jsonPath("$.data.avoidUnsafeSurface").value(true));
+    }
+
+    @Test
+    @DisplayName("내 선호경로 저장 API는 자전거도로 우선순위가 없으면 400을 반환한다")
+    void updateMyPreferenceReturnsBadRequestWithoutBikeRoadPriority() throws Exception {
+        mockMvc.perform(patch("/api/v1/profile/me/preferences")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "scenic": true,
+                                  "avoidDust": true,
+                                  "avoidUnsafeSurface": true
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("bikeRoadPriority는 비어 있을 수 없습니다."));
+    }
+
+    @Test
     @DisplayName("내 프로필 API는 비로그인 요청이면 401을 반환한다")
     void getMyProfileReturnsUnauthorizedWithoutToken() throws Exception {
         mockMvc.perform(get("/api/v1/profile/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    @DisplayName("내 선호경로 저장 API는 비로그인 요청이면 401을 반환한다")
+    void updateMyPreferenceReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(patch("/api/v1/profile/me/preferences")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "scenic": true,
+                                  "bikeRoadPriority": "HIGH",
+                                  "avoidDust": true,
+                                  "avoidUnsafeSurface": true
+                                }
+                                """))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(401));
     }

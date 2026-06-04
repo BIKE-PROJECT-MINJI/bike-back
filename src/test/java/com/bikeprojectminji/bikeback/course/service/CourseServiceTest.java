@@ -4,12 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verify;
 
+import com.bikeprojectminji.bikeback.achievement.service.AchievementService;
 import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseShareResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseDownloadResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointRequest;
 import com.bikeprojectminji.bikeback.course.dto.CreateCourseFromRideRecordRequest;
+import com.bikeprojectminji.bikeback.course.dto.UpdateCourseRequest;
 import com.bikeprojectminji.bikeback.course.dto.UpdateCourseVisibilityRequest;
 import com.bikeprojectminji.bikeback.course.dto.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseListResponse;
@@ -25,11 +30,13 @@ import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
+import com.bikeprojectminji.bikeback.course.repository.CourseRouteGeometryRepository;
 import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordProcessedPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
+import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
@@ -38,6 +45,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -65,6 +73,12 @@ class CourseServiceTest {
 
     @Mock
     private CourseRouteSnapshotService courseRouteSnapshotService;
+
+    @Mock
+    private CourseRouteGeometryRepository courseRouteGeometryRepository;
+
+    @Mock
+    private AchievementService achievementService;
 
     @InjectMocks
     private CourseService courseService;
@@ -155,6 +169,19 @@ class CourseServiceTest {
         assertThat(response.nextCursor()).isEqualTo("10");
     }
 
+    @Test
+    @DisplayName("공개 코스 목록은 limit 상한을 50개로 제한한다")
+    void getCoursesCapsLimitToFifty() {
+        List<CourseEntity> courses = createCourses(51);
+        given(courseRepository.findPublicPageAfter(null, 51)).willReturn(courses);
+
+        CourseListResponse response = courseService.getCourses(null, 1000);
+
+        assertThat(response.items()).hasSize(50);
+        assertThat(response.hasNext()).isTrue();
+        assertThat(response.nextCursor()).isEqualTo("50");
+    }
+
     private List<CourseEntity> createCourses(int count) {
         return java.util.stream.IntStream.rangeClosed(1, count)
                 .mapToObj(index -> {
@@ -214,6 +241,24 @@ class CourseServiceTest {
     }
 
     @Test
+    @DisplayName("UNLISTED 코스 상세 조회는 owner면 share token 없이 응답한다")
+    void getCourseDetailReturnsUnlistedCourseForOwnerWithoutShareToken() {
+        CourseEntity entity = new CourseEntity("링크 공유 코스", BigDecimal.valueOf(23.4), 95, 1);
+        ReflectionTestUtils.setField(entity, "id", 7L);
+        ReflectionTestUtils.setField(entity, "visibility", CourseVisibility.UNLISTED);
+        ReflectionTestUtils.setField(entity, "ownerUserId", 1L);
+        ReflectionTestUtils.setField(entity, "shareToken", "share-token");
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
+        given(authService.findUserBySubject("1")).willReturn(user);
+
+        CourseDetailResponse response = courseService.getCourseDetail(7L, "1", null);
+
+        assertThat(response.id()).isEqualTo(7L);
+    }
+
+    @Test
     @DisplayName("기록 기반 코스 생성은 소유자의 자유 주행 기록으로 코스를 만든다")
     void createCourseFromRideRecordCreatesOwnedCourse() {
         UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
@@ -239,6 +284,38 @@ class CourseServiceTest {
         assertThat(response.ownerUserId()).isEqualTo(1L);
         assertThat(response.visibility()).isEqualTo("PRIVATE");
         assertThat(response.sourceRideRecordId()).isEqualTo(1001L);
+        InOrder inOrder = inOrder(courseRoutePointRepository, courseRouteGeometryRepository);
+        inOrder.verify(courseRoutePointRepository).saveAll(any());
+        inOrder.verify(courseRoutePointRepository).flush();
+        inOrder.verify(courseRouteGeometryRepository).refreshRouteLine(2001L);
+    }
+
+    @Test
+    @DisplayName("코스 수정은 route point 교체 후 route_line_geom을 다시 계산한다")
+    void updateCourseRefreshesRouteLineAfterRoutePointReplacement() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        CourseEntity course = new CourseEntity("기존 코스", "설명", BigDecimal.valueOf(18.3), 10, 1, false, null, null, null, 1L, CourseVisibility.PRIVATE);
+        ReflectionTestUtils.setField(course, "id", 2001L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(courseRepository.findById(2001L)).willReturn(Optional.of(course));
+        given(courseRepository.save(any(CourseEntity.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+        courseService.updateCourse("1", 2001L, new UpdateCourseRequest(
+                "수정 코스",
+                "수정 설명",
+                "PRIVATE",
+                List.of(
+                        new CourseRoutePointRequest(2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792)),
+                        new CourseRoutePointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780))
+                )
+        ));
+
+        InOrder inOrder = inOrder(courseRoutePointRepository, courseRouteGeometryRepository);
+        inOrder.verify(courseRoutePointRepository).saveAll(any());
+        inOrder.verify(courseRoutePointRepository).flush();
+        inOrder.verify(courseRouteGeometryRepository).refreshRouteLine(2001L);
     }
 
     @Test
@@ -254,6 +331,43 @@ class CourseServiceTest {
 
         assertThatThrownBy(() -> courseService.createCourseFromRideRecord("1", new CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE")))
                 .isInstanceOf(com.bikeprojectminji.bikeback.global.exception.BadRequestException.class)
+                .hasMessage("경로 보정이 아직 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+    }
+
+    @Test
+    @DisplayName("기록 기반 코스 생성은 타인 자유 주행 기록이면 NotFoundException을 던진다")
+    void createCourseFromRideRecordThrowsNotFoundForOtherOwnerRideRecord() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(1001L, 1L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> courseService.createCourseFromRideRecord(
+                "1",
+                new CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE")
+        ))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("자유 주행 기록을 찾을 수 없습니다.");
+    }
+
+    @Test
+    @DisplayName("기록 기반 코스 생성은 finalization 실패 상태면 BadRequestException을 던진다")
+    void createCourseFromRideRecordThrowsWhenFinalizationFailed() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity rideRecord = new RideRecordEntity(1L, java.time.OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), java.time.OffsetDateTime.parse("2026-03-29T11:00:00+09:00"), 18250, 3600);
+        ReflectionTestUtils.setField(rideRecord, "id", 1001L);
+        rideRecord.markFailed(java.time.OffsetDateTime.parse("2026-03-29T11:01:00+09:00"), "processor failed");
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(1001L, 1L)).willReturn(Optional.of(rideRecord));
+
+        assertThatThrownBy(() -> courseService.createCourseFromRideRecord(
+                "1",
+                new CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE")
+        ))
+                .isInstanceOf(BadRequestException.class)
                 .hasMessage("경로 보정이 아직 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
     }
 
@@ -277,7 +391,7 @@ class CourseServiceTest {
     @DisplayName("공개 코스 검색은 PUBLIC 코스만 latest 기준으로 응답한다")
     void searchPublicCoursesReturnsPublicOnlyItems() {
         List<CourseEntity> courses = createCourses(2);
-        given(courseRepository.findTop20ByVisibilityAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility.PUBLIC, "한강"))
+        given(courseRepository.findTop20ByVisibilityAndReportHiddenFalseAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility.PUBLIC, "한강"))
                 .willReturn(courses);
 
         CourseListResponse response = courseService.searchPublicCourses("한강", "latest");
@@ -317,6 +431,32 @@ class CourseServiceTest {
         assertThatThrownBy(() -> courseService.downloadCourse(7L, null, null))
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("이 코스에 접근할 권한이 없습니다.");
+    }
+
+    @Test
+    @DisplayName("코스 수정은 route point 위도 범위를 검증한다")
+    void updateCourseRejectsInvalidRoutePointLatitude() {
+        assertThatThrownBy(() -> courseService.updateCourse("1", 2001L, new UpdateCourseRequest(
+                "한강 코스",
+                "설명",
+                "PRIVATE",
+                List.of(new CourseRoutePointRequest(1, BigDecimal.valueOf(91), BigDecimal.valueOf(126.9780)))
+        )))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("routePoints.latitude는 -90 이상 90 이하여야 합니다.");
+    }
+
+    @Test
+    @DisplayName("코스 수정은 route point 경도 범위를 검증한다")
+    void updateCourseRejectsInvalidRoutePointLongitude() {
+        assertThatThrownBy(() -> courseService.updateCourse("1", 2001L, new UpdateCourseRequest(
+                "한강 코스",
+                "설명",
+                "PRIVATE",
+                List.of(new CourseRoutePointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(181)))
+        )))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("routePoints.longitude는 -180 이상 180 이하여야 합니다.");
     }
 
     @Test

@@ -1,6 +1,8 @@
 package com.bikeprojectminji.bikeback.course.controller;
 
 import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseReportRequest;
+import com.bikeprojectminji.bikeback.course.dto.CourseReportResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseShareResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseDownloadResponse;
 import com.bikeprojectminji.bikeback.course.dto.CreateCourseFromRideRecordRequest;
@@ -13,6 +15,8 @@ import com.bikeprojectminji.bikeback.course.dto.UpdateCourseVisibilityRequest;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import java.math.BigDecimal;
+import com.bikeprojectminji.bikeback.course.entity.CourseReportReason;
+import com.bikeprojectminji.bikeback.course.service.CourseReportService;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -31,9 +35,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class CourseController {
 
     private final CourseService courseService;
+    private final CourseReportService courseReportService;
 
-    public CourseController(CourseService courseService) {
+    public CourseController(CourseService courseService, CourseReportService courseReportService) {
         this.courseService = courseService;
+        this.courseReportService = courseReportService;
     }
 
     @GetMapping
@@ -117,6 +123,15 @@ public class CourseController {
         return ApiResponse.success(courseService.updateCourseVisibility(jwt.getSubject(), courseId, request));
     }
 
+    @PostMapping("/{courseId}/reports")
+    public ApiResponse<CourseReportResponse> reportCourse(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long courseId,
+            @RequestBody CourseReportRequest request
+    ) {
+        return ApiResponse.success(courseReportService.reportCourse(jwt.getSubject(), courseId, parseReportReason(request)));
+    }
+
     @PostMapping("/{courseId}/share")
     public ApiResponse<CourseShareResponse> getCourseShareInfo(
             @AuthenticationPrincipal Jwt jwt,
@@ -132,5 +147,16 @@ public class CourseController {
             @AuthenticationPrincipal Jwt jwt
     ) {
         return ApiResponse.success(courseService.downloadCourse(courseId, jwt != null ? jwt.getSubject() : null, shareToken));
+    }
+
+    private CourseReportReason parseReportReason(CourseReportRequest request) {
+        if (request == null || request.reason() == null || request.reason().isBlank()) {
+            throw new BadRequestException("reason은 비어 있을 수 없습니다.");
+        }
+        try {
+            return CourseReportReason.valueOf(request.reason().toUpperCase());
+        } catch (IllegalArgumentException exception) {
+            throw new BadRequestException("reason은 지원하지 않는 신고 사유입니다.");
+        }
     }
 }

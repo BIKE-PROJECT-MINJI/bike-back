@@ -18,6 +18,7 @@ import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +31,7 @@ import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 
 @ExtendWith(MockitoExtension.class)
 class RideRecordServiceTest {
@@ -133,6 +135,41 @@ class RideRecordServiceTest {
     }
 
     @Test
+    @DisplayName("자유 주행 기록 저장은 같은 clientRideId 재시도면 기존 기록을 반환하고 중복 저장하지 않는다")
+    void saveRideRecordReturnsExistingRecordForSameClientRideId() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity existingRideRecord = new RideRecordEntity(
+                1L,
+                "android-ride-001",
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                18250,
+                3600
+        );
+        ReflectionTestUtils.setField(existingRideRecord, "id", 1001L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByOwnerUserIdAndClientRideId(1L, "android-ride-001")).willReturn(Optional.of(existingRideRecord));
+        given(rideRecordPointRepository.countByRideRecordId(1001L)).willReturn(2L);
+
+        RideRecordResponse response = rideRecordService.saveRideRecord("1", new CreateRideRecordRequest(
+                "android-ride-001",
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                new RideRecordSummaryRequest(18250, 3600),
+                List.of(
+                        new RideRecordPointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                        new RideRecordPointRequest(2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
+                )
+        ));
+
+        assertThat(response.rideRecordId()).isEqualTo(1001L);
+        assertThat(response.routePointCount()).isEqualTo(2);
+        verifyNoInteractions(recentLocationCacheService, rideRecordFinalizationService);
+    }
+
+    @Test
     @DisplayName("자유 주행 기록 저장은 telemetry nullable 필드를 포함해도 저장된다")
     void saveRideRecordAcceptsTelemetryFields() {
         UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
@@ -162,5 +199,67 @@ class RideRecordServiceTest {
         ));
 
         assertThat(response.routePointCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 저장은 route point 위도 범위를 검증한다")
+    void saveRideRecordRejectsInvalidLatitude() {
+        CreateRideRecordRequest request = new CreateRideRecordRequest(
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T10:10:00+09:00"),
+                new RideRecordSummaryRequest(1200, 600),
+                List.of(new RideRecordPointRequest(1, BigDecimal.valueOf(-91), BigDecimal.valueOf(126.9780)))
+        );
+
+        assertThatThrownBy(() -> rideRecordService.saveRideRecord("1", request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("routePoints.latitude는 -90 이상 90 이하여야 합니다.");
+
+        verifyNoInteractions(authService, rideRecordRepository, rideRecordPointRepository,
+                recentLocationCacheService, rideRecordFinalizationService);
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 저장은 route point 경도 범위를 검증한다")
+    void saveRideRecordRejectsInvalidLongitude() {
+        CreateRideRecordRequest request = new CreateRideRecordRequest(
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T10:10:00+09:00"),
+                new RideRecordSummaryRequest(1200, 600),
+                List.of(new RideRecordPointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(-181)))
+        );
+
+        assertThatThrownBy(() -> rideRecordService.saveRideRecord("1", request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("routePoints.longitude는 -180 이상 180 이하여야 합니다.");
+
+        verifyNoInteractions(authService, rideRecordRepository, rideRecordPointRepository,
+                recentLocationCacheService, rideRecordFinalizationService);
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 상세 조회는 내 기록이 없으면 NotFoundException을 던진다")
+    void getRideRecordStatusThrowsNotFoundWhenOwnedRecordMissing() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(999L, 1L)).willReturn(java.util.Optional.empty());
+
+        assertThatThrownBy(() -> rideRecordService.getRideRecordStatus("1", 999L))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("자유 주행 기록을 찾을 수 없습니다.");
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 재처리는 내 기록이 없으면 NotFoundException을 던진다")
+    void regenerateRideRecordThrowsNotFoundWhenOwnedRecordMissing() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(999L, 1L)).willReturn(java.util.Optional.empty());
+
+        assertThatThrownBy(() -> rideRecordService.regenerateRideRecord("1", 999L))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("자유 주행 기록을 찾을 수 없습니다.");
     }
 }

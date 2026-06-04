@@ -26,6 +26,11 @@ public class RedisRefreshTokenStore implements RefreshTokenStore {
         redisJsonValueStore.set(key(subject), session, ttl);
     }
 
+    @Override
+    public void delete(String subject) {
+        redisJsonValueStore.delete(key(subject));
+    }
+
     private String key(String subject) {
         return "auth:refresh-token:" + subject;
     }

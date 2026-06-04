@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.Clock;
 import java.time.OffsetDateTime;
 
 @Entity
@@ -37,6 +38,12 @@ public class UserEntity {
     @Column(name = "updated_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime updatedAt;
 
+    @Column(name = "account_status", nullable = false, length = 20)
+    private String accountStatus = "ACTIVE";
+
+    @Column(name = "deleted_at")
+    private OffsetDateTime deletedAt;
+
     protected UserEntity() {
     }
 
@@ -53,11 +60,33 @@ public class UserEntity {
         this.profileImageUrl = profileImageUrl;
     }
 
+    public void updateKakaoProfile(String email, String displayName, String profileImageUrl) {
+        this.email = email;
+        this.displayName = displayName;
+        this.profileImageUrl = profileImageUrl;
+    }
+
+    public void updateKakaoProfile(String displayName, String profileImageUrl) {
+        this.displayName = displayName;
+        this.profileImageUrl = profileImageUrl;
+    }
+
     public void claimLocalAccount(String email, String passwordHash, String displayName, String profileImageUrl) {
         this.email = email;
         this.passwordHash = passwordHash;
         this.displayName = displayName;
         this.profileImageUrl = profileImageUrl;
+    }
+
+    public void markDeleted(Clock clock) {
+        OffsetDateTime now = OffsetDateTime.now(clock);
+        this.accountStatus = "DELETED";
+        this.deletedAt = now;
+        this.externalId = "deleted:" + id + ":" + now.toInstant().toEpochMilli();
+    }
+
+    public boolean isDeleted() {
+        return "DELETED".equals(accountStatus);
     }
 
     public Long getId() {
@@ -90,5 +119,13 @@ public class UserEntity {
 
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getAccountStatus() {
+        return accountStatus;
+    }
+
+    public OffsetDateTime getDeletedAt() {
+        return deletedAt;
     }
 }

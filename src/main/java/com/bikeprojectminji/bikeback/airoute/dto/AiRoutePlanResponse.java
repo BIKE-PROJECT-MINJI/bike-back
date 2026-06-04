@@ -1,0 +1,23 @@
+package com.bikeprojectminji.bikeback.airoute.dto;
+
+import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
+import com.bikeprojectminji.bikeback.weather.dto.WindData;
+import java.util.List;
+
+public record AiRoutePlanResponse(
+        String planId,
+        String status,
+        String summary,
+        String confidence,
+        WeatherData weather,
+        WindData wind,
+        List<AiRoutePointResponse> routePoints,
+        List<AiRouteRiskResponse> risks,
+        List<String> actions,
+        int recommendationScore,
+        RecommendationScoreResponse scoreBreakdown,
+        RecommendationExplanationResponse explanation,
+        List<ProviderEvidenceBadgeResponse> evidenceBadges,
+        boolean aiGenerated
+) {
+}

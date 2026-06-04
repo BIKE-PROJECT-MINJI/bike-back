@@ -136,7 +136,11 @@ public class WeatherService {
                 snapshot.weather(),
                 snapshot.wind(),
                 stale,
-                snapshot.forecastFallbackUsed()
+                snapshot.forecastFallbackUsed(),
+                stale ? "STALE_LAST_SUCCESS" : "FRESH_PROVIDER",
+                stale ? "LAST_SUCCESS_CACHE" : null,
+                snapshot.observedAt(),
+                stale ? Math.max(0L, cacheAgeMs(snapshot) / 1000L) : 0L
         );
     }
 
