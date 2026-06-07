@@ -100,7 +100,7 @@ AI worker는 텍스트 의도와 설명 후보를 만든다. 실제 경로 좌�
 - AI route 응답은 `elevationSummary`, `recommendationScores.elevation`, `graphhopper.*` evidence를 포함한다.
 - AI worker는 설명 후보 역할로 축소되고, route point source of truth는 GraphHopper 후보가 된다.
 - self-host runtime 검증은 `docker-compose.test.yml`과 AWS compose+k6 evidence로 남긴다.
-- 성능상 `course-follow` flow는 100 VU AWS 테스트에서 p95/p99 threshold를 넘었다. 이번 PR은 기능 검증과 병목 식별까지 완료한 상태이며, route-points/detail hot path 최적화는 후속 개선 과제로 분리한다.
+- 성능상 `course-follow` flow는 100 VU AWS 테스트에서 p95/p99 threshold를 넘었다. 이번 PR은 기능 검증과 병목 식별까지 완료한 상태이며, route-points/detail hot path 최적화는 [#37 course-follow hot path p95/p99 최적화](https://github.com/BIKE-PROJECT-MINJI/bike-back/issues/37)로 분리한다.
 
 ## 검증 근거
 
@@ -108,4 +108,3 @@ AI worker는 텍스트 의도와 설명 후보를 만든다. 실제 경로 좌�
 - AI route HTTP evidence: `.omo/ulw-loop/evidence/G014-*`
 - AWS compose/k6/cleanup evidence: `.omo/ulw-loop/evidence/G016-*`
 - CI: PR #36 `bike-back-ci / test-and-build` success at `78e74aa`
-

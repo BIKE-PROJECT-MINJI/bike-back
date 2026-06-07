@@ -41,7 +41,7 @@ k6 summary JSON에서 다음 값을 보고한다.
 
 ## 2026-06-07 실행 결과
 
-실행은 완료됐고 전체 HTTP 실패율과 전체 latency threshold는 통과했다. 다만 `course-follow` flow는 별도 flow threshold를 넘었으므로 프로덕션 품질 통과가 아니라 병목 식별 결과로 해석한다.
+실행은 완료됐고 전체 HTTP 실패율과 전체 latency threshold는 통과했다. 다만 `course-follow` flow는 별도 flow threshold를 넘었으므로 프로덕션 성능 gate 통과가 아니라 병목 식별 결과로 해석한다.
 
 | 항목 | 결과 |
 | --- | --- |
@@ -65,6 +65,8 @@ k6 summary JSON에서 다음 값을 보고한다.
 - Course follow flow threshold: fail
 
 후속 개선 대상은 코스 상세, route-points 조회, ride-policy 평가가 묶인 `course-follow` hot path다. raw 결과는 `.omo/ulw-loop/evidence/G016-C002-k6-100-users-2026-06-07.json`에 남겼다.
+
+PR #36의 완료 범위는 AI route + GraphHopper + elevation 기능 정리, AWS compose 실행, 100 VU 병목 측정, cleanup 증거 확보까지다. `course-follow` p95/p99 개선은 [#37 course-follow hot path p95/p99 최적화](https://github.com/BIKE-PROJECT-MINJI/bike-back/issues/37)에서 별도 성능 개선으로 진행한다.
 
 ## 비용 안전
 
