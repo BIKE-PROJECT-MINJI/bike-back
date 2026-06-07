@@ -39,6 +39,33 @@ k6 summary JSON에서 다음 값을 보고한다.
 
 테스트 threshold는 AI/GraphHopper cold latency를 고려해 AI route p95 60초, p99 90초로 시작한다. 결과가 안정되면 이 값을 낮추는 것을 다음 개선 과제로 삼는다.
 
+## 2026-06-07 실행 결과
+
+실행은 완료됐고 전체 HTTP 실패율과 전체 latency threshold는 통과했다. 다만 `course-follow` flow는 별도 flow threshold를 넘었으므로 프로덕션 품질 통과가 아니라 병목 식별 결과로 해석한다.
+
+| 항목 | 결과 |
+| --- | --- |
+| VU | 100명 |
+| 완료 iterations | 2808 |
+| checks rate | 99.20% |
+| HTTP failure rate | 1.218% |
+| 전체 p95 | 2606.54ms |
+| 전체 p99 | 14464.88ms |
+| AI route p95 / p99 | 247.97ms / 395.97ms |
+| Free ride p95 / p99 | 2212.13ms / 2948.85ms |
+| Course follow p95 / p99 | 18276.18ms / 27779.12ms |
+
+판정:
+
+- Load test completion: pass
+- Overall HTTP failure threshold: pass
+- Overall p95/p99 threshold: pass
+- AI route flow threshold: pass
+- Free ride flow threshold: pass
+- Course follow flow threshold: fail
+
+후속 개선 대상은 코스 상세, route-points 조회, ride-policy 평가가 묶인 `course-follow` hot path다. raw 결과는 `.omo/ulw-loop/evidence/G016-C002-k6-100-users-2026-06-07.json`에 남겼다.
+
 ## 비용 안전
 
 테스트 리소스는 `bike-ulw-loadtest-20260607` prefix/tag로 만든다. 테스트 후 다음 리소스가 남지 않았음을 증거로 남긴다.
