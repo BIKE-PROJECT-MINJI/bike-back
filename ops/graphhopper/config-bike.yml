@@ -11,8 +11,8 @@ graphhopper:
 
   graph.encoded_values: |
     road_class, road_environment, surface, smoothness,
-    bike_access, backward_bike_access, bike_average_speed, bike_priority, bike_road_access, bike_network,
-    foot_road_access, roundabout, mtb_rating, ferry_speed, hike_rating, country, average_slope, max_slope
+    bike_access, bike_average_speed, bike_priority, bike_road_access, bike_network,
+    mtb_rating, ferry_speed, hike_rating, country, average_slope, max_slope
 
   graph.elevation.provider: srtm
   graph.elevation.cache_dir: /data/srtm-cache
