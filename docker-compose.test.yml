@@ -73,7 +73,7 @@ services:
       GRAPHHOPPER_OSM_FILE: ${GRAPHHOPPER_OSM_FILE:-south-korea-latest.osm.pbf}
       GRAPHHOPPER_JAVA_XMX: ${GRAPHHOPPER_JAVA_XMX:-2g}
     volumes:
-      - ./ops/graphhopper/config-bike.yml:/graphhopper/config-bike.yml:ro
+      - ./ops/graphhopper:/graphhopper:ro
       - bike_test_graphhopper_runtime:/runtime:ro
       - bike_test_graphhopper_data:/data
     depends_on:
