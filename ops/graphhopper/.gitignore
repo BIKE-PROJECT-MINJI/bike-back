@@ -1,0 +1,4 @@
+data/
+graph-cache/
+*.jar
+*.osm.pbf

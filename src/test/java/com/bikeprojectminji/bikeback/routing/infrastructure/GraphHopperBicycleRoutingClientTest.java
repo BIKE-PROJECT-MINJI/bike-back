@@ -37,19 +37,23 @@ class GraphHopperBicycleRoutingClientTest {
                     {
                       "distance": 1234.5,
                       "time": 420000,
+                      "ascend": 88.4,
+                      "descend": 21.2,
                       "points": {
                         "type": "LineString",
                         "coordinates": [
-                          [126.9780000, 37.5665000],
-                          [126.9820000, 37.5700000],
-                          [126.9900000, 37.5750000]
+                          [126.9780000, 37.5665000, 35.0],
+                          [126.9820000, 37.5700000, 82.0],
+                          [126.9900000, 37.5750000, 123.0]
                         ]
                       },
                       "details": {
                         "bike_network": [[0, 1, "local"], [1, 2, "regional"]],
                         "surface": [[0, 2, "asphalt"]],
                         "road_environment": [[0, 1, "road"], [1, 2, "bridge"]],
-                        "road_class": [[0, 2, "cycleway"]]
+                        "road_class": [[0, 2, "cycleway"]],
+                        "average_slope": [[0, 1, 4.2], [1, 2, 7.8]],
+                        "max_slope": [[0, 1, 9.0], [1, 2, 12.5]]
                       }
                     }
                   ]
@@ -73,11 +77,17 @@ class GraphHopperBicycleRoutingClientTest {
         assertThat(result.candidates().get(0).distanceMeters()).isEqualTo(1235);
         assertThat(result.candidates().get(0).durationSeconds()).isEqualTo(420);
         assertThat(result.candidates().get(0).polyline()).hasSize(3);
+        assertThat(result.candidates().get(0).polyline().get(2).altitudeM()).isEqualByComparingTo("123.0");
+        assertThat(result.candidates().get(0).elevationSummary().totalAscentM()).isEqualByComparingTo("88.4");
+        assertThat(result.candidates().get(0).elevationSummary().totalDescentM()).isEqualByComparingTo("21.2");
+        assertThat(result.candidates().get(0).elevationSummary().minAltitudeM()).isEqualByComparingTo("35.0");
+        assertThat(result.candidates().get(0).elevationSummary().maxAltitudeM()).isEqualByComparingTo("123.0");
+        assertThat(result.candidates().get(0).elevationSummary().maxSlopePercent()).isEqualByComparingTo("12.5");
         assertThat(result.candidates().get(0).bikePathScore()).isGreaterThanOrEqualTo(85);
         assertThat(result.candidates().get(0).evidenceSummary()).contains("cycleway", "asphalt", "regional");
         assertThat(result.candidates().get(0).evidenceBadges())
                 .extracting("source")
-                .contains("graphhopper.road_class", "graphhopper.surface", "graphhopper.smoothness");
+                .contains("graphhopper.road_class", "graphhopper.surface", "graphhopper.smoothness", "graphhopper.elevation", "graphhopper.slope");
         assertThat(result.candidates().get(0).evidenceBadges())
                 .extracting("status")
                 .contains("VERIFIED", "WARNING", "UNKNOWN");
@@ -113,6 +123,50 @@ class GraphHopperBicycleRoutingClientTest {
                 .tag("reason", "http_429")
                 .counter()
                 .count()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("GraphHopper provider는 null detail/coordinate 구간을 건너뛰고 유효 경로를 반환한다")
+    void routeSkipsMalformedGraphHopperSegments() throws IOException {
+        startServer(200, """
+                {
+                  "paths": [
+                    {
+                      "distance": 1000.0,
+                      "time": 300000,
+                      "points": {
+                        "type": "LineString",
+                        "coordinates": [
+                          null,
+                          [126.9500000],
+                          [126.9600000, 37.4900000]
+                        ]
+                      },
+                      "details": {
+                        "average_slope": [null, [0, 1, 11.0]]
+                      }
+                    }
+                  ]
+                }
+                """);
+
+        GraphHopperBicycleRoutingClient client = new GraphHopperBicycleRoutingClient(baseUrl(), "");
+
+        BicycleRoutingProviderResult result = client.route(new BicycleRouteRequest(
+                BigDecimal.valueOf(37.4800),
+                BigDecimal.valueOf(126.9500),
+                BigDecimal.valueOf(37.4900),
+                BigDecimal.valueOf(126.9600),
+                "SCENERY_FIRST"
+        ));
+
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(result.candidates()).hasSize(1);
+        assertThat(result.candidates().get(0).polyline()).hasSize(1);
+        assertThat(result.candidates().get(0).evidenceBadges())
+                .filteredOn(badge -> "graphhopper.slope".equals(badge.source()))
+                .extracting("status")
+                .containsExactly("WARNING");
     }
 
     @Test

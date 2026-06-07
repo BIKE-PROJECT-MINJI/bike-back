@@ -113,6 +113,14 @@ class RideRecordControllerTest {
     }
 
     @Test
+    @DisplayName("자유 주행 기록 목록 API는 비로그인 요청이면 401을 반환한다")
+    void listRideRecordsReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(get("/api/v1/ride-records"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
     @DisplayName("자유 주행 기록 상세 API는 상태와 요약 필드를 함께 응답한다")
     void getRideRecordStatusReturnsEnhancedResponse() throws Exception {
         given(rideRecordService.getRideRecordStatus("1", 1001L))
@@ -138,6 +146,22 @@ class RideRecordControllerTest {
                 .andExpect(jsonPath("$.data.distanceM").value(18250))
                 .andExpect(jsonPath("$.data.durationSec").value(3600))
                 .andExpect(jsonPath("$.data.linkedCourseId").value(2001));
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 상세 API는 비로그인 요청이면 401을 반환한다")
+    void getRideRecordStatusReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(get("/api/v1/ride-records/1001"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 재생성 API는 비로그인 요청이면 401을 반환한다")
+    void regenerateRideRecordReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(post("/api/v1/ride-records/1001/regenerate"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
     }
 
     @Test

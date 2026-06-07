@@ -2,6 +2,7 @@ package com.bikeprojectminji.bikeback.airoute.service;
 
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRouteElevationSummaryResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.ProviderEvidenceBadgeResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.RecommendationScoreResponse;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
@@ -61,11 +62,14 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
             BigDecimal destinationLon,
             String destinationLabel,
             String rideStyle,
+            String elevationPreference,
+            String textIntent,
             CurrentWeatherResponse weather,
             String constructionSummary,
             String roadSurfaceSummary,
             int recommendationScore,
             RecommendationScoreResponse scoreBreakdown,
+            AiRouteElevationSummaryResponse elevationSummary,
             List<ProviderEvidenceBadgeResponse> evidenceBadges,
             AiRoutePlanResponse fallbackPlan
     ) {
@@ -82,11 +86,14 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
                     request.destinationLon(),
                     request.destinationLabel(),
                     request.rideStyle(),
+                    request.elevationPreference(),
+                    request.textIntent(),
                     context.weather().orElse(null),
                     context.constructionSummary(),
                     context.roadSurfaceSummary(),
                     fallbackPlan.recommendationScore(),
                     fallbackPlan.scoreBreakdown(),
+                    fallbackPlan.elevationSummary(),
                     fallbackPlan.evidenceBadges(),
                     fallbackPlan
             );

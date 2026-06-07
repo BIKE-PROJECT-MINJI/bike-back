@@ -75,6 +75,42 @@ class AiRouteControllerTest {
         verify(aiRouteQuotaService).checkAllowed("1");
     }
 
+    @Test
+    @DisplayName("텍스트 기반 AI 경로 추천 REST는 인증 subject 기준으로 quota를 확인한다")
+    void planFromTextChecksQuotaByAuthenticatedSubject() throws Exception {
+        given(aiRoutePlannerService.planFromText(eq("1"), any())).willReturn(new AiRoutePlanResponse(
+                "plan-text-1",
+                "READY",
+                "오르막 추천 경로",
+                "MEDIUM",
+                null,
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                82,
+                null,
+                null,
+                List.of(),
+                false
+        ));
+
+        mockMvc.perform(post("/api/v1/ai-routes/plan/from-text")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "lat": 37.4812,
+                                  "lon": 126.9527,
+                                  "text": "오르막이 많은 곳 추천"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        verify(aiRouteQuotaService).checkAllowed("1");
+        verify(aiRoutePlannerService).planFromText(eq("1"), any());
+    }
+
     private String validRequestJson() {
         return """
                 {

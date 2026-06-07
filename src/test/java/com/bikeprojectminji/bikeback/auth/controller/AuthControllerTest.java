@@ -16,12 +16,20 @@ import com.bikeprojectminji.bikeback.auth.dto.RegisterRequest;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import com.bikeprojectminji.bikeback.global.exception.UnauthorizedException;
+import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpHeaders;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -37,6 +45,12 @@ class AuthControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JwtEncoder jwtEncoder;
+
+    @Autowired
+    private JwtDecoder jwtDecoder;
 
     @MockitoBean
     private AuthService authService;
@@ -67,6 +81,16 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.data.accessExpiresInSec").value(900))
                 .andExpect(jsonPath("$.data.refreshExpiresInSec").value(1209600))
                 .andExpect(jsonPath("$.data.userId").value(1));
+    }
+
+    @Test
+    @DisplayName("회원가입 API는 요청 본문이 없으면 400을 반환한다")
+    void registerReturnsBadRequestWithoutBody() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("요청 본문이 필요합니다."));
     }
 
     @Test
@@ -198,5 +222,36 @@ class AuthControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(401))
                 .andExpect(jsonPath("$.message").value("로그인 정보가 필요합니다."));
+    }
+
+    @Test
+    @DisplayName("보호 API는 refresh token을 Bearer access token으로 인정하지 않는다")
+    void getMeReturnsUnauthorizedWithRefreshToken() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token("refresh", "bike-back-test")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("JWT decoder는 refresh API 검증을 위해 refresh token도 해석할 수 있다")
+    void jwtDecoderDecodesRefreshTokenForRefreshEndpointValidation() {
+        org.springframework.security.oauth2.jwt.Jwt jwt = jwtDecoder.decode(token("refresh", "bike-back-test"));
+
+        org.assertj.core.api.Assertions.assertThat(jwt.getClaimAsString("tokenType")).isEqualTo("refresh");
+    }
+
+    private String token(String tokenType, String issuer) {
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(issuer)
+                .issuedAt(now)
+                .expiresAt(now.plusSeconds(900))
+                .subject("1")
+                .claim("tokenType", tokenType)
+                .build();
+        return jwtEncoder.encode(JwtEncoderParameters.from(
+                JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
+                claims
+        )).getTokenValue();
     }
 }

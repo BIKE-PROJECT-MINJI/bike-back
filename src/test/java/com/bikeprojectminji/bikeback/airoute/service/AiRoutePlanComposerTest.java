@@ -6,6 +6,7 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteCandidate;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePoint;
+import com.bikeprojectminji.bikeback.routing.service.ElevationSummary;
 import com.bikeprojectminji.bikeback.routing.service.RouteEvidenceBadge;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
 import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
@@ -85,14 +86,23 @@ class AiRoutePlanComposerTest {
                 1420,
                 List.of(
                         new BicycleRoutePoint(BigDecimal.valueOf(37.48), BigDecimal.valueOf(126.95), "출발"),
-                        new BicycleRoutePoint(BigDecimal.valueOf(37.50), BigDecimal.valueOf(126.98), "도착")
+                        new BicycleRoutePoint(BigDecimal.valueOf(37.50), BigDecimal.valueOf(126.98), "도착", BigDecimal.valueOf(83.5))
                 ),
                 "GraphHopper OSM path detail: cycleway, asphalt",
                 95,
                 72,
                 List.of(
                         new RouteEvidenceBadge("graphhopper.road_class", "자전거도로", "VERIFIED", "INFO", "cycleway 확인"),
-                        new RouteEvidenceBadge("graphhopper.surface", "노면", "UNKNOWN", "UNKNOWN", "surface 태그 미확인")
+                        new RouteEvidenceBadge("graphhopper.surface", "노면", "UNKNOWN", "UNKNOWN", "surface 태그 미확인"),
+                        new RouteEvidenceBadge("graphhopper.elevation", "고도", "VERIFIED", "INFO", "상승 55m")
+                ),
+                new ElevationSummary(
+                        BigDecimal.valueOf(55),
+                        BigDecimal.valueOf(12),
+                        BigDecimal.valueOf(21),
+                        BigDecimal.valueOf(83.5),
+                        BigDecimal.valueOf(8.2),
+                        BigDecimal.valueOf(3.1)
                 )
         );
 
@@ -103,9 +113,60 @@ class AiRoutePlanComposerTest {
         );
 
         assertThat(response.routePoints()).hasSize(2);
+        assertThat(response.routePoints().get(1).altitudeM()).isEqualByComparingTo("83.5");
+        assertThat(response.elevationSummary().totalAscentM()).isEqualByComparingTo("55");
+        assertThat(response.scoreBreakdown().elevation()).isGreaterThan(0);
         assertThat(response.scoreBreakdown().bikePath()).isEqualTo(95);
         assertThat(response.scoreBreakdown().unknownPenalty()).isGreaterThan(0);
         assertThat(response.evidenceBadges()).extracting("source")
-                .contains("graphhopper.road_class", "graphhopper.surface");
+                .contains("graphhopper.road_class", "graphhopper.surface", "graphhopper.elevation");
+    }
+
+    @Test
+    @DisplayName("고도 선호가 있으면 rideStyle이 아니라 elevationPreference로 고도 점수를 계산한다")
+    void composeRouteCandidateScoresElevationByElevationPreference() {
+        AiRoutePlanRequest request = new AiRoutePlanRequest(
+                BigDecimal.valueOf(37.48),
+                BigDecimal.valueOf(126.95),
+                BigDecimal.valueOf(37.55),
+                BigDecimal.valueOf(126.98),
+                "남산 N서울타워",
+                "SCENERY_FIRST",
+                "CLIMB_FIRST",
+                "CANONICAL_NAMSAN_NATIONAL_THEATER"
+        );
+
+        AiRoutePlanResponse response = composer.composeWithRouteCandidate(
+                request,
+                new AiRouteConditionContext(Optional.empty(), "공사 정보 미확인", "노면 정보 미확인"),
+                climbCandidate()
+        );
+
+        assertThat(response.scoreBreakdown().elevation()).isGreaterThan(80);
+        assertThat(response.evidenceBadges()).extracting("source").contains("canonical-route");
+    }
+
+    private BicycleRouteCandidate climbCandidate() {
+        return new BicycleRouteCandidate(
+                "SCENIC",
+                8200,
+                2200,
+                List.of(
+                        new BicycleRoutePoint(BigDecimal.valueOf(37.48), BigDecimal.valueOf(126.95), "출발", BigDecimal.valueOf(40)),
+                        new BicycleRoutePoint(BigDecimal.valueOf(37.55), BigDecimal.valueOf(126.98), "도착", BigDecimal.valueOf(198))
+                ),
+                "GraphHopper OSM path detail: climb",
+                88,
+                92,
+                List.of(new RouteEvidenceBadge("graphhopper.elevation", "고도", "VERIFIED", "INFO", "상승 160m")),
+                new ElevationSummary(
+                        BigDecimal.valueOf(160),
+                        BigDecimal.valueOf(40),
+                        BigDecimal.valueOf(40),
+                        BigDecimal.valueOf(198),
+                        BigDecimal.valueOf(12),
+                        BigDecimal.valueOf(5)
+                )
+        );
     }
 }
