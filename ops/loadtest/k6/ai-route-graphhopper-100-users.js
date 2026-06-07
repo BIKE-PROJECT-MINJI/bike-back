@@ -14,6 +14,7 @@ if (!BASE_URL) {
 }
 
 export const options = {
+  summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
   scenarios: {
     ai_route_generation: {
       executor: 'constant-vus',
