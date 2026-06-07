@@ -11,6 +11,7 @@ import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import java.time.DayOfWeek;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.TemporalAdjusters;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -50,7 +51,7 @@ class ProfileActivitySummaryIntegrationTest {
     @Test
     @DisplayName("활동 요약 집계는 READY 주행만 주간과 전체 합계에 포함한다")
     void getMyActivitySummaryAggregatesOnlyReadyRideRecords() {
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.ofHours(9));
         OffsetDateTime weekStart = now.toLocalDate()
                 .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
                 .atStartOfDay()
