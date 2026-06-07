@@ -2,6 +2,7 @@ package com.bikeprojectminji.bikeback.airoute.controller;
 
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRouteTextPlanRequest;
 import com.bikeprojectminji.bikeback.airoute.service.AiRoutePlannerService;
 import com.bikeprojectminji.bikeback.airoute.service.AiRouteQuotaService;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
@@ -28,5 +29,11 @@ public class AiRouteController {
     public ApiResponse<AiRoutePlanResponse> plan(@AuthenticationPrincipal Jwt jwt, @RequestBody AiRoutePlanRequest request) {
         aiRouteQuotaService.checkAllowed(jwt.getSubject());
         return ApiResponse.success(aiRoutePlannerService.plan(jwt.getSubject(), request));
+    }
+
+    @PostMapping("/plan/from-text")
+    public ApiResponse<AiRoutePlanResponse> planFromText(@AuthenticationPrincipal Jwt jwt, @RequestBody AiRouteTextPlanRequest request) {
+        aiRouteQuotaService.checkAllowed(jwt.getSubject());
+        return ApiResponse.success(aiRoutePlannerService.planFromText(jwt.getSubject(), request));
     }
 }

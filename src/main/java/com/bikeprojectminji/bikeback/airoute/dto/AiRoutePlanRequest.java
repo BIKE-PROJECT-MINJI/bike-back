@@ -8,6 +8,19 @@ public record AiRoutePlanRequest(
         BigDecimal destinationLat,
         BigDecimal destinationLon,
         String destinationLabel,
-        String rideStyle
+        String rideStyle,
+        String elevationPreference,
+        String textIntent
 ) {
+
+    public AiRoutePlanRequest(
+            BigDecimal lat,
+            BigDecimal lon,
+            BigDecimal destinationLat,
+            BigDecimal destinationLon,
+            String destinationLabel,
+            String rideStyle
+    ) {
+        this(lat, lon, destinationLat, destinationLon, destinationLabel, rideStyle, null, null);
+    }
 }

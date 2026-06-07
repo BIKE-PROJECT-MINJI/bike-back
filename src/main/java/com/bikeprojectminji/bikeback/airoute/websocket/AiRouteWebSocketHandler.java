@@ -36,8 +36,9 @@ public class AiRouteWebSocketHandler extends TextWebSocketHandler {
         session.sendMessage(toMessage(Map.of("type", "accepted")));
         try {
             AiRoutePlanRequest request = objectMapper.readValue(message.getPayload(), AiRoutePlanRequest.class);
-            aiRouteQuotaService.checkAllowed(subject(session));
-            AiRoutePlanResponse response = aiRoutePlannerService.plan(request);
+            String subject = subject(session);
+            aiRouteQuotaService.checkAllowed(subject);
+            AiRoutePlanResponse response = aiRoutePlannerService.plan(subject, request);
             session.sendMessage(toMessage(Map.of("type", "plan", "data", response)));
         } catch (TooManyRequestsException exception) {
             session.sendMessage(toMessage(Map.of(
@@ -48,7 +49,7 @@ public class AiRouteWebSocketHandler extends TextWebSocketHandler {
         } catch (RuntimeException exception) {
             session.sendMessage(toMessage(Map.of(
                     "type", "error",
-                    "message", exception.getMessage() == null ? "AI 경로를 생성하지 못했습니다." : exception.getMessage()
+                    "message", "AI 경로를 생성하지 못했습니다."
             )));
         } finally {
             session.close(CloseStatus.NORMAL);

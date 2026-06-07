@@ -2,6 +2,8 @@ package com.bikeprojectminji.bikeback.airoute.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.bikeprojectminji.bikeback.routing.service.ElevationSummary;
+import java.math.BigDecimal;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -98,6 +100,58 @@ class RecommendationScoreCalculatorTest {
     }
 
     @Test
+    @DisplayName("평지 우선은 상승고도와 최대경사가 낮은 후보의 고도 점수를 높인다")
+    void flatFirstPrefersLowAscent() {
+        RecommendationScore flat = calculator.calculateWithRouteEvidence(
+                "FLAT_FIRST",
+                75,
+                85,
+                0,
+                0,
+                6000,
+                elevation("18", "3")
+        );
+        RecommendationScore climb = calculator.calculateWithRouteEvidence(
+                "FLAT_FIRST",
+                75,
+                85,
+                0,
+                0,
+                6000,
+                elevation("160", "12")
+        );
+
+        assertThat(flat.elevation()).isGreaterThan(climb.elevation());
+        assertThat(flat.total()).isGreaterThan(climb.total());
+    }
+
+    @Test
+    @DisplayName("업힐 우선은 상승고도와 최대경사가 높은 후보의 고도 점수를 높인다")
+    void climbFirstPrefersHighAscent() {
+        RecommendationScore flat = calculator.calculateWithRouteEvidence(
+                "CLIMB_FIRST",
+                75,
+                85,
+                0,
+                0,
+                6000,
+                elevation("18", "3")
+        );
+        RecommendationScore climb = calculator.calculateWithRouteEvidence(
+                "CLIMB_FIRST",
+                75,
+                85,
+                0,
+                0,
+                6000,
+                elevation("160", "12")
+        );
+
+        assertThat(climb.elevation()).isGreaterThan(flat.elevation());
+        assertThat(climb.total()).isGreaterThan(flat.total());
+    }
+
+    @Test
     @DisplayName("최종 추천 점수는 0에서 100 사이로 제한한다")
     void totalScoreIsClamped() {
         RecommendationScore high = calculator.calculate(
@@ -123,5 +177,16 @@ class RecommendationScoreCalculatorTest {
 
         assertThat(high.total()).isEqualTo(100);
         assertThat(low.total()).isZero();
+    }
+
+    private ElevationSummary elevation(String totalAscentM, String maxSlopePercent) {
+        return new ElevationSummary(
+                new BigDecimal(totalAscentM),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                new BigDecimal(totalAscentM),
+                new BigDecimal(maxSlopePercent),
+                BigDecimal.ZERO
+        );
     }
 }

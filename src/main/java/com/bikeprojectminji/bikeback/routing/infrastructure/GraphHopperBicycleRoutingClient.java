@@ -2,17 +2,13 @@ package com.bikeprojectminji.bikeback.routing.infrastructure;
 
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteCandidate;
-import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePoint;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteRequest;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutingClient;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutingProviderResult;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -97,12 +93,15 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
                                 .queryParam("point", coordinate(request.destinationLat(), request.destinationLon()))
                                 .queryParam("profile", "bike")
                                 .queryParam("points_encoded", "false")
+                                .queryParam("elevation", "true")
                                 .queryParam("locale", "ko")
                                 .queryParam("details", "road_class")
                                 .queryParam("details", "road_environment")
                                 .queryParam("details", "surface")
                                 .queryParam("details", "smoothness")
-                                .queryParam("details", "bike_network");
+                                .queryParam("details", "bike_network")
+                                .queryParam("details", "average_slope")
+                                .queryParam("details", "max_slope");
                         if (!apiKey.isBlank()) {
                             builder.queryParam("key", apiKey);
                         }
@@ -162,58 +161,5 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
 
     private String coordinate(BigDecimal lat, BigDecimal lon) {
         return lat.stripTrailingZeros().toPlainString() + "," + lon.stripTrailingZeros().toPlainString();
-    }
-
-    private record GraphHopperRouteResponse(List<GraphHopperPath> paths) {
-    }
-
-    private record GraphHopperPath(
-            double distance,
-            long time,
-            GraphHopperLineString points,
-            Map<String, List<List<Object>>> details
-    ) {
-
-        private BicycleRouteCandidate toCandidate(String preference, GraphHopperRouteEvidenceMapper evidenceMapper) {
-            List<BicycleRoutePoint> routePoints = points == null ? List.of() : points.toRoutePoints();
-            GraphHopperRouteEvidence evidence = evidenceMapper.map(details);
-            return new BicycleRouteCandidate(
-                    routeTypeFor(preference),
-                    BigDecimal.valueOf(distance).setScale(0, RoundingMode.HALF_UP).intValue(),
-                    BigDecimal.valueOf(time).divide(BigDecimal.valueOf(1000), 0, RoundingMode.HALF_UP).intValue(),
-                    routePoints,
-                    evidence.summary(),
-                    evidence.bikePathScore(),
-                    evidence.sceneryScore(),
-                    evidence.badges()
-            );
-        }
-
-        private String routeTypeFor(String preference) {
-            if ("SCENERY_FIRST".equals(preference)) {
-                return "SCENIC";
-            }
-            if ("BIKE_PATH_FIRST".equals(preference)) {
-                return "BIKE_PATH";
-            }
-            return "RECOMMENDED";
-        }
-
-    }
-
-    private record GraphHopperLineString(String type, List<List<BigDecimal>> coordinates) {
-
-        private List<BicycleRoutePoint> toRoutePoints() {
-            if (!"LineString".equals(type) || coordinates == null) {
-                return List.of();
-            }
-            List<BicycleRoutePoint> routePoints = new ArrayList<>();
-            for (List<BigDecimal> coordinate : coordinates) {
-                if (coordinate.size() >= 2) {
-                    routePoints.add(new BicycleRoutePoint(coordinate.get(1), coordinate.get(0), "GraphHopper"));
-                }
-            }
-            return routePoints;
-        }
     }
 }

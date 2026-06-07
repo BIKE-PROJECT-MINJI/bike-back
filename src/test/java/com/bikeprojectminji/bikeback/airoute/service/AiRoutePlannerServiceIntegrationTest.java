@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRouteTextPlanRequest;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteCandidate;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePoint;
@@ -64,6 +66,38 @@ class AiRoutePlannerServiceIntegrationTest {
         assertThat(routingClient.lastRequest().preference()).isEqualTo("SCENERY_FIRST");
     }
 
+    @Test
+    @DisplayName("목적지가 없는 현재 위치 기반 AI 경로 요청도 기본 목적지를 계산해 GraphHopper routing을 사용한다")
+    void planUsesGraphHopperRouteForCurrentLocationDefaultRequest() {
+        routingClient.nextResult(BicycleRoutingProviderResult.success("GRAPHHOPPER", List.of(candidate())));
+
+        AiRoutePlanResponse response = aiRoutePlannerService.plan("1", currentLocationOnlyRequest());
+
+        assertThat(routingClient.lastRequest().destinationLat()).isEqualByComparingTo("37.4932");
+        assertThat(routingClient.lastRequest().destinationLon()).isEqualByComparingTo("126.9667");
+        assertThat(response.routePoints()).hasSize(2);
+        assertThat(response.summary()).contains("현재 위치 기반 추천 코스");
+    }
+
+    @Test
+    @DisplayName("텍스트 기반 AI 경로 추천은 오르막 의도를 남산 정석 루트와 업힐 선호로 변환한다")
+    void planFromTextResolvesClimbIntentToNamsanCanonicalRoute() {
+        routingClient.nextResult(BicycleRoutingProviderResult.success("GRAPHHOPPER", List.of(candidate())));
+
+        AiRoutePlanResponse response = aiRoutePlannerService.planFromText("1", new AiRouteTextPlanRequest(
+                BigDecimal.valueOf(37.4812),
+                BigDecimal.valueOf(126.9527),
+                "오르막이 많은 곳 추천"
+        ));
+
+        assertThat(routingClient.lastRequest().preference()).isEqualTo("SCENERY_FIRST");
+        assertThat(routingClient.lastRequest().elevationPreference()).isEqualTo("CLIMB_FIRST");
+        assertThat(routingClient.lastRequest().destinationLat()).isEqualByComparingTo("37.5512");
+        assertThat(routingClient.lastRequest().destinationLon()).isEqualByComparingTo("126.9882");
+        assertThat(response.summary()).contains("남산");
+        assertThat(response.evidenceBadges()).extracting("source").contains("canonical-route");
+    }
+
     private AiRoutePlanRequest request() {
         return new AiRoutePlanRequest(
                 BigDecimal.valueOf(37.4812),
@@ -83,6 +117,19 @@ class AiRoutePlannerServiceIntegrationTest {
                 BigDecimal.valueOf(127.0692),
                 "건대입구",
                 " "
+        );
+    }
+
+    private AiRoutePlanRequest currentLocationOnlyRequest() {
+        return new AiRoutePlanRequest(
+                BigDecimal.valueOf(37.4812),
+                BigDecimal.valueOf(126.9527),
+                null,
+                null,
+                "현재 위치 기반 추천 코스",
+                "BALANCED",
+                "BALANCED_ELEVATION",
+                null
         );
     }
 
@@ -127,6 +174,11 @@ class AiRoutePlannerServiceIntegrationTest {
         @Bean
         ScenarioUserRoutePreferenceProvider userRoutePreferenceProvider() {
             return new ScenarioUserRoutePreferenceProvider();
+        }
+
+        @Bean
+        AiRouteTextIntentResolver aiRouteTextIntentResolver() {
+            return new AiRouteTextIntentResolver();
         }
     }
 

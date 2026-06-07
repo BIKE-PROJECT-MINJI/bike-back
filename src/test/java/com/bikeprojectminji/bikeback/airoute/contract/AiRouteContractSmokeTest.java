@@ -37,6 +37,7 @@ import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.WebSocketSession;
@@ -45,6 +46,10 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
+@TestPropertySource(properties = {
+        "routing.bicycle.provider=fake",
+        "routing.bicycle.fake.enabled=true"
+})
 class AiRouteContractSmokeTest {
 
     @Value("${local.server.port}")
@@ -93,7 +98,9 @@ class AiRouteContractSmokeTest {
                 String.class
         );
 
-        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getStatusCode().is2xxSuccessful())
+                .as("REST response status=%s body=%s", response.getStatusCode(), response.getBody())
+                .isTrue();
         JsonNode body = objectMapper.readTree(response.getBody());
         assertThat(body.path("code").asInt()).isEqualTo(200);
         return body.path("data");

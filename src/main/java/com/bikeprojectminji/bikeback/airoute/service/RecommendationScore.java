@@ -8,10 +8,24 @@ public record RecommendationScore(
         int bikePath,
         int safety,
         int condition,
+        int elevation,
         int preferenceFit,
         int distancePenalty,
         int unknownPenalty
 ) {
+
+    public RecommendationScore(
+            int total,
+            int scenery,
+            int bikePath,
+            int safety,
+            int condition,
+            int preferenceFit,
+            int distancePenalty,
+            int unknownPenalty
+    ) {
+        this(total, scenery, bikePath, safety, condition, 0, preferenceFit, distancePenalty, unknownPenalty);
+    }
 
     public RecommendationScoreResponse toResponse() {
         return new RecommendationScoreResponse(
@@ -20,6 +34,7 @@ public record RecommendationScore(
                 bikePath,
                 safety,
                 condition,
+                elevation,
                 preferenceFit,
                 distancePenalty,
                 unknownPenalty
