@@ -37,8 +37,8 @@ docker compose --env-file .env.test -f docker-compose.test.yml up --build -d
 ## 확인
 
 ```bash
+curl -i http://127.0.0.1:8081/actuator/health
 curl -sS http://127.0.0.1:8080/health
-curl -sS http://127.0.0.1:8080/health/monitor
 ```
 
 경로 생성 API는 backend 내부에서 다음 주소를 사용한다.
@@ -65,7 +65,9 @@ docker compose --env-file .env.test -f docker-compose.test.yml down -v
 ## 정책
 
 - 테스트 compose는 깨끗한 named volume을 사용하므로 기존 로컬 DB의 Flyway checksum drift와 분리된다.
-- 테스트 compose는 `8080`, `18081`을 `127.0.0.1`에만 바인딩한다.
+- 테스트 compose는 backend API `8080`, management health `8081`을 `127.0.0.1`에만 바인딩한다. 컨테이너 내부 management port는 `18081`이다.
+- 테스트 compose는 100VU course/free 부하 테스트를 위해 Hikari maximum pool size 기본값을 30으로 둔다.
+- Spring `@Async` 후처리는 bounded executor를 사용한다. `.env.test`의 `BIKE_ASYNC_CORE_POOL_SIZE`, `BIKE_ASYNC_MAX_POOL_SIZE`, `BIKE_ASYNC_QUEUE_CAPACITY`로 조정할 수 있다.
 - `AUTH_JWT_SECRET`은 compose 기본값을 두지 않고 `.env.test`에서 명시한다.
 - `bike-back` 테스트 이미지는 Docker 내부 Gradle 빌드가 아니라 로컬 `bootJar` 산출물을 복사한다.
 - GraphHopper self-host는 key 없이 호출한다.

@@ -1,0 +1,72 @@
+{
+  "run": "course-follow-local-rerun-20260608-151432",
+  "before": {
+    "checksRate": 0.9351969504447268,
+    "httpReqFailedRate": 0.025652633167345708,
+    "httpReqRate": 100.78403707965555,
+    "iterationRate": 23.61816954650748,
+    "overall": {
+      "p95": 2238.813907899999,
+      "p99": 10714.7524015
+    },
+    "courseFollow": {
+      "p95": 1334.5603532499986,
+      "p99": 2782.9128936699944
+    },
+    "freeRide": {
+      "p95": 979.04115925,
+      "p99": 1622.9780557000006
+    },
+    "routePoints": {
+      "p95": 3003.6399418499996,
+      "p99": 4482.024574879999
+    },
+    "k6ExitCode": "99",
+    "errorScanBytes": 1344739
+  },
+  "after": {
+    "checksRate": 0.9515365332838177,
+    "httpReqFailedRate": 0.01871571474669248,
+    "httpReqRate": 128.16322847780953,
+    "iterationRate": 28.246364972682773,
+    "overall": {
+      "p95": 982.8015559999999,
+      "p99": 10042.1331468
+    },
+    "courseFollow": {
+      "p95": 559.0179481999999,
+      "p99": 1098.0622969299998
+    },
+    "freeRide": {
+      "p95": 669.8050354499999,
+      "p99": 1341.908881519998
+    },
+    "routePoints": {
+      "p95": 431.0481966,
+      "p99": 662.8437763599998
+    },
+    "k6ExitCode": "0",
+    "errorScanBytes": 0
+  },
+  "improvements": {
+    "overallP95ReductionPct": 56.101686141396854,
+    "overallP99ReductionPct": 6.277506278221012,
+    "courseFollowP95ReductionPct": 58.11220175703205,
+    "courseFollowP99ReductionPct": 60.54269972201972,
+    "routePointsP95ReductionPct": 85.64913887999143,
+    "routePointsP99ReductionPct": 85.21106332002326,
+    "httpReqRateIncreasePct": 27.166198330113122,
+    "iterationRateIncreasePct": 19.59591075447963
+  },
+  "evidence": {
+    "dir": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608",
+    "beforeSummary": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-rerun-20260608-151432-before-summary.json",
+    "afterSummary": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-rerun-20260608-151432-after-summary.json",
+    "beforeExitCode": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-rerun-20260608-151432-before-k6-exit-code.txt",
+    "afterExitCode": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-rerun-20260608-151432-after-k6-exit-code.txt",
+    "beforeErrorScan": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-rerun-20260608-151432-before-error-scan.txt",
+    "afterErrorScan": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-rerun-20260608-151432-after-error-scan.txt",
+    "beforeCleanup": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-rerun-20260608-151432-before-cleanup.txt",
+    "afterCleanup": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-rerun-20260608-151432-after-cleanup.txt"
+  }
+}

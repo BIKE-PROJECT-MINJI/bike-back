@@ -5,9 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
-import com.bikeprojectminji.bikeback.achievement.service.AchievementService;
+import com.bikeprojectminji.bikeback.achievement.service.AchievementCompletionDispatcher;
 import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseShareResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseDownloadResponse;
@@ -78,7 +79,7 @@ class CourseServiceTest {
     private CourseRouteGeometryRepository courseRouteGeometryRepository;
 
     @Mock
-    private AchievementService achievementService;
+    private AchievementCompletionDispatcher achievementCompletionDispatcher;
 
     @InjectMocks
     private CourseService courseService;
@@ -288,6 +289,32 @@ class CourseServiceTest {
         inOrder.verify(courseRoutePointRepository).saveAll(any());
         inOrder.verify(courseRoutePointRepository).flush();
         inOrder.verify(courseRouteGeometryRepository).refreshRouteLine(2001L);
+    }
+
+    @Test
+    @DisplayName("기록 기반 코스 생성은 업적 지급 후처리를 별도 dispatcher에 맡긴다")
+    void createCourseFromRideRecordDispatchesAchievementGrant() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity rideRecord = new RideRecordEntity(1L, java.time.OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), java.time.OffsetDateTime.parse("2026-03-29T11:00:00+09:00"), 18250, 3600);
+        ReflectionTestUtils.setField(rideRecord, "id", 1001L);
+        rideRecord.markReady(java.time.OffsetDateTime.parse("2026-03-29T11:01:00+09:00"));
+        CourseEntity savedCourse = new CourseEntity("한강 코스", "설명", BigDecimal.valueOf(18.3), 60, 11, false, null, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780), 1L, 1001L, CourseVisibility.PRIVATE);
+        ReflectionTestUtils.setField(savedCourse, "id", 2001L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(1001L, 1L)).willReturn(Optional.of(rideRecord));
+        given(rideRecordProcessedPointRepository.findByRideRecordIdOrderByPointOrderAsc(1001L)).willReturn(List.of(
+                new RideRecordProcessedPointEntity(1001L, 1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                new RideRecordProcessedPointEntity(1001L, 2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
+        ));
+        given(courseRepository.findTopByOrderByDisplayOrderDescIdDesc()).willReturn(Optional.of(createCourses(10).get(9)));
+        given(courseRepository.save(any(CourseEntity.class))).willReturn(savedCourse);
+
+        CourseWriteResponse response = courseService.createCourseFromRideRecord("1", new CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE"));
+
+        assertThat(response.courseId()).isEqualTo(2001L);
+        verify(achievementCompletionDispatcher).dispatchAfterCommit(any());
     }
 
     @Test

@@ -43,24 +43,25 @@ public class CourseRouteSnapshotService {
             return loadSnapshot(courseId, consumer);
         }
 
+        Instant now = clock.instant();
         CachedCourseRouteSnapshot cached = cache.get(courseId);
-        if (cached != null && !cached.isExpired(clock.instant())) {
+        if (cached != null && !cached.isExpired(now)) {
             bikeMetricsRecorder.recordCourseRouteCacheHit(consumer);
             return cached.snapshot();
         }
 
-        bikeMetricsRecorder.recordCourseRouteCacheMiss(consumer);
-        synchronized (cache) {
-            CachedCourseRouteSnapshot rechecked = cache.get(courseId);
-            if (rechecked != null && !rechecked.isExpired(clock.instant())) {
+        CachedCourseRouteSnapshot loaded = cache.compute(courseId, (id, existing) -> {
+            Instant computeNow = clock.instant();
+            if (existing != null && !existing.isExpired(computeNow)) {
                 bikeMetricsRecorder.recordCourseRouteCacheHit(consumer);
-                return rechecked.snapshot();
+                return existing;
             }
 
-            CourseRouteSnapshot loaded = loadSnapshot(courseId, consumer);
-            cache.put(courseId, new CachedCourseRouteSnapshot(loaded, clock.instant().plus(ttl)));
-            return loaded;
-        }
+            bikeMetricsRecorder.recordCourseRouteCacheMiss(consumer);
+            CourseRouteSnapshot snapshot = loadSnapshot(id, consumer);
+            return new CachedCourseRouteSnapshot(snapshot, computeNow.plus(ttl));
+        });
+        return loaded.snapshot();
     }
 
     public void evict(Long courseId, String reason) {

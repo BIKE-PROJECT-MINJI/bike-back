@@ -2,7 +2,7 @@ package com.bikeprojectminji.bikeback.course.service;
 
 import com.bikeprojectminji.bikeback.achievement.service.AchievementCompletionSignal;
 import com.bikeprojectminji.bikeback.achievement.service.AchievementRoutePoint;
-import com.bikeprojectminji.bikeback.achievement.service.AchievementService;
+import com.bikeprojectminji.bikeback.achievement.service.AchievementCompletionDispatcher;
 import com.bikeprojectminji.bikeback.course.dto.CourseListItemResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseListResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseDownloadResponse;
@@ -67,7 +67,7 @@ public class CourseService {
     private final AuthService authService;
     private final BikeMetricsRecorder bikeMetricsRecorder;
     private final CourseRouteSnapshotService courseRouteSnapshotService;
-    private final AchievementService achievementService;
+    private final AchievementCompletionDispatcher achievementCompletionDispatcher;
     private final CourseAccessPolicy courseAccessPolicy = new CourseAccessPolicy();
 
     public CourseService(
@@ -80,7 +80,7 @@ public class CourseService {
             AuthService authService,
             BikeMetricsRecorder bikeMetricsRecorder,
             CourseRouteSnapshotService courseRouteSnapshotService,
-            AchievementService achievementService
+            AchievementCompletionDispatcher achievementCompletionDispatcher
     ) {
         this.courseRepository = courseRepository;
         this.courseRouteGeometryRepository = courseRouteGeometryRepository;
@@ -91,7 +91,7 @@ public class CourseService {
         this.authService = authService;
         this.bikeMetricsRecorder = bikeMetricsRecorder;
         this.courseRouteSnapshotService = courseRouteSnapshotService;
-        this.achievementService = achievementService;
+        this.achievementCompletionDispatcher = achievementCompletionDispatcher;
     }
 
     public CourseListResponse getCourses(Long cursor, Integer limit) {
@@ -258,7 +258,7 @@ public class CourseService {
         courseRoutePointRepository.flush();
         courseRouteGeometryRepository.refreshRouteLine(savedCourse.getId());
         courseRouteSnapshotService.evict(savedCourse.getId(), "course_created");
-        achievementService.grantForCompletedCourse(new AchievementCompletionSignal(
+        achievementCompletionDispatcher.dispatchAfterCommit(new AchievementCompletionSignal(
                 user.getId(),
                 savedCourse.getId(),
                 rideRecord.getId(),

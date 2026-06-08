@@ -14,8 +14,9 @@
 
 - k6 script: `ops/loadtest/k6/ai-route-graphhopper-100-users.js`
 - env example: `ops/loadtest/k6.ai-route-100.env.example`
+- AWS wrapper: `ops/loadtest/run-aws-compose-k6.sh`
 
-기본 VU 배분은 34 + 33 + 33 = 100명이다.
+k6 script 자체 기본 VU 배분은 AI route 34명, free-ride 33명, course-follow 33명이다. AWS wrapper 기본값은 외부 AI 비용과 AI route 잔여 리스크를 분리하기 위해 AI route 0명, free-ride 50명, course-follow 50명이다.
 
 ## 실행
 
@@ -27,6 +28,29 @@ k6 run \
   -e SUMMARY_PATH=ops/loadtest/results/bike-ai-route-aws-20260607-summary.json \
   ops/loadtest/k6/ai-route-graphhopper-100-users.js
 ```
+
+course/free hot path만 측정:
+
+```bash
+k6 run \
+  -e BASE_URL=http://127.0.0.1:8080 \
+  -e AI_ROUTE_VUS=0 \
+  -e FREE_RIDE_VUS=50 \
+  -e COURSE_FOLLOW_VUS=50 \
+  ops/loadtest/k6/ai-route-graphhopper-100-users.js
+```
+
+AWS에서 before/after와 cleanup receipt까지 자동 생성:
+
+```bash
+PREFIX=bike-ulw-loadtest-course-follow \
+K6_AI_ROUTE_VUS=0 \
+K6_FREE_RIDE_VUS=50 \
+K6_COURSE_FOLLOW_VUS=50 \
+bash ops/loadtest/run-aws-compose-k6.sh
+```
+
+wrapper는 SSH/health 대기에 timeout을 두고, EC2에는 `ExpiresAt` 태그와 TTL shutdown user-data를 넣는다. 정상 종료 또는 실패 종료 시 cleanup trap이 instance, security group, key pair 삭제 receipt를 남긴다.
 
 ## 결과 기준
 
@@ -77,3 +101,5 @@ PR #36의 완료 범위는 AI route + GraphHopper + elevation 기능 정리, AWS
 - security group: deleted
 - key pair: deleted
 - local private key/temp bundle: removed
+
+2026-06-08 course-follow 개선 작업의 compact evidence는 `ops/loadtest/results/course-follow-perf-20260608`에 있다. 원본 raw evidence는 `.omo/ulw-loop/evidence/course-follow-perf-20260608`에 보관한다.
