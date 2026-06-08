@@ -1,0 +1,30 @@
+{
+  "run": "course-follow-local-final-course-free-after-20260608-171302",
+  "checksRate": 1,
+  "httpReqFailedRate": 0,
+  "httpReqRate": 226.1766717975007,
+  "iterationRate": 39.7755673526502,
+  "overall": {
+    "p95": 749.87855775,
+    "p99": 1334.266195
+  },
+  "courseFollow": {
+    "p95": 457.545971,
+    "p99": 751.5304289999997
+  },
+  "freeRide": {
+    "p95": 562.7621299999998,
+    "p99": 1071.8437725399986
+  },
+  "routePoints": {
+    "p95": 385.31063379999995,
+    "p99": 665.4475346399996
+  },
+  "evidence": {
+    "summary": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-final-course-free-after-20260608-171302-summary.json",
+    "exitCode": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-final-course-free-after-20260608-171302-k6-exit-code.txt",
+    "errorScan": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-final-course-free-after-20260608-171302-error-scan.txt",
+    "cleanup": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-final-course-free-after-20260608-171302-cleanup.txt",
+    "portCheck": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/course-follow-local-final-course-free-after-20260608-171302-port-check-after-cleanup.txt"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "prefix": "bike-ulw-loadtest-20260608-course-follow-r8",
+  "region": "ap-northeast-2",
+  "instanceType": "t3.xlarge",
+  "instanceId": "i-09f4eab913b6558c0",
+  "publicIp": "43.203.186.195",
+  "beforeRef": "origin/main",
+  "runDuration": "2m",
+  "vus": {"aiRoute": 0, "freeRide": 50, "courseFollow": 50},
+  "secretEnvProvided": true,
+  "beforeSummary": "bike-ulw-loadtest-20260608-course-follow-r8-before-summary.json",
+  "afterSummary": "bike-ulw-loadtest-20260608-course-follow-r8-after-summary.json"
+}

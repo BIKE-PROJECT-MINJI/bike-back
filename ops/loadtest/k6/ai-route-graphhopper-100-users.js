@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check, group, sleep } from 'k6';
+import { Rate, Trend } from 'k6/metrics';
 
 const BASE_URL = (__ENV.BASE_URL || '').replace(/\/$/, '');
 const TEST_ID = __ENV.TEST_ID || `bike-ai-route-${Date.now()}`;
@@ -8,33 +9,62 @@ const RUN_DURATION = __ENV.RUN_DURATION || '2m';
 const AI_ROUTE_VUS = numberEnv('AI_ROUTE_VUS', 34);
 const FREE_RIDE_VUS = numberEnv('FREE_RIDE_VUS', 33);
 const COURSE_FOLLOW_VUS = numberEnv('COURSE_FOLLOW_VUS', 33);
+const COURSE_READY_MAX_ATTEMPTS = numberEnv('COURSE_READY_MAX_ATTEMPTS', 20);
+const COURSE_READY_POLL_SECONDS = floatEnv('COURSE_READY_POLL_SECONDS', 0.1);
+
+const endpointDuration = new Trend('bike_endpoint_duration', true);
+const endpointFailureRate = new Rate('bike_endpoint_failure_rate');
+const endpointDurationByName = {
+  'ai-route-from-text': new Trend('bike_endpoint_ai_route_from_text_duration', true),
+  'auth-register': new Trend('bike_endpoint_auth_register_duration', true),
+  'course-create': new Trend('bike_endpoint_course_create_duration', true),
+  'course-detail': new Trend('bike_endpoint_course_detail_duration', true),
+  'course-route-points': new Trend('bike_endpoint_course_route_points_duration', true),
+  'ride-policy-evaluate': new Trend('bike_endpoint_ride_policy_evaluate_duration', true),
+  'ride-record-regenerate': new Trend('bike_endpoint_ride_record_regenerate_duration', true),
+  'ride-record-save': new Trend('bike_endpoint_ride_record_save_duration', true),
+  'ride-record-status': new Trend('bike_endpoint_ride_record_status_duration', true),
+};
+const courseFollowReadyWaitDuration = new Trend('course_follow_ready_wait_duration', true);
+const courseFollowReadyPollAttempts = new Trend('course_follow_ready_poll_attempts');
+const courseFollowReadyFailureRate = new Rate('course_follow_ready_failure_rate');
 
 if (!BASE_URL) {
   throw new Error('BASE_URL is required. Example: BASE_URL=http://127.0.0.1:8080');
 }
 
+const scenarios = {};
+if (AI_ROUTE_VUS > 0) {
+  scenarios.ai_route_generation = {
+    executor: 'constant-vus',
+    exec: 'aiRouteGeneration',
+    vus: AI_ROUTE_VUS,
+    duration: RUN_DURATION,
+  };
+}
+if (FREE_RIDE_VUS > 0) {
+  scenarios.free_ride_recording = {
+    executor: 'constant-vus',
+    exec: 'freeRideRecording',
+    vus: FREE_RIDE_VUS,
+    duration: RUN_DURATION,
+  };
+}
+if (COURSE_FOLLOW_VUS > 0) {
+  scenarios.course_follow_reading = {
+    executor: 'constant-vus',
+    exec: 'courseFollowReading',
+    vus: COURSE_FOLLOW_VUS,
+    duration: RUN_DURATION,
+  };
+}
+if (Object.keys(scenarios).length === 0) {
+  throw new Error('At least one of AI_ROUTE_VUS, FREE_RIDE_VUS, COURSE_FOLLOW_VUS must be greater than 0.');
+}
+
 export const options = {
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
-  scenarios: {
-    ai_route_generation: {
-      executor: 'constant-vus',
-      exec: 'aiRouteGeneration',
-      vus: AI_ROUTE_VUS,
-      duration: RUN_DURATION,
-    },
-    free_ride_recording: {
-      executor: 'constant-vus',
-      exec: 'freeRideRecording',
-      vus: FREE_RIDE_VUS,
-      duration: RUN_DURATION,
-    },
-    course_follow_reading: {
-      executor: 'constant-vus',
-      exec: 'courseFollowReading',
-      vus: COURSE_FOLLOW_VUS,
-      duration: RUN_DURATION,
-    },
-  },
+  scenarios,
   thresholds: {
     http_req_failed: ['rate<0.05'],
     checks: ['rate>0.95'],
@@ -92,9 +122,10 @@ export function freeRideRecording() {
 export function courseFollowReading() {
   const token = registerUser('course');
   group('course follow read path', () => {
-    const save = saveRideRecord(token, 'course');
+    const save = saveRideRecord(token, 'course', 'course-follow');
     const rideRecordId = jsonValue(save, ['data', 'rideRecordId']);
-    const create = rideRecordId
+    const rideRecordReady = rideRecordId ? waitForRideRecordReady(rideRecordId, token) : false;
+    const create = rideRecordId && rideRecordReady
       ? postJson('/api/v1/courses', {
         sourceRideRecordId: rideRecordId,
         name: `k6 course ${__VU}-${__ITER}`,
@@ -104,8 +135,9 @@ export function courseFollowReading() {
       : null;
     const courseId = create ? jsonValue(create, ['data', 'courseId']) : null;
 
-    check(create || save, {
-      'course id exists': () => !!courseId,
+    check({ rideRecordReady, courseId }, {
+      'ride record finalized READY': (value) => value.rideRecordReady,
+      'course id exists': (value) => !!value.courseId,
     });
 
     if (courseId) {
@@ -144,7 +176,7 @@ function registerUser(prefix) {
   return jsonValue(response, ['data', 'accessToken']) || '';
 }
 
-function saveRideRecord(token, prefix) {
+function saveRideRecord(token, prefix, flow) {
   const now = Date.now();
   return postJson('/api/v1/ride-records', {
     clientRideId: `${TEST_ID}-${prefix}-${__VU}-${__ITER}`,
@@ -159,7 +191,51 @@ function saveRideRecord(token, prefix) {
       ridePoint(2, 37.4824, 126.9553, now - 45000, 410),
       ridePoint(3, 37.4840, 126.9584, now, 820),
     ],
-  }, token, { flow: 'free-ride', endpoint: 'ride-record-save' });
+  }, token, { flow: flow || 'free-ride', endpoint: 'ride-record-save' });
+}
+
+function waitForRideRecordReady(rideRecordId, token) {
+  const startedAt = Date.now();
+  let attempts = 0;
+  let lastStatus = 'UNKNOWN';
+  let ready = false;
+
+  for (let attempt = 1; attempt <= COURSE_READY_MAX_ATTEMPTS; attempt += 1) {
+    attempts = attempt;
+    const response = getJson(`/api/v1/ride-records/${rideRecordId}`, token, {
+      flow: 'course-follow',
+      endpoint: 'ride-record-status',
+    });
+    lastStatus = jsonValue(response, ['data', 'status']) || 'UNKNOWN';
+
+    check(response, {
+      'ride record status fetch is 200': (r) => r.status === 200,
+    });
+
+    if (response.status === 200 && lastStatus === 'READY') {
+      ready = true;
+      break;
+    }
+
+    if (response.status === 200 && lastStatus === 'FAILED') {
+      break;
+    }
+
+    if (attempt < COURSE_READY_MAX_ATTEMPTS) {
+      sleep(COURSE_READY_POLL_SECONDS);
+    }
+  }
+
+  const tags = {
+    flow: 'course-follow',
+    endpoint: 'ride-record-status',
+    finalization_status: lastStatus,
+  };
+  courseFollowReadyWaitDuration.add(Date.now() - startedAt, tags);
+  courseFollowReadyPollAttempts.add(attempts, tags);
+  courseFollowReadyFailureRate.add(!ready, tags);
+
+  return ready;
 }
 
 function ridePoint(pointOrder, latitude, longitude, capturedAt, progressM) {
@@ -190,11 +266,15 @@ function ridePolicyPayload() {
 }
 
 function postJson(path, body, token, tags) {
-  return http.post(`${BASE_URL}${path}`, JSON.stringify(body), requestParams(token, tags));
+  const response = http.post(`${BASE_URL}${path}`, JSON.stringify(body), requestParams(token, tags));
+  recordEndpointMetrics(response, 'POST', tags);
+  return response;
 }
 
 function getJson(path, token, tags) {
-  return http.get(`${BASE_URL}${path}`, requestParams(token, tags));
+  const response = http.get(`${BASE_URL}${path}`, requestParams(token, tags));
+  recordEndpointMetrics(response, 'GET', tags);
+  return response;
 }
 
 function requestParams(token, tags) {
@@ -202,7 +282,21 @@ function requestParams(token, tags) {
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-  return { headers, tags: Object.assign({ testid: TEST_ID }, tags || {}) };
+  return { headers, tags: requestTags(tags) };
+}
+
+function requestTags(tags) {
+  return Object.assign({ testid: TEST_ID }, tags || {});
+}
+
+function recordEndpointMetrics(response, method, tags) {
+  const metricTags = Object.assign({ method }, requestTags(tags));
+  endpointDuration.add(response.timings.duration, metricTags);
+  endpointFailureRate.add(response.status === 0 || response.status >= 400, metricTags);
+  const namedTrend = endpointDurationByName[tags && tags.endpoint];
+  if (namedTrend) {
+    namedTrend.add(response.timings.duration, metricTags);
+  }
 }
 
 function routePromptFor(seed) {
@@ -233,6 +327,11 @@ function jsonValue(response, path) {
 
 function numberEnv(name, fallback) {
   const value = Number.parseInt(__ENV[name] || '', 10);
+  return Number.isNaN(value) ? fallback : value;
+}
+
+function floatEnv(name, fallback) {
+  const value = Number.parseFloat(__ENV[name] || '');
   return Number.isNaN(value) ? fallback : value;
 }
 

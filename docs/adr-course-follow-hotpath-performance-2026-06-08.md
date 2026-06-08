@@ -1,0 +1,79 @@
+# ADR: course-follow hot path 성능 개선
+
+- 날짜: 2026-06-08
+- 상태: accepted
+- 관련 이슈: https://github.com/BIKE-PROJECT-MINJI/bike-back/issues/37
+- 범위: 백엔드 course-follow 읽기 경로, 주행 기록 finalization, k6/AWS 부하 테스트
+
+## 배경
+
+PR #36 이후 AWS compose 100VU 테스트에서 `course-follow` flow p95/p99가 높게 나왔다. 로컬과 EC2 재현 중 다음 병목이 확인됐다.
+
+- `GET /api/v1/courses/{id}/route-points` cache miss 구간이 전역 `synchronized(cache)`로 묶여 서로 다른 courseId 요청까지 직렬화됐다.
+- 주행 기록 저장 직후 코스 생성 또는 regenerate가 들어오면 async finalization과 재처리 흐름이 같은 processed point를 다시 쓰면서 중복키 오류가 발생했다.
+- 코스 생성 트랜잭션 안에서 업적 부여까지 동기 수행되어 사용자 응답 경로에 부가 작업이 섞였다.
+
+## 선택지
+
+1. DB 인덱스와 조회 쿼리만 최적화한다.
+   - 장점: 변경 범위가 작고 위험이 낮다.
+   - 단점: 실제 p95 병목이 cache miss 직렬화라 효과가 제한된다.
+
+2. route-points 응답을 Redis 또는 별도 materialized cache로 옮긴다.
+   - 장점: 읽기 처리량을 크게 늘릴 수 있다.
+   - 단점: cache invalidation, 장애 처리, 운영 비용이 늘고 이번 병목에는 과하다.
+
+3. 현재 in-memory snapshot cache를 유지하되 miss lock을 courseId 단위로 좁히고, finalization 동시성 제어와 부가 작업 after-commit 분리를 적용한다.
+   - 장점: 기존 구조를 크게 바꾸지 않고 병목 지점만 줄인다.
+   - 단점: 단일 인스턴스 cache 한계는 그대로라 다중 인스턴스 운영 시 별도 전략이 필요하다.
+
+## 결정
+
+3번을 선택했다.
+
+- `CourseRouteSnapshotService`는 전체 cache lock 대신 `ConcurrentHashMap.compute`로 courseId 단위 miss 계산만 직렬화한다.
+- `RideRecordFinalizationWriter`와 regenerate 경로는 `PESSIMISTIC_WRITE` lock을 사용하고, 기존 processed point 삭제 후 `flush()`로 insert 순서를 확정한다.
+- 이미 READY 상태인 기록은 async finalization이 processed point를 다시 쓰지 않도록 skip한다.
+- finalization 실패 시 경로 교체 트랜잭션은 rollback하고, 실패 상태는 `RideRecordFinalizationFailureService`의 별도 `REQUIRES_NEW` 트랜잭션으로 기록한다. 이렇게 하면 READY 기록 재처리 실패 시 기존 processed point를 지우지 않는다.
+- `CourseService`의 업적 부여는 `AchievementCompletionDispatcher`가 commit 이후 bounded async executor로 넘긴다. 실제 지급은 별도 트랜잭션에서 처리해 사용자 응답 트랜잭션을 가볍게 유지한다.
+- Spring `@Async` 기본 executor 대신 bounded executor를 사용하고, compose 테스트의 Hikari pool size를 명시한다.
+- Hibernate JDBC batch/order inserts 설정을 명시해 다건 insert 기본값을 고정한다.
+
+## 결과
+
+로컬 100VU 60초, before/after 재측정:
+
+- before k6 exit code: `99`
+- after k6 exit code: `0`
+- 전체 p95: 2238.81ms -> 982.80ms, 56.1% 단축
+- course-follow p95: 1334.56ms -> 559.02ms, 58.1% 단축
+- route-points p95: 3003.64ms -> 431.05ms, 85.6% 단축
+- HTTP request rate: 100.78/s -> 128.16/s, 27.2% 증가
+- before error scan에는 processed point 중복키/rollback 오류가 있었고 after error scan은 비어 있다.
+
+로컬 최종 코드 course/free 100VU 60초 after sanity gate:
+
+- k6 exit code: `0`
+- checks: 100%
+- HTTP failure rate: 0%
+- course-follow p95/p99: 457.55ms / 751.53ms
+- route-points p95/p99: 385.31ms / 665.45ms
+
+AWS EC2 t3.xlarge 100VU 2분, r8 course/free hot path:
+
+- 전체 p95: 4008.11ms -> 3188.56ms, 20.4% 단축
+- 전체 p99: 22793.78ms -> 5024.96ms, 78.0% 단축
+- course-follow p95: 19823.79ms -> 2938.27ms, 85.2% 단축
+- course-follow p99: 33603.90ms -> 4369.44ms, 87.0% 단축
+- route-points p95: 36270.04ms -> 3691.95ms, 89.8% 단축
+- HTTP request rate: 52.87/s -> 63.35/s, 19.8% 증가
+- before error scan에는 processed point 중복키 오류가 있었고 after error scan은 비어 있다.
+
+원본 evidence는 `.omo/ulw-loop/evidence/course-follow-perf-20260608`에 보관했고, PR에서 확인할 compact evidence는 `ops/loadtest/results/course-follow-perf-20260608`에 둔다.
+
+## 남은 리스크
+
+- EC2 r5 compose 테스트의 AI route flow는 모든 AI route check가 실패했다. 이후 로컬 smoke에서 Gemini/GraphHopper key 주입 경로를 확인했지만 `from-text` endpoint는 여전히 200을 반환하지 못했다. course-follow/free-ride checks는 실패가 없으므로 이번 ADR의 개선 범위와 분리한다.
+- AI route 포함 로컬 100VU 혼합 시나리오는 아직 별도 capacity 튜닝 대상이다. 이번 ADR은 course/free hot path 통과를 기준으로 한다.
+- GraphHopper 컨테이너 CPU가 300% 이상까지 사용되어 AI route p95/p99는 여전히 높다. AI route 안정화는 credential 주입 방식, GraphHopper warm-up/cache, 별도 worker capacity 기준으로 후속 ADR이 필요하다.
+- in-memory cache는 단일 JVM 안에서만 유효하다. 여러 backend instance로 확장하면 Redis 또는 DB 기반 snapshot cache 정책을 다시 결정해야 한다.

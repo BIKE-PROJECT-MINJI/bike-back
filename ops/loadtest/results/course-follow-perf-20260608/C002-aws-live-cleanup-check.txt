@@ -1,0 +1,6 @@
+prefix=bike-ulw-loadtest-20260608-course-follow-r8
+region=ap-northeast-2
+checked_at=2026-06-08T18:53:06+09:00
+active_instances=[]
+security_groups=[]
+key_pair=[]

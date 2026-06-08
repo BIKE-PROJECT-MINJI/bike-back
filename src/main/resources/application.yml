@@ -7,11 +7,19 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME:${PGUSER:}}
     password: ${SPRING_DATASOURCE_PASSWORD:${PGPASSWORD:}}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT_MS:30000}
 
   jpa:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: ${HIBERNATE_JDBC_BATCH_SIZE:50}
+        order_inserts: true
 
   flyway:
     enabled: true
@@ -73,3 +81,9 @@ routing:
       hosted-base-url: ${GRAPHHOPPER_HOSTED_BASE_URL:}
       api-key: ${GRAPHHOPPER_API_KEY:}
       retry-max-attempts: ${GRAPHHOPPER_RETRY_MAX_ATTEMPTS:2}
+
+bike:
+  async:
+    core-pool-size: ${BIKE_ASYNC_CORE_POOL_SIZE:4}
+    max-pool-size: ${BIKE_ASYNC_MAX_POOL_SIZE:8}
+    queue-capacity: ${BIKE_ASYNC_QUEUE_CAPACITY:500}

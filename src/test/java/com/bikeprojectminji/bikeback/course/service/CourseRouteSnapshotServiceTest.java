@@ -14,6 +14,11 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -71,6 +76,43 @@ class CourseRouteSnapshotServiceTest {
         snapshotService.get(7L, "route_points");
 
         verify(courseRoutePointRepository, times(2)).findByCourseIdOrderByPointOrderAsc(7L);
+    }
+
+    @Test
+    @DisplayName("서로 다른 코스 route snapshot cache miss는 전역 lock 없이 병렬로 적재한다")
+    void getLoadsDifferentCourseMissesInParallel() throws Exception {
+        BikeMetricsRecorder metricsRecorder = new BikeMetricsRecorder(new SimpleMeterRegistry());
+        CourseRouteSnapshotService snapshotService = new CourseRouteSnapshotService(
+                courseRoutePointRepository,
+                metricsRecorder,
+                Clock.fixed(Instant.parse("2026-05-04T00:00:00Z"), ZoneOffset.UTC),
+                true,
+                600
+        );
+        CountDownLatch concurrentLoads = new CountDownLatch(2);
+        given(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(org.mockito.ArgumentMatchers.anyLong()))
+                .willAnswer(invocation -> {
+                    Long courseId = invocation.getArgument(0);
+                    concurrentLoads.countDown();
+                    assertThat(concurrentLoads.await(1, TimeUnit.SECONDS))
+                            .as("서로 다른 courseId miss는 동시에 repository 적재에 진입해야 한다")
+                            .isTrue();
+                    return List.of(
+                            routePoint(courseId, 1, 37.5665, 126.9780),
+                            routePoint(courseId, 2, 37.5671, 126.9792)
+                    );
+                });
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<CourseRouteSnapshot> first = executor.submit(() -> snapshotService.get(7L, "route_points"));
+            Future<CourseRouteSnapshot> second = executor.submit(() -> snapshotService.get(8L, "route_points"));
+
+            assertThat(first.get(2, TimeUnit.SECONDS).courseId()).isEqualTo(7L);
+            assertThat(second.get(2, TimeUnit.SECONDS).courseId()).isEqualTo(8L);
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     private CourseRoutePointEntity routePoint(Long courseId, int order, double lat, double lon) {

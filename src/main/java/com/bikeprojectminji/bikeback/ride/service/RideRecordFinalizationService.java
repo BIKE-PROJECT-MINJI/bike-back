@@ -1,5 +1,6 @@
 package com.bikeprojectminji.bikeback.ride.service;
 
+import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusResponse;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordPointRepository;
@@ -37,8 +38,10 @@ public class RideRecordFinalizationService {
 
     @Transactional
     public void markForRegeneration(RideRecordEntity rideRecord) {
-        rideRecord.markFinalizing(OffsetDateTime.now());
-        rideRecordRepository.save(rideRecord);
+        RideRecordEntity lockedRideRecord = rideRecordRepository.findByIdForUpdate(rideRecord.getId())
+                .orElseThrow(() -> new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
+        lockedRideRecord.markFinalizing(OffsetDateTime.now());
+        rideRecordRepository.save(lockedRideRecord);
     }
 
     @Transactional(readOnly = true)
