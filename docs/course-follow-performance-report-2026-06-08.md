@@ -159,6 +159,13 @@ GraphHopper CPU가 가장 큰 병목으로 남아 있다. 이번 작업은 cours
 - AWS EC2 r8 course/free 100 VU: after k6 exit code `0`, checks 100%, HTTP failure 0%
 - AWS cleanup verification: instance `terminated`, security group/key pair describe 결과 NotFound 계열 확인
 
+## GitHub 관리
+
+- PR: https://github.com/BIKE-PROJECT-MINJI/bike-back/pull/38
+- 관련 이슈: https://github.com/BIKE-PROJECT-MINJI/bike-back/issues/37
+- 브랜치: `feature/course-follow-hotpath-performance`
+- 최종 리뷰: OMO 5개 리뷰 lane 모두 PASS, blocking issue 없음
+
 ## 남은 리스크
 
 - AI route flow는 실제 Gemini key를 주입한 로컬 smoke에서도 `from-text` endpoint가 200을 반환하지 못했다. 이번 PR은 course-follow hot path 성능 개선으로 범위를 고정하고, AI route/GraphHopper readiness 문제는 후속 이슈로 분리해야 한다.

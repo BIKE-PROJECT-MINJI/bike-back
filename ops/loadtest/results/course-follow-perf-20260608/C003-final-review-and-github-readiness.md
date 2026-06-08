@@ -2,6 +2,8 @@
 
 - checked_at: 2026-06-08 Asia/Seoul
 - branch: feature/course-follow-hotpath-performance
+- pull_request: https://github.com/BIKE-PROJECT-MINJI/bike-back/pull/38
+- issue: https://github.com/BIKE-PROJECT-MINJI/bike-back/issues/37
 - reviewers: 5/5 PASS
 
 ## Reviewer verdicts
