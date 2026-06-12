@@ -28,6 +28,7 @@ class GraphHopperReadinessScriptTest {
         assertThat(script).contains("export_graphhopper_cache");
         assertThat(script).contains("graphhopper-cache.tgz");
         assertThat(script).contains("run -T --rm --no-deps");
+        assertThat(script).contains("< /dev/null");
         assertThat(script).contains("restore_graphhopper_cache");
         assertThat(script).contains("graphhopper_route_status");
         assertThat(script).contains("/route?profile=bike");
