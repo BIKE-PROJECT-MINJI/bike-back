@@ -42,7 +42,7 @@
 
 - 이 WebSocket은 계속 스트리밍하는 구조가 아니라 "한 번 요청하고 한 번 응답한 뒤 닫는 구조"다.
 - `SecurityConfig`에서 `/ws/v1/ai-routes/**`는 authenticated로 되어 있다.
-- `AiRouteWebSocketConfig`의 allowed origin은 `*`다. 운영에서는 프론트 도메인으로 제한하는 것이 좋다.
+- `AiRouteWebSocketConfig`의 allowed origin은 `AI_ROUTE_WEBSOCKET_ALLOWED_ORIGINS` 설정값으로 제한한다. 기본값은 로컬 웹 개발 포트만 포함한다.
 
 ## N+1 문제 리뷰
 

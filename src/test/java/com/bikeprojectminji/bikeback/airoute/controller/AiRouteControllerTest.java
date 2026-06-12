@@ -47,6 +47,21 @@ class AiRouteControllerTest {
     }
 
     @Test
+    @DisplayName("텍스트 기반 AI 경로 추천 REST는 access token이 없으면 거부한다")
+    void planFromTextRequiresAuthentication() throws Exception {
+        mockMvc.perform(post("/api/v1/ai-routes/plan/from-text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "lat": 37.4812,
+                                  "lon": 126.9527,
+                                  "text": "오르막이 많은 곳 추천"
+                                }
+                                """))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("AI 경로 추천 REST는 인증 subject 기준으로 quota를 확인한다")
     void planChecksQuotaByAuthenticatedSubject() throws Exception {
         given(aiRoutePlannerService.plan(eq("1"), any())).willReturn(new AiRoutePlanResponse(

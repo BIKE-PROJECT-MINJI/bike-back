@@ -13,7 +13,7 @@ baseline / stress에서는 이 집단들이 **동시에 섞여서 들어오는 �
 
 - 전체 API를 한 번에 넓게 때리지 않습니다.
 - 핵심 read 경로를 먼저 봅니다.
-- 그 다음에 `ride-policy/evaluate`, 인증 기반 read, write 경로를 추가합니다.
+- 그 다음에 `profile/activity-summary`, `ride-policy/evaluate`, 인증 기반 read, write 경로를 추가합니다.
 - `/health`는 생존 확인용이고, 병목 분석은 request_id 로그 / DB / Redis / 외부 API 지연과 함께 봅니다.
 
 ## 2. 파일 위치
@@ -26,6 +26,7 @@ baseline / stress에서는 이 집단들이 **동시에 섞여서 들어오는 �
 1. k6를 로컬 또는 실행기에서 설치합니다.
 2. backend가 기동 중이어야 합니다.
 3. 필요한 경우 테스트용 `AUTH_BEARER_TOKEN`을 준비합니다.
+   - 토큰을 매번 직접 준비하기 어렵다면 `AUTH_AUTO_REGISTER=true`를 켜서 `setup()`이 테스트 계정을 등록하거나 로그인하게 할 수 있습니다.
 4. `COURSE_ID`를 비워두면 `setup()`이 `/api/v1/courses/featured` 또는 `/api/v1/courses?limit=1`에서 첫 코스를 자동 탐색합니다.
 
 ## 4. 빠른 시작
@@ -73,16 +74,18 @@ k6 run ops/loadtest/k6/bike-api.js
 ```bash
 TEST_ID=prod-mixed-100-users-001 \
 SCENARIO=stress \
-PERSONAS=home,preRide,inRide,health \
+PERSONAS=home,profile,preRide,inRide,health \
 BASE_URL=http://3.35.168.38 \
+AUTH_AUTO_REGISTER=true \
 STRESS_TOTAL_VUS=100 \
 STRESS_RAMP_UP=3m \
 STRESS_HOLD=7m \
 STRESS_RAMP_DOWN=3m \
-HOME_WEIGHT_PERCENT=35 \
-PRERIDE_WEIGHT_PERCENT=35 \
+HOME_WEIGHT_PERCENT=30 \
+PROFILE_WEIGHT_PERCENT=10 \
+PRERIDE_WEIGHT_PERCENT=25 \
 INRIDE_WEIGHT_PERCENT=20 \
-HEALTH_WEIGHT_PERCENT=10 \
+HEALTH_WEIGHT_PERCENT=15 \
 WRITE_WEIGHT_PERCENT=0 \
 k6 run ops/loadtest/k6/bike-api.js
 ```
@@ -155,7 +158,13 @@ k6 run ops/loadtest/k6/bike-api.js
 - `/api/v1/courses?limit=10`
 - `COURSE_ID`가 있으면 `/api/v1/courses/{courseId}`
 
-### P2. preRide
+### P2. profile
+
+- `AUTH_BEARER_TOKEN`이 있거나 `AUTH_AUTO_REGISTER=true`이면 `/api/v1/profile/me/activity-summary`
+- 인증 토큰과 자동 등록 옵션이 모두 없으면 profile 페르소나는 실행 대상에서 제외된다.
+- 포트폴리오용 activity-summary p95/p99 측정은 이 persona를 켜고 실행한다.
+
+### P3. preRide
 
 - `/api/v1/courses/featured`
 - `/api/v1/courses?limit=10`
@@ -164,17 +173,17 @@ k6 run ops/loadtest/k6/bike-api.js
 - `/api/v1/weather/current`
 - `/api/v1/courses/{courseId}/ride-policy/evaluate` (`PRE_START`)
 
-### P3. inRide
+### P4. inRide
 
 - `/api/v1/courses/{courseId}/ride-policy/evaluate`
 - `/api/v1/weather/current`
-- `AUTH_BEARER_TOKEN`이 있으면 `/api/v1/location/me/recent`
+- `AUTH_BEARER_TOKEN`이 있거나 `AUTH_AUTO_REGISTER=true`이면 `/api/v1/location/me/recent`
 
-### P4. write
+### P5. write
 
-- `AUTH_BEARER_TOKEN`이 있으면 `/api/v1/ride-records`
+- `AUTH_BEARER_TOKEN`이 있거나 `AUTH_AUTO_REGISTER=true`이면 `/api/v1/ride-records`
 
-### P5. health
+### P6. health
 
 - `/health`
 
@@ -193,7 +202,8 @@ k6 run ops/loadtest/k6/bike-api.js
   - `GET /api/v1/courses/{courseId}`
   - `GET /api/v1/courses/{courseId}/route-points`
   - `POST /api/v1/courses/{courseId}/ride-policy/evaluate`
-- `AUTH_BEARER_TOKEN`이 있으면
+- `AUTH_BEARER_TOKEN`이 있거나 `AUTH_AUTO_REGISTER=true`이면
+  - `GET /api/v1/profile/me/activity-summary`
   - `GET /api/v1/location/me/recent`
   - `POST /api/v1/ride-records`
 
@@ -211,9 +221,11 @@ k6 run ops/loadtest/k6/bike-api.js
 ### 주요 선택값
 
 - `SCENARIO`: `smoke | baseline | stress`
-- `PERSONAS`: `home,preRide,inRide,write,health` 중 실행할 페르소나 목록
+- `PERSONAS`: `home,profile,preRide,inRide,write,health` 중 실행할 페르소나 목록
 - `COURSE_ID`: 상세/route-points/ride-policy까지 포함할 코스 id
-- `AUTH_BEARER_TOKEN`: 인증이 필요한 recent-location / ride-record save를 테스트할 때 사용
+- `AUTH_BEARER_TOKEN`: 인증이 필요한 profile summary / recent-location / ride-record save를 테스트할 때 사용
+- `AUTH_AUTO_REGISTER`: `true`면 토큰이 없을 때 k6 `setup()`에서 테스트 계정을 등록하거나 로그인
+- `AUTH_EMAIL`, `AUTH_PASSWORD`, `AUTH_DISPLAY_NAME`: `AUTH_AUTO_REGISTER=true`일 때 사용할 테스트 계정 값. `AUTH_EMAIL`을 비우면 `TEST_ID` 기반 이메일을 자동 생성
 - `TEST_ID`: Grafana/Prometheus/요약 파일을 같은 실행 단위로 묶을 이름
 - `SUMMARY_DIR`: `handleSummary()`가 JSON 요약을 저장할 디렉터리
 - `K6_PROMETHEUS_RW_SERVER_URL`: Grafana/Prometheus에 k6 시계열을 직접 보내는 Prometheus remote write endpoint
@@ -224,6 +236,7 @@ k6 run ops/loadtest/k6/bike-api.js
 baseline / stress에서는 아래 비중으로 총 VU를 나눕니다.
 
 - `HOME_WEIGHT_PERCENT`
+- `PROFILE_WEIGHT_PERCENT`
 - `PRERIDE_WEIGHT_PERCENT`
 - `INRIDE_WEIGHT_PERCENT`
 - `WRITE_WEIGHT_PERCENT`

@@ -6,17 +6,22 @@ const BASE_URL = (__ENV.BASE_URL || '').replace(/\/$/, '');
 const TEST_ID = __ENV.TEST_ID || `bike-ai-route-${Date.now()}`;
 const SUMMARY_PATH = __ENV.SUMMARY_PATH || `ops/loadtest/results/${TEST_ID}-summary.json`;
 const RUN_DURATION = __ENV.RUN_DURATION || '2m';
-const AI_ROUTE_VUS = numberEnv('AI_ROUTE_VUS', 34);
-const FREE_RIDE_VUS = numberEnv('FREE_RIDE_VUS', 33);
-const COURSE_FOLLOW_VUS = numberEnv('COURSE_FOLLOW_VUS', 33);
+const AI_ROUTE_VUS = numberEnv('AI_ROUTE_VUS', 25);
+const COURSE_MAP_READ_VUS = numberEnv('COURSE_MAP_READ_VUS', 35);
+const COURSE_FOLLOW_VUS = numberEnv('COURSE_FOLLOW_VUS', 30);
+const FREE_RIDE_VUS = numberEnv('FREE_RIDE_VUS', 10);
 const COURSE_READY_MAX_ATTEMPTS = numberEnv('COURSE_READY_MAX_ATTEMPTS', 20);
 const COURSE_READY_POLL_SECONDS = floatEnv('COURSE_READY_POLL_SECONDS', 0.1);
+const PROMOTE_AI_COURSE_RATE = floatEnv('PROMOTE_AI_COURSE_RATE', 0.2);
 
 const endpointDuration = new Trend('bike_endpoint_duration', true);
 const endpointFailureRate = new Rate('bike_endpoint_failure_rate');
 const endpointDurationByName = {
-  'ai-route-from-text': new Trend('bike_endpoint_ai_route_from_text_duration', true),
+  'ai-route-session-create': new Trend('bike_endpoint_ai_route_session_create_duration', true),
+  'ai-route-session-get': new Trend('bike_endpoint_ai_route_session_get_duration', true),
+  'ai-route-candidate-promote': new Trend('bike_endpoint_ai_route_candidate_promote_duration', true),
   'auth-register': new Trend('bike_endpoint_auth_register_duration', true),
+  'course-list': new Trend('bike_endpoint_course_list_duration', true),
   'course-create': new Trend('bike_endpoint_course_create_duration', true),
   'course-detail': new Trend('bike_endpoint_course_detail_duration', true),
   'course-route-points': new Trend('bike_endpoint_course_route_points_duration', true),
@@ -42,6 +47,14 @@ if (AI_ROUTE_VUS > 0) {
     duration: RUN_DURATION,
   };
 }
+if (COURSE_MAP_READ_VUS > 0) {
+  scenarios.course_map_reading = {
+    executor: 'constant-vus',
+    exec: 'courseMapReading',
+    vus: COURSE_MAP_READ_VUS,
+    duration: RUN_DURATION,
+  };
+}
 if (FREE_RIDE_VUS > 0) {
   scenarios.free_ride_recording = {
     executor: 'constant-vus',
@@ -59,7 +72,7 @@ if (COURSE_FOLLOW_VUS > 0) {
   };
 }
 if (Object.keys(scenarios).length === 0) {
-  throw new Error('At least one of AI_ROUTE_VUS, FREE_RIDE_VUS, COURSE_FOLLOW_VUS must be greater than 0.');
+  throw new Error('At least one of AI_ROUTE_VUS, COURSE_MAP_READ_VUS, FREE_RIDE_VUS, COURSE_FOLLOW_VUS must be greater than 0.');
 }
 
 export const options = {
@@ -70,6 +83,7 @@ export const options = {
     checks: ['rate>0.95'],
     http_req_duration: ['p(95)<30000', 'p(99)<60000'],
     'http_req_duration{flow:ai-route}': ['p(95)<60000', 'p(99)<90000'],
+    'http_req_duration{flow:course-map-read}': ['p(95)<5000', 'p(99)<10000'],
     'http_req_duration{flow:free-ride}': ['p(95)<5000', 'p(99)<10000'],
     'http_req_duration{flow:course-follow}': ['p(95)<5000', 'p(99)<10000'],
   },
@@ -81,17 +95,72 @@ export const options = {
 export function aiRouteGeneration() {
   const token = registerUser('ai');
   group('ai route generation', () => {
-    const response = postJson('/api/v1/ai-routes/plan/from-text', {
+    const response = postJson('/api/v1/ai-route-sessions', {
       lat: 37.4812,
       lon: 126.9527,
+      destinationLat: 37.5512,
+      destinationLon: 126.9882,
+      destinationLabel: '남산',
+      rideStyle: 'SCENERY_FIRST',
+      elevationPreference: elevationPreferenceFor(__VU + __ITER),
       text: routePromptFor(__VU + __ITER),
-    }, token, { flow: 'ai-route', endpoint: 'ai-route-from-text' });
+    }, token, { flow: 'ai-route', endpoint: 'ai-route-session-create' });
 
+    const sessionId = jsonValue(response, ['data', 'sessionId']);
+    const candidateId = jsonValue(response, ['data', 'candidates', 0, 'candidateId']);
     check(response, {
-      'ai route status is 200': (r) => r.status === 200,
-      'ai route has route points': (r) => routePointCount(r) >= 2,
-      'ai route has elevation summary': (r) => hasJsonPath(r, ['data', 'elevationSummary']),
+      'ai route session status is 200 or protected 429': (r) => r.status === 200 || r.status === 429,
+      'ai route session has candidate when accepted': (r) => r.status === 429 || routeCandidateCount(r) >= 1,
+      'ai route candidate has elevation summary when accepted': (r) => r.status === 429 || hasJsonPath(r, ['data', 'candidates', 0, 'elevationSummary']),
     });
+
+    if (response.status === 200 && sessionId) {
+      check(getJson(`/api/v1/ai-route-sessions/${sessionId}`, token, {
+        flow: 'ai-route',
+        endpoint: 'ai-route-session-get',
+      }), {
+        'ai route session get status is 200': (r) => r.status === 200,
+      });
+    }
+
+    if (response.status === 200 && sessionId && candidateId && Math.random() < PROMOTE_AI_COURSE_RATE) {
+      check(postJson(`/api/v1/ai-route-sessions/${sessionId}/candidates/${candidateId}/course`, {
+        name: `k6 ai course ${__VU}-${__ITER}`,
+        description: 'k6 promoted AI route candidate',
+        visibility: 'PRIVATE',
+      }, token, { flow: 'ai-route', endpoint: 'ai-route-candidate-promote' }), {
+        'ai route candidate promote status is 200': (r) => r.status === 200,
+      });
+    }
+  });
+  sleep(numberEnv('SLEEP_SECONDS', 1));
+}
+
+export function courseMapReading() {
+  group('course map reading', () => {
+    const list = getJson('/api/v1/courses?limit=10', null, {
+      flow: 'course-map-read',
+      endpoint: 'course-list',
+    });
+    const courseId = extractCourseId(list);
+    check(list, {
+      'course list status is 200': (r) => r.status === 200,
+    });
+
+    if (courseId) {
+      check(getJson(`/api/v1/courses/${courseId}`, null, {
+        flow: 'course-map-read',
+        endpoint: 'course-detail',
+      }), {
+        'course detail read status is 200': (r) => r.status === 200,
+      });
+      check(getJson(`/api/v1/courses/${courseId}/route-points`, null, {
+        flow: 'course-map-read',
+        endpoint: 'course-route-points',
+      }), {
+        'course route points read status is 200': (r) => r.status === 200,
+      });
+    }
   });
   sleep(numberEnv('SLEEP_SECONDS', 1));
 }
@@ -308,9 +377,28 @@ function routePromptFor(seed) {
   return prompts[seed % prompts.length];
 }
 
-function routePointCount(response) {
-  const value = jsonValue(response, ['data', 'routePoints']);
+function elevationPreferenceFor(seed) {
+  const preferences = ['FLAT_FIRST', 'CLIMB_FIRST', 'BALANCED'];
+  return preferences[seed % preferences.length];
+}
+
+function routeCandidateCount(response) {
+  const value = jsonValue(response, ['data', 'candidates']);
   return Array.isArray(value) ? value.length : 0;
+}
+
+function extractCourseId(response) {
+  const data = jsonValue(response, ['data']);
+  const candidates = [
+    data && data.courses,
+    data && data.items,
+    Array.isArray(data) ? data : null,
+  ].filter((value) => Array.isArray(value) && value.length > 0);
+  if (candidates.length === 0) {
+    return null;
+  }
+  const first = candidates[0][0];
+  return first && (first.courseId || first.id);
 }
 
 function hasJsonPath(response, path) {
@@ -347,7 +435,7 @@ function summaryText(data) {
   const failed = data.metrics.http_req_failed && data.metrics.http_req_failed.values;
   return [
     `testid: ${TEST_ID}`,
-    `vus: ${AI_ROUTE_VUS + FREE_RIDE_VUS + COURSE_FOLLOW_VUS}`,
+    `vus: ${AI_ROUTE_VUS + COURSE_MAP_READ_VUS + COURSE_FOLLOW_VUS + FREE_RIDE_VUS}`,
     `http_req_failed(rate): ${failed ? failed.rate : 'n/a'}`,
     `http_req_duration(p95): ${duration ? duration['p(95)'] : 'n/a'} ms`,
     `http_req_duration(p99): ${duration ? duration['p(99)'] : 'n/a'} ms`,

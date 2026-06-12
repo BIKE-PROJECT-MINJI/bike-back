@@ -25,7 +25,7 @@ class CourseControllerReadTest extends CourseControllerWebMvcTestSupport {
     @DisplayName("코스 상세 API는 success 래퍼로 응답한다")
     void getCourseDetailReturnsWrappedResponse() throws Exception {
         CourseDetailResponse response = new CourseDetailResponse(7L, "아라뱃길 루트", BigDecimal.valueOf(23.4), 95);
-        given(courseService.getCourseDetail(7L, null, null)).willReturn(response);
+        given(courseQueryService.getCourseDetail(7L, null, null)).willReturn(response);
 
         mockMvc.perform(get("/api/v1/courses/7"))
                 .andExpect(status().isOk())
@@ -41,7 +41,7 @@ class CourseControllerReadTest extends CourseControllerWebMvcTestSupport {
     @DisplayName("코스 상세 API는 없는 코스면 404를 응답한다")
     void getCourseDetailReturnsNotFoundWhenCourseDoesNotExist() throws Exception {
         willThrow(new NotFoundException("코스를 찾을 수 없습니다."))
-                .given(courseService).getCourseDetail(999L, null, null);
+                .given(courseQueryService).getCourseDetail(999L, null, null);
 
         mockMvc.perform(get("/api/v1/courses/999"))
                 .andExpect(status().isNotFound())
@@ -59,7 +59,7 @@ class CourseControllerReadTest extends CourseControllerWebMvcTestSupport {
                         new CourseRoutePointResponse(2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
                 )
         );
-        given(courseService.getCourseRoutePoints(7L, null, null)).willReturn(response);
+        given(courseQueryService.getCourseRoutePoints(7L, null, null)).willReturn(response);
 
         mockMvc.perform(get("/api/v1/courses/7/route-points"))
                 .andExpect(status().isOk())
@@ -74,7 +74,7 @@ class CourseControllerReadTest extends CourseControllerWebMvcTestSupport {
     @DisplayName("코스 경로 API는 없는 코스면 404를 응답한다")
     void getCourseRoutePointsReturnsNotFoundWhenCourseDoesNotExist() throws Exception {
         willThrow(new NotFoundException("코스를 찾을 수 없습니다."))
-                .given(courseService).getCourseRoutePoints(999L, null, null);
+                .given(courseQueryService).getCourseRoutePoints(999L, null, null);
 
         mockMvc.perform(get("/api/v1/courses/999/route-points"))
                 .andExpect(status().isNotFound())
@@ -90,7 +90,7 @@ class CourseControllerReadTest extends CourseControllerWebMvcTestSupport {
                 true,
                 "12"
         );
-        given(courseService.getCourses(null, null)).willReturn(response);
+        given(courseQueryService.getCourses(null, null)).willReturn(response);
 
         mockMvc.perform(get("/api/v1/courses"))
                 .andExpect(status().isOk())
@@ -106,7 +106,7 @@ class CourseControllerReadTest extends CourseControllerWebMvcTestSupport {
     @DisplayName("비공개 코스 상세 API는 비로그인 요청이면 403을 응답한다")
     void getPrivateCourseDetailReturnsForbiddenWithoutToken() throws Exception {
         willThrow(new ForbiddenException("이 코스는 공개되지 않았습니다."))
-                .given(courseService).getCourseDetail(2001L, null, null);
+                .given(courseQueryService).getCourseDetail(2001L, null, null);
 
         mockMvc.perform(get("/api/v1/courses/2001"))
                 .andExpect(status().isForbidden())
@@ -116,7 +116,7 @@ class CourseControllerReadTest extends CourseControllerWebMvcTestSupport {
     @Test
     @DisplayName("비공개 코스 상세 API는 owner 토큰이면 응답한다")
     void getPrivateCourseDetailReturnsResponseForOwner() throws Exception {
-        given(courseService.getCourseDetail(2001L, "1", null))
+        given(courseQueryService.getCourseDetail(2001L, "1", null))
                 .willReturn(new CourseDetailResponse(2001L, "내 코스", BigDecimal.valueOf(18.3), 60));
 
         mockMvc.perform(get("/api/v1/courses/2001").with(jwt().jwt(jwt -> jwt.subject("1"))))
@@ -132,7 +132,7 @@ class CourseControllerReadTest extends CourseControllerWebMvcTestSupport {
                 false,
                 null
         );
-        given(courseService.searchPublicCourses("한강", "latest")).willReturn(response);
+        given(courseQueryService.searchPublicCourses("한강", "latest")).willReturn(response);
 
         mockMvc.perform(get("/api/v1/courses/search").param("q", "한강").param("sort", "latest"))
                 .andExpect(status().isOk())

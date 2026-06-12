@@ -34,11 +34,14 @@ public interface CourseRepository extends JpaRepository<CourseEntity, Long>, Cou
         return findTop20ByVisibilityAndReportHiddenFalseAndTitleContainingIgnoreCaseOrderByIdDesc(visibility, title);
     }
 
-    @Query("select count(c) from CourseEntity c where c.ownerUserId = :ownerUserId")
-    long countByOwnerUserId(Long ownerUserId);
-
-    @Query("select count(c) from CourseEntity c where c.ownerUserId = :ownerUserId and c.createdAt between :start and :end")
-    long countByOwnerUserIdAndCreatedAtBetween(Long ownerUserId, OffsetDateTime start, OffsetDateTime end);
+    @Query("""
+            select new com.bikeprojectminji.bikeback.course.repository.CourseActivityAggregate(
+                coalesce(sum(case when c.createdAt between :start and :end then 1 else 0 end), 0)
+            )
+            from CourseEntity c
+            where c.ownerUserId = :ownerUserId
+    """)
+    CourseActivityAggregate findActivityAggregateByOwnerUserId(Long ownerUserId, OffsetDateTime start, OffsetDateTime end);
 
     default List<CourseEntity> findFeaturedCourses() {
         return findByCuratedTrueAndVisibilityAndReportHiddenFalseOrderByFeaturedRankAscIdAsc(CourseVisibility.PUBLIC);

@@ -3,7 +3,7 @@ import { check, group, sleep } from 'k6';
 
 var BASE_URL = (__ENV.BASE_URL || '').replace(/\/$/, '');
 var SCENARIO = __ENV.SCENARIO || 'smoke';
-var ACTIVE_PERSONAS = parsePersonaFilter(__ENV.PERSONAS || 'home,preRide,inRide,write,health');
+var ACTIVE_PERSONAS = parsePersonaFilter(__ENV.PERSONAS || 'home,profile,preRide,inRide,write,health');
 var TEST_ID = __ENV.TEST_ID || 'bike-' + SCENARIO;
 var SUMMARY_DIR = (__ENV.SUMMARY_DIR || 'ops/loadtest/results').replace(/\/$/, '');
 var ENABLE_WEATHER_READ = ((__ENV.ENABLE_WEATHER_READ || 'true') + '').toLowerCase() !== 'false';
@@ -31,7 +31,14 @@ function parsePersonaFilter(raw) {
 }
 
 function isPersonaEnabled(name) {
+  if ((name === 'profile' || name === 'write') && !canRunAuthenticatedPersona()) {
+    return false;
+  }
   return ACTIVE_PERSONAS.indexOf(name) !== -1;
+}
+
+function canRunAuthenticatedPersona() {
+  return !!__ENV.AUTH_BEARER_TOKEN || ((__ENV.AUTH_AUTO_REGISTER || 'false') + '').toLowerCase() === 'true';
 }
 
 function baseRequestTags(extra) {
@@ -83,8 +90,9 @@ function addRampingScenario(scenarios, personaName, execName, options) {
 function buildOptions() {
   var p95Ms = intEnv('P95_MS', 800);
   var errorRateMax = Number.parseFloat(__ENV.ERROR_RATE_MAX || '0.01');
-  var homeWeight = intEnv('HOME_WEIGHT_PERCENT', 35);
-  var preRideWeight = intEnv('PRERIDE_WEIGHT_PERCENT', 30);
+  var homeWeight = intEnv('HOME_WEIGHT_PERCENT', 30);
+  var profileWeight = intEnv('PROFILE_WEIGHT_PERCENT', 10);
+  var preRideWeight = intEnv('PRERIDE_WEIGHT_PERCENT', 25);
   var inRideWeight = intEnv('INRIDE_WEIGHT_PERCENT', 20);
   var writeWeight = intEnv('WRITE_WEIGHT_PERCENT', 10);
   var healthWeight = intEnv('HEALTH_WEIGHT_PERCENT', 5);
@@ -97,10 +105,13 @@ function buildOptions() {
     'http_req_duration{flow:route-read}': ['p(95)<' + intEnv('ROUTE_READ_P95_MS', 1000)],
     'http_req_duration{flow:weather-read}': ['p(95)<' + intEnv('WEATHER_P95_MS', 1200)],
     'http_req_duration{flow:ride-policy}': ['p(95)<' + intEnv('RIDE_POLICY_P95_MS', 1200)],
-    'http_req_duration{flow:location-read}': ['p(95)<' + intEnv('LOCATION_P95_MS', 500)],
-    'http_req_duration{flow:write-core}': ['p(95)<' + intEnv('WRITE_P95_MS', 1500)],
     checks: ['rate>0.99'],
   };
+  if (canRunAuthenticatedPersona()) {
+    thresholds['http_req_duration{flow:profile-read}'] = ['p(95)<' + intEnv('PROFILE_P95_MS', 700)];
+    thresholds['http_req_duration{flow:location-read}'] = ['p(95)<' + intEnv('LOCATION_P95_MS', 500)];
+    thresholds['http_req_duration{flow:write-core}'] = ['p(95)<' + intEnv('WRITE_P95_MS', 1500)];
+  }
 
   if (SCENARIO === 'baseline' || SCENARIO === 'stress') {
     var totalVus = intEnv(
@@ -111,6 +122,12 @@ function buildOptions() {
     var scenarios = {};
     addRampingScenario(scenarios, 'home', 'personaHomeDiscovery', {
       target: weightedVus(totalVus, homeWeight),
+      rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
+      hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
+      rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
+    });
+    addRampingScenario(scenarios, 'profile', 'personaProfileSummary', {
+      target: weightedVus(totalVus, profileWeight),
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
@@ -151,6 +168,7 @@ function buildOptions() {
   }
   var scenarios = {};
   addSmokeScenario(scenarios, 'home', 'personaHomeDiscovery', 2);
+  addSmokeScenario(scenarios, 'profile', 'personaProfileSummary', 2);
   addSmokeScenario(scenarios, 'preRide', 'personaPreRide', 2);
   addSmokeScenario(scenarios, 'inRide', 'personaInRide', 2);
   addSmokeScenario(scenarios, 'write', 'personaRideRecord', 1);
@@ -168,15 +186,15 @@ function buildOptions() {
 
 export var options = buildOptions();
 
-function authHeaders() {
-  var token = __ENV.AUTH_BEARER_TOKEN;
+function authHeaders(authToken) {
+  var token = authToken || __ENV.AUTH_BEARER_TOKEN;
   return token ? { Authorization: 'Bearer ' + token } : {};
 }
 
 function getJson(path, tags, params) {
   tags = tags || {};
   params = params || {};
-  var auth = authHeaders();
+  var auth = authHeaders(params.authToken);
   var paramHeaders = params.headers || {};
   var mergedHeaders = { Accept: 'application/json' };
   Object.keys(auth).forEach(function(key) { mergedHeaders[key] = auth[key]; });
@@ -188,9 +206,9 @@ function getJson(path, tags, params) {
   return http.get(BASE_URL + path, merged);
 }
 
-function postJson(path, body, tags) {
+function postJson(path, body, tags, authToken) {
   tags = tags || {};
-  var auth = authHeaders();
+  var auth = authHeaders(authToken);
   var mergedHeaders = { 'Content-Type': 'application/json', Accept: 'application/json' };
   Object.keys(auth).forEach(function(key) { mergedHeaders[key] = auth[key]; });
   return http.post(BASE_URL + path, JSON.stringify(body), {
@@ -238,13 +256,65 @@ function extractCourseId(response) {
   }
 }
 
-export function setup() {
-  var explicitCourseId = __ENV.COURSE_ID;
-  if (explicitCourseId) {
-    return { courseId: explicitCourseId };
+function extractAccessToken(response) {
+  if (!response || response.status !== 200) {
+    return null;
+  }
+  try {
+    var payload = JSON.parse(response.body);
+    return payload && payload.data && payload.data.accessToken ? payload.data.accessToken : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function postSetupJson(path, body, endpoint) {
+  return http.post(BASE_URL + path, JSON.stringify(body), {
+    tags: baseRequestTags({ flow: 'setup', endpoint: endpoint }),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    responseCallback: http.expectedStatuses(200, 400, 401, 409),
+  });
+}
+
+function resolveSetupAuthToken() {
+  if (__ENV.AUTH_BEARER_TOKEN) {
+    return __ENV.AUTH_BEARER_TOKEN;
+  }
+  if (!canRunAuthenticatedPersona()) {
+    return null;
   }
 
-  var auth = authHeaders();
+  var safeTestId = TEST_ID.replace(/[^a-zA-Z0-9._-]/g, '-');
+  var email = stringEnv('AUTH_EMAIL', 'k6-' + safeTestId + '@example.com');
+  var password = stringEnv('AUTH_PASSWORD', 'Loadtest123!');
+  var displayName = stringEnv('AUTH_DISPLAY_NAME', 'k6-loadtest');
+  var registerBody = {
+    email: email,
+    password: password,
+    displayName: displayName,
+    profileImageUrl: null,
+    legacyExternalId: null,
+  };
+  var loginBody = { email: email, password: password };
+
+  var loginResponse = postSetupJson('/api/v1/auth/login', loginBody, 'auth-login-setup');
+  var loggedInToken = extractAccessToken(loginResponse);
+  if (loggedInToken) {
+    return loggedInToken;
+  }
+
+  var registerResponse = postSetupJson('/api/v1/auth/register', registerBody, 'auth-register-setup');
+  return extractAccessToken(registerResponse);
+}
+
+export function setup() {
+  var authToken = resolveSetupAuthToken();
+  var explicitCourseId = __ENV.COURSE_ID;
+  if (explicitCourseId) {
+    return { courseId: explicitCourseId, authToken: authToken };
+  }
+
+  var auth = authHeaders(authToken);
   var headers = { Accept: 'application/json' };
   Object.keys(auth).forEach(function(key) { headers[key] = auth[key]; });
 
@@ -254,7 +324,7 @@ export function setup() {
   });
   var featuredCourseId = extractCourseId(featured);
   if (featuredCourseId) {
-    return { courseId: String(featuredCourseId) };
+    return { courseId: String(featuredCourseId), authToken: authToken };
   }
 
   var courses = http.get(BASE_URL + '/api/v1/courses?limit=1', {
@@ -262,11 +332,15 @@ export function setup() {
     headers: headers,
   });
   var listCourseId = extractCourseId(courses);
-  return { courseId: listCourseId ? String(listCourseId) : null };
+  return { courseId: listCourseId ? String(listCourseId) : null, authToken: authToken };
 }
 
 function resolvedCourseId(setupData) {
   return __ENV.COURSE_ID || (setupData && setupData.courseId) || null;
+}
+
+function resolvedAuthToken(setupData) {
+  return __ENV.AUTH_BEARER_TOKEN || (setupData && setupData.authToken) || null;
 }
 
 function runCourseReads(setupData) {
@@ -354,8 +428,9 @@ function runRidePolicy(setupData) {
   });
 }
 
-function runRecentLocation() {
-  if (!__ENV.AUTH_BEARER_TOKEN) {
+function runRecentLocation(setupData) {
+  var authToken = resolvedAuthToken(setupData);
+  if (!authToken) {
     return;
   }
 
@@ -363,7 +438,7 @@ function runRecentLocation() {
     var response = getJson('/api/v1/location/me/recent', {
       flow: 'location-read',
       endpoint: 'location-me-recent',
-    });
+    }, { authToken: authToken });
 
     check(response, {
       'status is 200 or 404': function(r) { return r.status === 200 || r.status === 404; },
@@ -371,8 +446,24 @@ function runRecentLocation() {
   });
 }
 
-function runRideRecordWrite() {
-  if (!__ENV.AUTH_BEARER_TOKEN) {
+function runProfileSummary(setupData) {
+  var authToken = resolvedAuthToken(setupData);
+  if (!authToken) {
+    return;
+  }
+
+  group('profile activity summary', function() {
+    var response = getJson('/api/v1/profile/me/activity-summary', {
+      flow: 'profile-read',
+      endpoint: 'profile-activity-summary',
+    }, { authToken: authToken });
+    commonChecks(response, 200);
+  });
+}
+
+function runRideRecordWrite(setupData) {
+  var authToken = resolvedAuthToken(setupData);
+  if (!authToken) {
     return;
   }
 
@@ -398,7 +489,7 @@ function runRideRecordWrite() {
     var response = postJson('/api/v1/ride-records', payload, {
       flow: 'write-core',
       endpoint: 'ride-record-save',
-    });
+    }, authToken);
 
     check(response, {
       'status is 200 or 201': function(r) { return r.status === 200 || r.status === 201; },
@@ -413,13 +504,18 @@ export function coreJourney(setupData) {
   runRoutePointsRead(setupData);
   runWeatherRead();
   runRidePolicy(setupData);
-  runRecentLocation();
-  runRideRecordWrite();
+  runRecentLocation(setupData);
+  runRideRecordWrite(setupData);
   sleep(Number.parseFloat(stringEnv('SLEEP_SECONDS', '1')));
 }
 
 export function personaHomeDiscovery(setupData) {
   runCourseReads(setupData);
+  sleep(Number.parseFloat(stringEnv('SLEEP_SECONDS', '1')));
+}
+
+export function personaProfileSummary(setupData) {
+  runProfileSummary(setupData);
   sleep(Number.parseFloat(stringEnv('SLEEP_SECONDS', '1')));
 }
 
@@ -434,12 +530,12 @@ export function personaPreRide(setupData) {
 export function personaInRide(setupData) {
   runRidePolicy(setupData);
   runWeatherRead();
-  runRecentLocation();
+  runRecentLocation(setupData);
   sleep(Number.parseFloat(stringEnv('SLEEP_SECONDS', '1')));
 }
 
-export function personaRideRecord() {
-  runRideRecordWrite();
+export function personaRideRecord(setupData) {
+  runRideRecordWrite(setupData);
   sleep(Number.parseFloat(stringEnv('SLEEP_SECONDS', '1')));
 }
 

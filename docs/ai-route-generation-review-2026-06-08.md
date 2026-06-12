@@ -78,7 +78,7 @@ AI에게 처음부터 모든 결정을 맡기면 결과가 흔들린다. 그래�
 
 ### AI worker 보강
 
-`HttpAiRouteWorkerClient`는 `fallbackPlan`까지 포함해 AI worker에 보낸다. worker가 실패하면 `Optional.empty()`로 내려가고, 서버는 기본 plan을 그대로 반환한다.
+`HttpAiRouteWorkerClient`는 `fallbackPlan`까지 포함해 AI worker에 보낸다. worker가 실패하면 `ai_route_worker_failed` 로그로 실패 이유를 남긴 뒤 `Optional.empty()`로 내려가고, 서버는 기본 plan을 그대로 반환한다.
 
 장점:
 
@@ -87,7 +87,7 @@ AI에게 처음부터 모든 결정을 맡기면 결과가 흔들린다. 그래�
 
 한계:
 
-- 실패 원인이 응답에 구체적으로 남지 않는다.
+- 실패 원인은 사용자 응답에는 구체적으로 남기지 않고 서버 로그에서 추적한다.
 - 현재 성능 gate에서 AI route는 안정적으로 통과하지 못했다.
 
 ## 추가 개선 방향
@@ -114,7 +114,7 @@ AI에게 처음부터 모든 결정을 맡기면 결과가 흔들린다. 그래�
 
 ## 리스크
 
-- WebSocket은 인증은 걸려 있지만 allowed origin이 `*`다. 실제 배포에서는 프론트 도메인으로 제한하는 것이 좋다.
+- WebSocket은 인증이 걸려 있고 allowed origin도 `AI_ROUTE_WEBSOCKET_ALLOWED_ORIGINS` 설정값으로 제한한다. 실제 배포에서는 운영 프론트 도메인만 넣어야 한다.
 - `from-text`는 아직 최종 안정화 증거가 없다.
 - GraphHopper CPU가 높아 AI route p99를 끌어올릴 수 있다.
 - 텍스트 해석이 현재 하드코딩 규칙이라 확장성이 낮다.
