@@ -219,6 +219,11 @@ run_remote_case() {
 	mkdir -p "$REMOTE_DIR"
 	tar -xzf "$REMOTE_TAR" -C "$REMOTE_DIR"
 	cd "$REMOTE_DIR/dev/bike-back"
+	mkdir -p ops/loadtest/results
+	write_remote_stage() {
+	  printf '%s %s\n' "$(date -Iseconds)" "$1" >> ops/loadtest/results/"$TEST_ID"-remote-stage.txt
+	}
+	write_remote_stage "unpacked"
 	chmod +x ./gradlew
 	cp .env.test.example .env.test
 	chmod 600 .env.test
@@ -226,6 +231,7 @@ run_remote_case() {
 	  local remote_status=$?
 	  set +e
 	  mkdir -p ops/loadtest/results
+	  write_remote_stage "cleanup remote_status=$remote_status"
 	  echo "$remote_status" > ops/loadtest/results/"$TEST_ID"-remote-exit-code.txt
 	  if [[ "$remote_status" != "0" ]]; then
 	    docker compose --env-file .env.test -f docker-compose.test.yml ps \
@@ -251,20 +257,27 @@ run_remote_case() {
 	  grep -E '^(GEMINI_API_KEY|GEMINI_MODEL|GOOGLE_MODEL|GOOGLE_API_KEY|OPENAI_API_KEY|OPENAI_MODEL|GRAPHHOPPER_API_KEY|KAKAO_LOCAL_REST_API_KEY|KAKAO_MOBILITY_REST_API_KEY)=' "$REMOTE_SECRET_ENV" >> .env.test || true
 	  chmod 600 "$REMOTE_SECRET_ENV" .env.test
 	fi
+write_remote_stage "bootJar_start"
 ./gradlew --no-daemon bootJar --console=plain
+write_remote_stage "bootJar_done"
 if [[ "$RESET_GRAPHHOPPER_CACHE" == "true" ]]; then
+  write_remote_stage "compose_down_with_volume_reset"
   docker compose --env-file .env.test -f docker-compose.test.yml down -v >/dev/null 2>&1 || true
 else
+  write_remote_stage "compose_down_keep_volumes"
   docker compose --env-file .env.test -f docker-compose.test.yml down >/dev/null 2>&1 || true
 fi
 
 restore_graphhopper_cache() {
   if [[ -z "$GRAPHHOPPER_CACHE_ARCHIVE_URL" ]]; then
+    write_remote_stage "cache_restore_skipped"
     return 0
   fi
   echo "restore_graphhopper_cache source=$GRAPHHOPPER_CACHE_ARCHIVE_URL"
+  write_remote_stage "cache_restore_start"
   docker compose --env-file .env.test -f docker-compose.test.yml run --rm --no-deps --entrypoint sh graphhopper-prepare -c \
     "set -eu; mkdir -p /data; curl -fsSL '$GRAPHHOPPER_CACHE_ARCHIVE_URL' -o /tmp/graphhopper-cache.tgz; tar -xzf /tmp/graphhopper-cache.tgz -C /data; test -d /data/graph-cache"
+  write_remote_stage "cache_restore_done"
 }
 
 export_graphhopper_cache() {
@@ -278,7 +291,9 @@ export_graphhopper_cache() {
 }
 
 restore_graphhopper_cache
+write_remote_stage "compose_up_start"
 docker compose --env-file .env.test -f docker-compose.test.yml up --build -d
+write_remote_stage "compose_up_done"
 
 health_status() {
   local candidate status
@@ -306,6 +321,7 @@ if [[ "${status:-}" != "200" ]]; then
   exit 21
 fi
 echo "health_status=$status"
+write_remote_stage "health_ready status=$status"
 
 graphhopper_route_status() {
   docker compose --env-file .env.test -f docker-compose.test.yml run --rm --no-deps --entrypoint sh graphhopper-prepare -c \
@@ -334,10 +350,12 @@ if [[ "${graphhopper_status:-}" != "200" ]]; then
   exit 23
 fi
 echo "graphhopper_route_ready_status=$graphhopper_status"
+write_remote_stage "graphhopper_ready status=$graphhopper_status"
 
 mkdir -p ops/loadtest/results
 set +e
 echo "starting_k6 test_id=$TEST_ID duration=$RUN_DURATION"
+write_remote_stage "k6_start"
 k6 run --quiet \
   -e BASE_URL=http://127.0.0.1:8080 \
   -e TEST_ID="$TEST_ID" \
@@ -355,6 +373,7 @@ k6_status="${PIPESTATUS[0]}"
 set -e
 echo "$k6_status" > ops/loadtest/results/"$TEST_ID"-k6-exit-code.txt
 echo "k6_status=$k6_status"
+write_remote_stage "k6_done status=$k6_status"
 
 docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' \
   bike-test-backend bike-test-postgres bike-test-graphhopper bike-test-ai-route-worker \
@@ -379,6 +398,8 @@ REMOTE
 
   scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-remote-exit-code.txt" \
     "$EVIDENCE_DIR/$test_id-remote-exit-code.txt"
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-remote-stage.txt" \
+    "$EVIDENCE_DIR/$test_id-remote-stage.txt"
   scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-summary.json" \
     "$EVIDENCE_DIR/$test_id-summary.json"
   scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-k6.log" \

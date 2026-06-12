@@ -18,6 +18,7 @@ class GraphHopperReadinessScriptTest {
         assertThat(script).contains("/health");
         assertThat(script).doesNotContain("status\" == \"401\"");
         assertThat(script).contains("remote-exit-code.txt");
+        assertThat(script).contains("remote-stage.txt");
         assertThat(script).contains("scp_from_instance_optional");
         assertThat(script).contains("graphhopper_attempt=");
         assertThat(script).contains("starting_k6");
