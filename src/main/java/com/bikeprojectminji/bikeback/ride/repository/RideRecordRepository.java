@@ -25,36 +25,24 @@ public interface RideRecordRepository extends JpaRepository<RideRecordEntity, Lo
 
     Optional<RideRecordEntity> findFirstByOwnerUserIdAndFinalizationStatusOrderByEndedAtDescIdDesc(Long ownerUserId, String finalizationStatus);
 
-    @Query("select count(r) from RideRecordEntity r where r.ownerUserId = :ownerUserId and r.finalizationStatus = :finalizationStatus")
-    long countByOwnerUserIdAndFinalizationStatus(Long ownerUserId, String finalizationStatus);
-
-    @Query("select count(r) from RideRecordEntity r where r.ownerUserId = :ownerUserId and r.finalizationStatus = :finalizationStatus and r.endedAt between :start and :end")
-    long countByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
+    @Query("""
+            select new com.bikeprojectminji.bikeback.ride.repository.RideRecordActivityAggregate(
+                count(r),
+                coalesce(sum(r.distanceM), 0),
+                coalesce(sum(r.durationSec), 0),
+                coalesce(sum(case when r.endedAt between :start and :end then 1 else 0 end), 0),
+                coalesce(sum(case when r.endedAt between :start and :end then r.distanceM else 0 end), 0),
+                coalesce(sum(case when r.endedAt between :start and :end then r.durationSec else 0 end), 0)
+            )
+            from RideRecordEntity r
+            where r.ownerUserId = :ownerUserId
+              and r.finalizationStatus = :finalizationStatus
+            """)
+    RideRecordActivityAggregate findActivityAggregateByOwnerUserIdAndFinalizationStatus(
             Long ownerUserId,
             String finalizationStatus,
             OffsetDateTime start,
             OffsetDateTime end
     );
 
-    @Query("select coalesce(sum(r.distanceM), 0) from RideRecordEntity r where r.ownerUserId = :ownerUserId and r.finalizationStatus = :finalizationStatus")
-    Long sumDistanceMByOwnerUserIdAndFinalizationStatus(Long ownerUserId, String finalizationStatus);
-
-    @Query("select coalesce(sum(r.distanceM), 0) from RideRecordEntity r where r.ownerUserId = :ownerUserId and r.finalizationStatus = :finalizationStatus and r.endedAt between :start and :end")
-    Long sumDistanceMByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
-            Long ownerUserId,
-            String finalizationStatus,
-            OffsetDateTime start,
-            OffsetDateTime end
-    );
-
-    @Query("select coalesce(sum(r.durationSec), 0) from RideRecordEntity r where r.ownerUserId = :ownerUserId and r.finalizationStatus = :finalizationStatus")
-    Long sumDurationSecByOwnerUserIdAndFinalizationStatus(Long ownerUserId, String finalizationStatus);
-
-    @Query("select coalesce(sum(r.durationSec), 0) from RideRecordEntity r where r.ownerUserId = :ownerUserId and r.finalizationStatus = :finalizationStatus and r.endedAt between :start and :end")
-    Long sumDurationSecByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
-            Long ownerUserId,
-            String finalizationStatus,
-            OffsetDateTime start,
-            OffsetDateTime end
-    );
 }

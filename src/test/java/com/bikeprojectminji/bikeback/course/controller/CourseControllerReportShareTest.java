@@ -90,7 +90,7 @@ class CourseControllerReportShareTest extends CourseControllerWebMvcTestSupport 
     @Test
     @DisplayName("코스 다운로드 API는 share token 기반 응답을 반환한다")
     void downloadCourseReturnsWrappedResponse() throws Exception {
-        given(courseService.downloadCourse(2001L, null, "share-token"))
+        given(courseQueryService.downloadCourse(2001L, null, "share-token"))
                 .willReturn(new CourseDownloadResponse(
                         2001L,
                         "한강 코스",

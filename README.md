@@ -201,10 +201,18 @@ npx expo start
 
 ```bash
 curl -i https://example.ngrok.app/health
-curl -i https://example.ngrok.app/health/monitor
 curl -i -X POST https://example.ngrok.app/api/v1/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"smoke@example.com","password":"Password123!","displayName":"Smoke"}'
+```
+
+`/health/monitor`는 DB/Redis 상세 상태를 포함하므로 `roles` claim에 `OPS`가 있는 access token이 필요합니다.
+일반 register/login 토큰에는 `OPS` role이 없으므로 운영 smoke에서는 별도로 발급한 OPS JWT를 사용합니다.
+
+```bash
+ACCESS_TOKEN=...
+curl -i https://example.ngrok.app/health/monitor \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
 상세 절차는 [`RN_Expo_Go_Ngrok_백엔드_스모크_런북.md`](../../DOCS/15_기능명세/backend/RN_Expo_Go_Ngrok_백엔드_스모크_런북.md)를 기준으로 합니다.

@@ -17,11 +17,15 @@ SSH_USER="${SSH_USER:-ubuntu}"
 K6_VERSION="${K6_VERSION:-v1.4.1}"
 SECRET_ENV_FILE="${SECRET_ENV_FILE:-}"
 K6_AI_ROUTE_VUS="${K6_AI_ROUTE_VUS:-0}"
+K6_COURSE_MAP_READ_VUS="${K6_COURSE_MAP_READ_VUS:-0}"
 K6_FREE_RIDE_VUS="${K6_FREE_RIDE_VUS:-50}"
 K6_COURSE_FOLLOW_VUS="${K6_COURSE_FOLLOW_VUS:-50}"
+RUN_BEFORE="${RUN_BEFORE:-true}"
+RESET_GRAPHHOPPER_CACHE="${RESET_GRAPHHOPPER_CACHE:-false}"
 SSH_READY_MAX_ATTEMPTS="${SSH_READY_MAX_ATTEMPTS:-60}"
 SSH_CONNECT_TIMEOUT_SECONDS="${SSH_CONNECT_TIMEOUT_SECONDS:-10}"
 REMOTE_HEALTH_MAX_ATTEMPTS="${REMOTE_HEALTH_MAX_ATTEMPTS:-120}"
+REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS="${REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS:-180}"
 INSTANCE_TTL_SECONDS="${INSTANCE_TTL_SECONDS:-14400}"
 ALLOW_AFTER_K6_FAILURE="${ALLOW_AFTER_K6_FAILURE:-false}"
 
@@ -200,7 +204,7 @@ run_remote_case() {
   scp_to_instance "$tarball" "$remote_tar"
 
   log "running $label compose+k6"
-  ssh_run "LABEL='$label' REMOTE_TAR='$remote_tar' REMOTE_DIR='$remote_dir' TEST_ID='$test_id' RUN_DURATION='$RUN_DURATION' REMOTE_SECRET_ENV='$REMOTE_SECRET_ENV' K6_AI_ROUTE_VUS='$K6_AI_ROUTE_VUS' K6_FREE_RIDE_VUS='$K6_FREE_RIDE_VUS' K6_COURSE_FOLLOW_VUS='$K6_COURSE_FOLLOW_VUS' REMOTE_HEALTH_MAX_ATTEMPTS='$REMOTE_HEALTH_MAX_ATTEMPTS' bash -s" <<'REMOTE'
+  ssh_run "LABEL='$label' REMOTE_TAR='$remote_tar' REMOTE_DIR='$remote_dir' TEST_ID='$test_id' RUN_DURATION='$RUN_DURATION' REMOTE_SECRET_ENV='$REMOTE_SECRET_ENV' K6_AI_ROUTE_VUS='$K6_AI_ROUTE_VUS' K6_COURSE_MAP_READ_VUS='$K6_COURSE_MAP_READ_VUS' K6_FREE_RIDE_VUS='$K6_FREE_RIDE_VUS' K6_COURSE_FOLLOW_VUS='$K6_COURSE_FOLLOW_VUS' REMOTE_HEALTH_MAX_ATTEMPTS='$REMOTE_HEALTH_MAX_ATTEMPTS' REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS='$REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS' RESET_GRAPHHOPPER_CACHE='$RESET_GRAPHHOPPER_CACHE' bash -s" <<'REMOTE'
 	set -Eeuo pipefail
 	mkdir -p "$REMOTE_DIR"
 	tar -xzf "$REMOTE_TAR" -C "$REMOTE_DIR"
@@ -209,7 +213,11 @@ run_remote_case() {
 	cp .env.test.example .env.test
 	chmod 600 .env.test
 	remote_cleanup() {
-	  docker compose --env-file .env.test -f docker-compose.test.yml down -v >/dev/null 2>&1 || true
+	  if [[ "$RESET_GRAPHHOPPER_CACHE" == "true" ]]; then
+	    docker compose --env-file .env.test -f docker-compose.test.yml down -v >/dev/null 2>&1 || true
+	  else
+	    docker compose --env-file .env.test -f docker-compose.test.yml down >/dev/null 2>&1 || true
+	  fi
 	  rm -f .env.test "$REMOTE_SECRET_ENV"
 	}
 	trap remote_cleanup EXIT
@@ -218,6 +226,11 @@ run_remote_case() {
 	  chmod 600 "$REMOTE_SECRET_ENV" .env.test
 	fi
 ./gradlew --no-daemon bootJar --console=plain
+if [[ "$RESET_GRAPHHOPPER_CACHE" == "true" ]]; then
+  docker compose --env-file .env.test -f docker-compose.test.yml down -v >/dev/null 2>&1 || true
+else
+  docker compose --env-file .env.test -f docker-compose.test.yml down >/dev/null 2>&1 || true
+fi
 docker compose --env-file .env.test -f docker-compose.test.yml up --build -d
 
 health_status() {
@@ -247,6 +260,27 @@ if [[ "${status:-}" != "200" && "${status:-}" != "401" ]]; then
 fi
 echo "health_status=$status"
 
+graphhopper_route_status() {
+  docker compose --env-file .env.test -f docker-compose.test.yml run --rm --no-deps --entrypoint sh graphhopper-prepare -c \
+    "curl -sS -o /tmp/graphhopper-route-ready.json -w '%{http_code}' --max-time 10 'http://graphhopper:8989/route?profile=bike&point=37.481247,126.952739&point=37.551200,126.988200&points_encoded=false&elevation=true'" \
+    2>/tmp/"$LABEL"-graphhopper-ready.err || true
+}
+
+for attempt in $(seq 1 "$REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS"); do
+  graphhopper_status="$(graphhopper_route_status)"
+  if [[ "$graphhopper_status" == "200" ]]; then
+    break
+  fi
+  sleep 5
+done
+if [[ "${graphhopper_status:-}" != "200" ]]; then
+  docker compose --env-file .env.test -f docker-compose.test.yml ps || true
+  docker compose --env-file .env.test -f docker-compose.test.yml logs --tail=200 graphhopper || true
+  echo "GraphHopper route readiness did not pass after $REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS attempts; last_status=${graphhopper_status:-000}" >&2
+  exit 23
+fi
+echo "graphhopper_route_ready_status=$graphhopper_status"
+
 mkdir -p ops/loadtest/results
 set +e
 k6 run --quiet \
@@ -254,6 +288,7 @@ k6 run --quiet \
   -e TEST_ID="$TEST_ID" \
   -e SUMMARY_PATH=ops/loadtest/results/"$TEST_ID"-summary.json \
   -e AI_ROUTE_VUS="$K6_AI_ROUTE_VUS" \
+  -e COURSE_MAP_READ_VUS="$K6_COURSE_MAP_READ_VUS" \
   -e FREE_RIDE_VUS="$K6_FREE_RIDE_VUS" \
   -e COURSE_FOLLOW_VUS="$K6_COURSE_FOLLOW_VUS" \
   -e RUN_DURATION="$RUN_DURATION" \
@@ -275,9 +310,13 @@ docker compose --env-file .env.test -f docker-compose.test.yml logs --since=20m 
   > ops/loadtest/results/"$TEST_ID"-routing-logs.txt || true
 docker compose --env-file .env.test -f docker-compose.test.yml ps \
   > ops/loadtest/results/"$TEST_ID"-compose-ps.txt || true
-	docker compose --env-file .env.test -f docker-compose.test.yml down -v
-	rm -f .env.test
-	REMOTE
+if [[ "$RESET_GRAPHHOPPER_CACHE" == "true" ]]; then
+  docker compose --env-file .env.test -f docker-compose.test.yml down -v
+else
+  docker compose --env-file .env.test -f docker-compose.test.yml down
+fi
+rm -f .env.test
+REMOTE
 
   scp_from_instance "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-summary.json" \
     "$EVIDENCE_DIR/$test_id-summary.json"
@@ -410,11 +449,13 @@ docker compose version
 k6 version
 REMOTE
 
-  local before_tar after_tar
-  before_tar="$(package_tree before "git:$BEFORE_REF")"
+  local before_tar="" after_tar
   after_tar="$(package_tree after "worktree")"
 
-  run_remote_case before "$before_tar"
+  if [[ "$RUN_BEFORE" == "true" ]]; then
+    before_tar="$(package_tree before "git:$BEFORE_REF")"
+    run_remote_case before "$before_tar"
+  fi
   run_remote_case after "$after_tar"
   if [[ -n "$REMOTE_SECRET_ENV" ]]; then
     ssh_run "rm -f '$REMOTE_SECRET_ENV'" >/dev/null 2>&1 || true
@@ -431,7 +472,7 @@ REMOTE
 	    echo "  \"runDuration\": \"$RUN_DURATION\","
 	    echo "  \"instanceTtlSeconds\": $INSTANCE_TTL_SECONDS,"
 	    echo "  \"expiresAt\": \"$expires_at\","
-	    echo "  \"vus\": {\"aiRoute\": $K6_AI_ROUTE_VUS, \"freeRide\": $K6_FREE_RIDE_VUS, \"courseFollow\": $K6_COURSE_FOLLOW_VUS},"
+	    echo "  \"vus\": {\"aiRoute\": $K6_AI_ROUTE_VUS, \"courseMapRead\": $K6_COURSE_MAP_READ_VUS, \"freeRide\": $K6_FREE_RIDE_VUS, \"courseFollow\": $K6_COURSE_FOLLOW_VUS},"
     echo "  \"secretEnvProvided\": $([[ -n "$SECRET_ENV_FILE" ]] && echo true || echo false),"
     echo "  \"beforeSummary\": \"$PREFIX-before-summary.json\","
     echo "  \"afterSummary\": \"$PREFIX-after-summary.json\""

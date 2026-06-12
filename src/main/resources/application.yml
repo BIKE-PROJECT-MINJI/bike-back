@@ -82,6 +82,14 @@ routing:
       api-key: ${GRAPHHOPPER_API_KEY:}
       retry-max-attempts: ${GRAPHHOPPER_RETRY_MAX_ATTEMPTS:2}
 
+ai-route:
+  generation:
+    quota:
+      per-minute: ${AI_ROUTE_GENERATION_QUOTA_PER_MINUTE:3}
+      per-day: ${AI_ROUTE_GENERATION_QUOTA_PER_DAY:30}
+  websocket:
+    allowed-origins: ${AI_ROUTE_WEBSOCKET_ALLOWED_ORIGINS:}
+
 bike:
   async:
     core-pool-size: ${BIKE_ASYNC_CORE_POOL_SIZE:4}

@@ -5,25 +5,27 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
+import com.bikeprojectminji.bikeback.course.repository.CourseActivityAggregate;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileActivitySummaryResponse;
+import com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest;
 import com.bikeprojectminji.bikeback.profile.repository.UserPreferenceRepository;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
+import com.bikeprojectminji.bikeback.ride.repository.RideRecordActivityAggregate;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -89,34 +91,19 @@ class ProfileServiceTest {
         UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
         ReflectionTestUtils.setField(user, "id", 1L);
         given(authService.findUserBySubject("1")).willReturn(user);
-        given(rideRecordRepository.countByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
+        given(rideRecordRepository.findActivityAggregateByOwnerUserIdAndFinalizationStatus(
                 any(Long.class),
                 eq(RideRecordFinalizationStatus.READY.name()),
                 any(OffsetDateTime.class),
                 any(OffsetDateTime.class)
         ))
-                .willReturn(2L);
-        given(rideRecordRepository.sumDistanceMByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
+                .willReturn(new RideRecordActivityAggregate(12L, 120500L, 24000L, 2L, 24500L, 4200L));
+        given(courseRepository.findActivityAggregateByOwnerUserId(
                 any(Long.class),
-                eq(RideRecordFinalizationStatus.READY.name()),
                 any(OffsetDateTime.class),
                 any(OffsetDateTime.class)
         ))
-                .willReturn(24500L);
-        given(rideRecordRepository.sumDurationSecByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
-                any(Long.class),
-                eq(RideRecordFinalizationStatus.READY.name()),
-                any(OffsetDateTime.class),
-                any(OffsetDateTime.class)
-        ))
-                .willReturn(4200L);
-        given(courseRepository.countByOwnerUserIdAndCreatedAtBetween(any(Long.class), any(OffsetDateTime.class), any(OffsetDateTime.class)))
-                .willReturn(1L);
-
-        given(rideRecordRepository.countByOwnerUserIdAndFinalizationStatus(1L, RideRecordFinalizationStatus.READY.name())).willReturn(12L);
-        given(rideRecordRepository.sumDistanceMByOwnerUserIdAndFinalizationStatus(1L, RideRecordFinalizationStatus.READY.name())).willReturn(120500L);
-        given(rideRecordRepository.sumDurationSecByOwnerUserIdAndFinalizationStatus(1L, RideRecordFinalizationStatus.READY.name())).willReturn(24000L);
-        given(courseRepository.countByOwnerUserId(1L)).willReturn(5L);
+                .willReturn(new CourseActivityAggregate(1L));
 
         ProfileActivitySummaryResponse response = profileService.getMyActivitySummary("1");
 
@@ -128,6 +115,18 @@ class ProfileServiceTest {
         assertThat(response.overallSummary().totalRides()).isEqualTo(12);
         assertThat(response.overallSummary().avgSpeedKmh()).isEqualByComparingTo("18.1");
         assertThat(response.overallSummary().totalElevationM()).isZero();
+        verify(rideRecordRepository).findActivityAggregateByOwnerUserIdAndFinalizationStatus(
+                any(Long.class),
+                eq(RideRecordFinalizationStatus.READY.name()),
+                any(OffsetDateTime.class),
+                any(OffsetDateTime.class)
+        );
+        verify(courseRepository).findActivityAggregateByOwnerUserId(
+                any(Long.class),
+                any(OffsetDateTime.class),
+                any(OffsetDateTime.class)
+        );
+        verifyNoMoreInteractions(rideRecordRepository, courseRepository);
     }
 
     @Test
@@ -141,7 +140,7 @@ class ProfileServiceTest {
 
         ArgumentCaptor<OffsetDateTime> startCaptor = ArgumentCaptor.forClass(OffsetDateTime.class);
         ArgumentCaptor<OffsetDateTime> endCaptor = ArgumentCaptor.forClass(OffsetDateTime.class);
-        verify(rideRecordRepository).countByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
+        verify(rideRecordRepository).findActivityAggregateByOwnerUserIdAndFinalizationStatus(
                 eq(1L),
                 eq(RideRecordFinalizationStatus.READY.name()),
                 startCaptor.capture(),
@@ -157,34 +156,15 @@ class ProfileServiceTest {
         UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
         ReflectionTestUtils.setField(user, "id", 1L);
         given(authService.findUserBySubject("1")).willReturn(user);
-        given(rideRecordRepository.countByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
+        given(rideRecordRepository.findActivityAggregateByOwnerUserIdAndFinalizationStatus(
                 any(Long.class),
                 eq(RideRecordFinalizationStatus.READY.name()),
                 any(OffsetDateTime.class),
                 any(OffsetDateTime.class)
         ))
-                .willReturn(0L);
-        given(rideRecordRepository.sumDistanceMByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
-                any(Long.class),
-                eq(RideRecordFinalizationStatus.READY.name()),
-                any(OffsetDateTime.class),
-                any(OffsetDateTime.class)
-        ))
-                .willReturn(null);
-        given(rideRecordRepository.sumDurationSecByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
-                any(Long.class),
-                eq(RideRecordFinalizationStatus.READY.name()),
-                any(OffsetDateTime.class),
-                any(OffsetDateTime.class)
-        ))
-                .willReturn(null);
-        given(courseRepository.countByOwnerUserIdAndCreatedAtBetween(any(Long.class), any(OffsetDateTime.class), any(OffsetDateTime.class)))
-                .willReturn(0L);
-
-        given(rideRecordRepository.countByOwnerUserIdAndFinalizationStatus(1L, RideRecordFinalizationStatus.READY.name())).willReturn(4L);
-        given(rideRecordRepository.sumDistanceMByOwnerUserIdAndFinalizationStatus(1L, RideRecordFinalizationStatus.READY.name())).willReturn(50500L);
-        given(rideRecordRepository.sumDurationSecByOwnerUserIdAndFinalizationStatus(1L, RideRecordFinalizationStatus.READY.name())).willReturn(7200L);
-        given(courseRepository.countByOwnerUserId(1L)).willReturn(3L);
+                .willReturn(new RideRecordActivityAggregate(4L, 50500L, 7200L, 0L, null, null));
+        given(courseRepository.findActivityAggregateByOwnerUserId(any(Long.class), any(OffsetDateTime.class), any(OffsetDateTime.class)))
+                .willReturn(new CourseActivityAggregate(0L));
 
         ProfileActivitySummaryResponse response = profileService.getMyActivitySummary("1");
 

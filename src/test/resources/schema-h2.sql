@@ -58,6 +58,8 @@ CREATE TABLE courses (
     start_longitude NUMERIC(10,7),
     owner_user_id BIGINT,
     source_ride_record_id BIGINT,
+    source_ai_route_session_id BIGINT,
+    source_ai_route_candidate_id BIGINT,
     visibility VARCHAR(20) NOT NULL,
     share_token VARCHAR(64),
     report_hidden BOOLEAN NOT NULL DEFAULT FALSE,
@@ -150,6 +152,50 @@ CREATE TABLE client_events (
 
 CREATE UNIQUE INDEX uq_courses_owner_source_ride_record
     ON courses (owner_user_id, source_ride_record_id);
+
+CREATE INDEX idx_ride_records_owner_status_ended_at
+    ON ride_records (owner_user_id, finalization_status, ended_at);
+
+CREATE INDEX idx_courses_owner_created_at
+    ON courses (owner_user_id, created_at);
+
+CREATE INDEX idx_courses_public_list_page
+    ON courses (visibility, report_hidden, display_order, id);
+
+CREATE TABLE ai_route_generation_sessions (
+    id BIGSERIAL PRIMARY KEY,
+    owner_user_id BIGINT NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    fallback_used BOOLEAN NOT NULL DEFAULT FALSE,
+    provider VARCHAR(60) NOT NULL,
+    fallback_reason VARCHAR(120),
+    request_text VARCHAR(1000),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE TABLE ai_route_candidates (
+    id BIGSERIAL PRIMARY KEY,
+    session_id BIGINT NOT NULL,
+    title VARCHAR(160) NOT NULL,
+    summary VARCHAR(1000),
+    distance_km NUMERIC(5,1) NOT NULL,
+    estimated_duration_min INTEGER NOT NULL,
+    recommendation_score INTEGER NOT NULL,
+    elevation_summary_json TEXT,
+    route_point_count INTEGER NOT NULL,
+    route_points_json TEXT NOT NULL,
+    promoted_course_id BIGINT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_ai_route_generation_sessions_owner_created_at
+    ON ai_route_generation_sessions (owner_user_id, created_at DESC);
+
+CREATE INDEX idx_ai_route_candidates_session_id
+    ON ai_route_candidates (session_id, id);
+
+CREATE UNIQUE INDEX uq_courses_source_ai_route_candidate
+    ON courses (source_ai_route_candidate_id);
 
 CREATE TABLE achievement_grants (
     id BIGSERIAL PRIMARY KEY,

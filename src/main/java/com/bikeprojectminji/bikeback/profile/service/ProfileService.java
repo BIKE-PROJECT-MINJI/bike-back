@@ -3,18 +3,20 @@ package com.bikeprojectminji.bikeback.profile.service;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
+import com.bikeprojectminji.bikeback.course.repository.CourseActivityAggregate;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileOverallActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileMeResponse;
 import com.bikeprojectminji.bikeback.profile.dto.ProfileWeeklyActivitySummaryResponse;
 import com.bikeprojectminji.bikeback.profile.dto.UpdatePreferenceRequest;
+import com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest;
 import com.bikeprojectminji.bikeback.profile.dto.UserPreferenceResponse;
 import com.bikeprojectminji.bikeback.profile.entity.BikeRoadPriority;
 import com.bikeprojectminji.bikeback.profile.entity.UserPreferenceEntity;
 import com.bikeprojectminji.bikeback.profile.repository.UserPreferenceRepository;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
-import com.bikeprojectminji.bikeback.profile.dto.UpdateProfileRequest;
+import com.bikeprojectminji.bikeback.ride.repository.RideRecordActivityAggregate;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -105,11 +107,22 @@ public class ProfileService {
 
     public ProfileActivitySummaryResponse getMyActivitySummary(String subject) {
         // 활동 요약은 profile use case가 auth로 현재 사용자를 식별한 뒤,
-        // ride/course 도메인의 집계 seam만 호출해 홈/내 정보가 함께 쓰는 canonical DTO로 묶어 반환한다.
+        // ride/course 도메인의 집계 조회 메서드만 호출해 공통 응답 DTO로 묶어 반환한다.
         UserEntity user = authService.findUserBySubject(subject);
         ActivitySummaryWindow weeklyWindow = resolveCurrentWeekWindow();
-        ProfileWeeklyActivitySummaryResponse weeklySummary = buildWeeklySummary(user.getId(), weeklyWindow);
-        ProfileOverallActivitySummaryResponse overallSummary = buildOverallSummary(user.getId());
+        RideRecordActivityAggregate rideAggregate = rideRecordRepository.findActivityAggregateByOwnerUserIdAndFinalizationStatus(
+                user.getId(),
+                USABLE_RIDE_FINALIZATION_STATUS,
+                weeklyWindow.start(),
+                weeklyWindow.end()
+        );
+        CourseActivityAggregate courseAggregate = courseRepository.findActivityAggregateByOwnerUserId(
+                user.getId(),
+                weeklyWindow.start(),
+                weeklyWindow.end()
+        );
+        ProfileWeeklyActivitySummaryResponse weeklySummary = buildWeeklySummary(rideAggregate, courseAggregate);
+        ProfileOverallActivitySummaryResponse overallSummary = buildOverallSummary(rideAggregate);
         return new ProfileActivitySummaryResponse(weeklySummary, overallSummary);
     }
 
@@ -131,26 +144,14 @@ public class ProfileService {
         return new UserPreferenceResponse(false, BikeRoadPriority.MEDIUM, false, false);
     }
 
-    private ProfileWeeklyActivitySummaryResponse buildWeeklySummary(Long userId, ActivitySummaryWindow window) {
-        long rideCount = rideRecordRepository.countByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
-                userId,
-                USABLE_RIDE_FINALIZATION_STATUS,
-                window.start(),
-                window.end()
-        );
-        long savedCourseCount = courseRepository.countByOwnerUserIdAndCreatedAtBetween(userId, window.start(), window.end());
-        long totalDistanceM = normalizeLong(rideRecordRepository.sumDistanceMByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
-                userId,
-                USABLE_RIDE_FINALIZATION_STATUS,
-                window.start(),
-                window.end()
-        ));
-        long totalDurationSec = normalizeLong(rideRecordRepository.sumDurationSecByOwnerUserIdAndFinalizationStatusAndEndedAtBetween(
-                userId,
-                USABLE_RIDE_FINALIZATION_STATUS,
-                window.start(),
-                window.end()
-        ));
+    private ProfileWeeklyActivitySummaryResponse buildWeeklySummary(
+            RideRecordActivityAggregate rideAggregate,
+            CourseActivityAggregate courseAggregate
+    ) {
+        long rideCount = normalizeLong(rideAggregate == null ? null : rideAggregate.weeklyRideCount());
+        long savedCourseCount = normalizeLong(courseAggregate == null ? null : courseAggregate.weeklyCourseCount());
+        long totalDistanceM = normalizeLong(rideAggregate == null ? null : rideAggregate.weeklyDistanceM());
+        long totalDurationSec = normalizeLong(rideAggregate == null ? null : rideAggregate.weeklyDurationSec());
         return new ProfileWeeklyActivitySummaryResponse(
                 toKilometers(totalDistanceM),
                 rideCount,
@@ -159,11 +160,10 @@ public class ProfileService {
         );
     }
 
-    private ProfileOverallActivitySummaryResponse buildOverallSummary(Long userId) {
-        long rideCount = rideRecordRepository.countByOwnerUserIdAndFinalizationStatus(userId, USABLE_RIDE_FINALIZATION_STATUS);
-        long savedCourseCount = courseRepository.countByOwnerUserId(userId);
-        long totalDistanceM = normalizeLong(rideRecordRepository.sumDistanceMByOwnerUserIdAndFinalizationStatus(userId, USABLE_RIDE_FINALIZATION_STATUS));
-        long totalDurationSec = normalizeLong(rideRecordRepository.sumDurationSecByOwnerUserIdAndFinalizationStatus(userId, USABLE_RIDE_FINALIZATION_STATUS));
+    private ProfileOverallActivitySummaryResponse buildOverallSummary(RideRecordActivityAggregate rideAggregate) {
+        long rideCount = normalizeLong(rideAggregate == null ? null : rideAggregate.overallRideCount());
+        long totalDistanceM = normalizeLong(rideAggregate == null ? null : rideAggregate.overallDistanceM());
+        long totalDurationSec = normalizeLong(rideAggregate == null ? null : rideAggregate.overallDurationSec());
         return new ProfileOverallActivitySummaryResponse(
                 toKilometers(totalDistanceM),
                 rideCount,

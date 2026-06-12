@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.course.controller;
 
 import com.bikeprojectminji.bikeback.course.service.CourseReportService;
+import com.bikeprojectminji.bikeback.course.service.CourseQueryService;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +25,9 @@ abstract class CourseControllerWebMvcTestSupport {
 
     @MockitoBean
     protected CourseService courseService;
+
+    @MockitoBean
+    protected CourseQueryService courseQueryService;
 
     @MockitoBean
     protected CourseReportService courseReportService;

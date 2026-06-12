@@ -53,6 +53,12 @@ public class CourseEntity {
     @Column(name = "source_ride_record_id")
     private Long sourceRideRecordId;
 
+    @Column(name = "source_ai_route_session_id")
+    private Long sourceAiRouteSessionId;
+
+    @Column(name = "source_ai_route_candidate_id")
+    private Long sourceAiRouteCandidateId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private CourseVisibility visibility;
@@ -168,6 +174,11 @@ public class CourseEntity {
         this.shareToken = shareToken;
     }
 
+    public void attachAiRouteSource(Long sourceAiRouteSessionId, Long sourceAiRouteCandidateId) {
+        this.sourceAiRouteSessionId = sourceAiRouteSessionId;
+        this.sourceAiRouteCandidateId = sourceAiRouteCandidateId;
+    }
+
     public void hideByReport(String reportHiddenReason, Clock clock) {
         if (reportHiddenReason == null || reportHiddenReason.isBlank()) {
             throw new IllegalArgumentException("reportHiddenReason은 비어 있을 수 없습니다.");
@@ -180,6 +191,8 @@ public class CourseEntity {
     public void anonymizeOwner() {
         this.ownerUserId = null;
         this.sourceRideRecordId = null;
+        this.sourceAiRouteSessionId = null;
+        this.sourceAiRouteCandidateId = null;
         this.shareToken = null;
     }
 
@@ -237,6 +250,14 @@ public class CourseEntity {
 
     public Long getSourceRideRecordId() {
         return sourceRideRecordId;
+    }
+
+    public Long getSourceAiRouteSessionId() {
+        return sourceAiRouteSessionId;
+    }
+
+    public Long getSourceAiRouteCandidateId() {
+        return sourceAiRouteCandidateId;
     }
 
     public CourseVisibility getVisibility() {
