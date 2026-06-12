@@ -13,6 +13,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import jakarta.persistence.TypedQuery;
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,39 +41,39 @@ class CourseRepositoryImplTest {
     private TypedQuery<CoursePageCursorAnchor> coursePageCursorAnchorQuery;
 
     @Test
-    @DisplayName("공개 코스 목록은 Entity 전체가 아니라 목록 전용 projection row로 조회한다")
-    void findPublicPageAfterUsesListProjectionWithoutEntityHydration() {
+    @DisplayName("공개 코스 목록은 courses 본테이블이 아니라 목록 전용 read model에서 조회한다")
+    void findPublicPageAfterUsesListReadModelWithoutEntityHydration() {
         CourseRepositoryImpl repository = new CourseRepositoryImpl(entityManager);
-        given(entityManager.createQuery(org.mockito.ArgumentMatchers.contains("new com.bikeprojectminji.bikeback.course.repository.CourseListRow"), eq(CourseListRow.class)))
-                .willReturn(courseListRowQuery);
-        given(courseListRowQuery.setParameter("visibility", CourseVisibility.PUBLIC)).willReturn(courseListRowQuery);
-        given(courseListRowQuery.setMaxResults(2)).willReturn(courseListRowQuery);
-        given(courseListRowQuery.getResultList()).willReturn(List.of(
-                new CourseListRow(1L, "한강 코스", BigDecimal.valueOf(10.5), 45)
+        given(entityManager.createNativeQuery(org.mockito.ArgumentMatchers.contains("course_list_summaries")))
+                .willReturn(nativeQuery);
+        given(nativeQuery.setParameter("limit", 2)).willReturn(nativeQuery);
+        given(nativeQuery.getResultList()).willReturn(Collections.singletonList(
+                new Object[]{1L, "한강 코스", BigDecimal.valueOf(10.5), 45}
         ));
 
         List<CourseListRow> rows = repository.findPublicListPageAfter(null, 2);
 
         assertThat(rows).extracting(CourseListRow::id).containsExactly(1L);
+        assertThat(rows).extracting(CourseListRow::title).containsExactly("한강 코스");
         verify(entityManager, never()).find(eq(CourseEntity.class), org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
-    @DisplayName("cursor가 있으면 Entity 전체가 아니라 displayOrder/id anchor만 조회한다")
-    void findPublicPageAfterUsesCursorAnchorProjection() {
+    @DisplayName("cursor가 있으면 목록 read model에서 displayOrder/id anchor만 조회한다")
+    void findPublicPageAfterUsesCursorAnchorFromReadModel() {
         CourseRepositoryImpl repository = new CourseRepositoryImpl(entityManager);
-        given(entityManager.createQuery(org.mockito.ArgumentMatchers.contains("new com.bikeprojectminji.bikeback.course.repository.CoursePageCursorAnchor"), eq(CoursePageCursorAnchor.class)))
-                .willReturn(coursePageCursorAnchorQuery);
-        given(coursePageCursorAnchorQuery.setParameter("id", 10L)).willReturn(coursePageCursorAnchorQuery);
-        given(coursePageCursorAnchorQuery.getResultList()).willReturn(List.of(new CoursePageCursorAnchor(10L, 10)));
-        given(entityManager.createQuery(org.mockito.ArgumentMatchers.contains("new com.bikeprojectminji.bikeback.course.repository.CourseListRow"), eq(CourseListRow.class)))
-                .willReturn(courseListRowQuery);
-        given(courseListRowQuery.setParameter("visibility", CourseVisibility.PUBLIC)).willReturn(courseListRowQuery);
-        given(courseListRowQuery.setParameter("displayOrder", 10)).willReturn(courseListRowQuery);
-        given(courseListRowQuery.setParameter("id", 10L)).willReturn(courseListRowQuery);
-        given(courseListRowQuery.setMaxResults(2)).willReturn(courseListRowQuery);
-        given(courseListRowQuery.getResultList()).willReturn(List.of(
-                new CourseListRow(11L, "다음 코스", BigDecimal.valueOf(12.5), 50)
+        given(entityManager.createNativeQuery(org.mockito.ArgumentMatchers.contains("where course_id = :id")))
+                .willReturn(nativeQuery);
+        given(nativeQuery.setParameter("id", 10L)).willReturn(nativeQuery);
+        given(nativeQuery.getResultList()).willReturn(Collections.singletonList(new Object[]{10L, 10}));
+        Query pageQuery = org.mockito.Mockito.mock(Query.class);
+        given(entityManager.createNativeQuery(org.mockito.ArgumentMatchers.contains("display_order > :displayOrder")))
+                .willReturn(pageQuery);
+        given(pageQuery.setParameter("displayOrder", 10)).willReturn(pageQuery);
+        given(pageQuery.setParameter("id", 10L)).willReturn(pageQuery);
+        given(pageQuery.setParameter("limit", 2)).willReturn(pageQuery);
+        given(pageQuery.getResultList()).willReturn(Collections.singletonList(
+                new Object[]{11L, "다음 코스", BigDecimal.valueOf(12.5), 50}
         ));
 
         List<CourseListRow> rows = repository.findPublicListPageAfter(10L, 2);

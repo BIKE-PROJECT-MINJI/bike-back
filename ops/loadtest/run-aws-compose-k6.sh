@@ -26,6 +26,7 @@ SSH_READY_MAX_ATTEMPTS="${SSH_READY_MAX_ATTEMPTS:-60}"
 SSH_CONNECT_TIMEOUT_SECONDS="${SSH_CONNECT_TIMEOUT_SECONDS:-10}"
 REMOTE_HEALTH_MAX_ATTEMPTS="${REMOTE_HEALTH_MAX_ATTEMPTS:-120}"
 REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS="${REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS:-180}"
+GRAPHHOPPER_CACHE_ARCHIVE_URL="${GRAPHHOPPER_CACHE_ARCHIVE_URL:-}"
 INSTANCE_TTL_SECONDS="${INSTANCE_TTL_SECONDS:-14400}"
 ALLOW_AFTER_K6_FAILURE="${ALLOW_AFTER_K6_FAILURE:-false}"
 
@@ -193,6 +194,12 @@ scp_from_instance() {
     "$SSH_USER@$INSTANCE_PUBLIC_IP:$1" "$2"
 }
 
+scp_from_instance_optional() {
+  if ! scp_from_instance "$1" "$2"; then
+    echo "optional remote evidence missing: $1" >&2
+  fi
+}
+
 run_remote_case() {
   local label="$1"
   local tarball="$2"
@@ -204,7 +211,9 @@ run_remote_case() {
   scp_to_instance "$tarball" "$remote_tar"
 
   log "running $label compose+k6"
-  ssh_run "LABEL='$label' REMOTE_TAR='$remote_tar' REMOTE_DIR='$remote_dir' TEST_ID='$test_id' RUN_DURATION='$RUN_DURATION' REMOTE_SECRET_ENV='$REMOTE_SECRET_ENV' K6_AI_ROUTE_VUS='$K6_AI_ROUTE_VUS' K6_COURSE_MAP_READ_VUS='$K6_COURSE_MAP_READ_VUS' K6_FREE_RIDE_VUS='$K6_FREE_RIDE_VUS' K6_COURSE_FOLLOW_VUS='$K6_COURSE_FOLLOW_VUS' REMOTE_HEALTH_MAX_ATTEMPTS='$REMOTE_HEALTH_MAX_ATTEMPTS' REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS='$REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS' RESET_GRAPHHOPPER_CACHE='$RESET_GRAPHHOPPER_CACHE' bash -s" <<'REMOTE'
+  local remote_status
+  set +e
+  ssh_run "LABEL='$label' REMOTE_TAR='$remote_tar' REMOTE_DIR='$remote_dir' TEST_ID='$test_id' RUN_DURATION='$RUN_DURATION' REMOTE_SECRET_ENV='$REMOTE_SECRET_ENV' K6_AI_ROUTE_VUS='$K6_AI_ROUTE_VUS' K6_COURSE_MAP_READ_VUS='$K6_COURSE_MAP_READ_VUS' K6_FREE_RIDE_VUS='$K6_FREE_RIDE_VUS' K6_COURSE_FOLLOW_VUS='$K6_COURSE_FOLLOW_VUS' REMOTE_HEALTH_MAX_ATTEMPTS='$REMOTE_HEALTH_MAX_ATTEMPTS' REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS='$REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS' RESET_GRAPHHOPPER_CACHE='$RESET_GRAPHHOPPER_CACHE' GRAPHHOPPER_CACHE_ARCHIVE_URL='$GRAPHHOPPER_CACHE_ARCHIVE_URL' bash -s" <<'REMOTE'
 	set -Eeuo pipefail
 	mkdir -p "$REMOTE_DIR"
 	tar -xzf "$REMOTE_TAR" -C "$REMOTE_DIR"
@@ -213,12 +222,28 @@ run_remote_case() {
 	cp .env.test.example .env.test
 	chmod 600 .env.test
 	remote_cleanup() {
+	  local remote_status=$?
+	  set +e
+	  mkdir -p ops/loadtest/results
+	  echo "$remote_status" > ops/loadtest/results/"$TEST_ID"-remote-exit-code.txt
+	  if [[ "$remote_status" != "0" ]]; then
+	    docker compose --env-file .env.test -f docker-compose.test.yml ps \
+	      > ops/loadtest/results/"$TEST_ID"-compose-ps.txt 2>&1 || true
+	    docker compose --env-file .env.test -f docker-compose.test.yml logs --tail=300 bike-back \
+	      > ops/loadtest/results/"$TEST_ID"-bike-back-tail.log 2>&1 || true
+	    docker compose --env-file .env.test -f docker-compose.test.yml logs --tail=300 ai-route-worker graphhopper \
+	      > ops/loadtest/results/"$TEST_ID"-routing-logs.txt 2>&1 || true
+	    cp /tmp/"$LABEL"-health.json ops/loadtest/results/"$TEST_ID"-health.json 2>/dev/null || true
+	    cp /tmp/"$LABEL"-health.err ops/loadtest/results/"$TEST_ID"-health.err 2>/dev/null || true
+	    cp /tmp/"$LABEL"-graphhopper-ready.err ops/loadtest/results/"$TEST_ID"-graphhopper-ready.err 2>/dev/null || true
+	  fi
 	  if [[ "$RESET_GRAPHHOPPER_CACHE" == "true" ]]; then
 	    docker compose --env-file .env.test -f docker-compose.test.yml down -v >/dev/null 2>&1 || true
 	  else
 	    docker compose --env-file .env.test -f docker-compose.test.yml down >/dev/null 2>&1 || true
 	  fi
 	  rm -f .env.test "$REMOTE_SECRET_ENV"
+	  exit "$remote_status"
 	}
 	trap remote_cleanup EXIT
 	if [[ -n "$REMOTE_SECRET_ENV" && -f "$REMOTE_SECRET_ENV" ]]; then
@@ -231,13 +256,24 @@ if [[ "$RESET_GRAPHHOPPER_CACHE" == "true" ]]; then
 else
   docker compose --env-file .env.test -f docker-compose.test.yml down >/dev/null 2>&1 || true
 fi
+
+restore_graphhopper_cache() {
+  if [[ -z "$GRAPHHOPPER_CACHE_ARCHIVE_URL" ]]; then
+    return 0
+  fi
+  echo "restore_graphhopper_cache source=$GRAPHHOPPER_CACHE_ARCHIVE_URL"
+  docker compose --env-file .env.test -f docker-compose.test.yml run --rm --no-deps --entrypoint sh graphhopper-prepare -c \
+    "set -eu; mkdir -p /data; curl -fsSL '$GRAPHHOPPER_CACHE_ARCHIVE_URL' -o /tmp/graphhopper-cache.tgz; tar -xzf /tmp/graphhopper-cache.tgz -C /data; test -d /data/graph-cache"
+}
+
+restore_graphhopper_cache
 docker compose --env-file .env.test -f docker-compose.test.yml up --build -d
 
 health_status() {
   local candidate status
-  for candidate in 8081 18081; do
-    status="$(curl -sS -o /tmp/"$LABEL"-health.json -w '%{http_code}' --max-time 5 http://127.0.0.1:"$candidate"/actuator/health 2>/tmp/"$LABEL"-health.err || true)"
-    if [[ "$status" == "200" || "$status" == "401" ]]; then
+  for candidate in 8080; do
+    status="$(curl -sS -o /tmp/"$LABEL"-health.json -w '%{http_code}' --max-time 5 http://127.0.0.1:"$candidate"/health 2>/tmp/"$LABEL"-health.err || true)"
+    if [[ "$status" == "200" ]]; then
       printf '%s\n' "$status"
       return 0
     fi
@@ -252,7 +288,7 @@ for attempt in $(seq 1 "$REMOTE_HEALTH_MAX_ATTEMPTS"); do
   fi
   sleep 5
 done
-if [[ "${status:-}" != "200" && "${status:-}" != "401" ]]; then
+if [[ "${status:-}" != "200" ]]; then
   docker compose --env-file .env.test -f docker-compose.test.yml ps || true
   docker compose --env-file .env.test -f docker-compose.test.yml logs --tail=200 bike-back || true
   echo "health check did not pass after $REMOTE_HEALTH_MAX_ATTEMPTS attempts; last_status=${status:-000}" >&2
@@ -268,8 +304,15 @@ graphhopper_route_status() {
 
 for attempt in $(seq 1 "$REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS"); do
   graphhopper_status="$(graphhopper_route_status)"
+  echo "graphhopper_attempt=$attempt status=${graphhopper_status:-000}"
   if [[ "$graphhopper_status" == "200" ]]; then
     break
+  fi
+  if [[ "$attempt" == "$REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS" ]]; then
+    docker compose --env-file .env.test -f docker-compose.test.yml ps || true
+    docker compose --env-file .env.test -f docker-compose.test.yml logs --tail=200 graphhopper || true
+    echo "GraphHopper route readiness did not pass after $REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS attempts; last_status=${graphhopper_status:-000}" >&2
+    exit 23
   fi
   sleep 5
 done
@@ -283,6 +326,7 @@ echo "graphhopper_route_ready_status=$graphhopper_status"
 
 mkdir -p ops/loadtest/results
 set +e
+echo "starting_k6 test_id=$TEST_ID duration=$RUN_DURATION"
 k6 run --quiet \
   -e BASE_URL=http://127.0.0.1:8080 \
   -e TEST_ID="$TEST_ID" \
@@ -299,6 +343,7 @@ k6 run --quiet \
 k6_status="${PIPESTATUS[0]}"
 set -e
 echo "$k6_status" > ops/loadtest/results/"$TEST_ID"-k6-exit-code.txt
+echo "k6_status=$k6_status"
 
 docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' \
   bike-test-backend bike-test-postgres bike-test-graphhopper bike-test-ai-route-worker \
@@ -317,21 +362,43 @@ else
 fi
 rm -f .env.test
 REMOTE
+  remote_status=$?
+  set -e
 
-  scp_from_instance "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-summary.json" \
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-remote-exit-code.txt" \
+    "$EVIDENCE_DIR/$test_id-remote-exit-code.txt"
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-summary.json" \
     "$EVIDENCE_DIR/$test_id-summary.json"
-  scp_from_instance "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-k6.log" \
-  "$EVIDENCE_DIR/$test_id-k6.log"
-  scp_from_instance "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-k6-exit-code.txt" \
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-k6.log" \
+    "$EVIDENCE_DIR/$test_id-k6.log"
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-k6-exit-code.txt" \
     "$EVIDENCE_DIR/$test_id-k6-exit-code.txt"
-  scp_from_instance "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-docker-stats.txt" \
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-docker-stats.txt" \
     "$EVIDENCE_DIR/$test_id-docker-stats.txt"
-  scp_from_instance "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-error-scan.txt" \
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-error-scan.txt" \
     "$EVIDENCE_DIR/$test_id-error-scan.txt"
-  scp_from_instance "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-routing-logs.txt" \
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-routing-logs.txt" \
     "$EVIDENCE_DIR/$test_id-routing-logs.txt"
-  scp_from_instance "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-compose-ps.txt" \
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-compose-ps.txt" \
     "$EVIDENCE_DIR/$test_id-compose-ps.txt"
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-bike-back-tail.log" \
+    "$EVIDENCE_DIR/$test_id-bike-back-tail.log"
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-health.json" \
+    "$EVIDENCE_DIR/$test_id-health.json"
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-health.err" \
+    "$EVIDENCE_DIR/$test_id-health.err"
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-graphhopper-ready.err" \
+    "$EVIDENCE_DIR/$test_id-graphhopper-ready.err"
+
+  if [[ "$remote_status" != "0" ]]; then
+    echo "$label remote run failed with exit code $remote_status" >&2
+    exit "$remote_status"
+  fi
+
+  if [[ ! -f "$EVIDENCE_DIR/$test_id-k6-exit-code.txt" ]]; then
+    echo "$label remote run ended without k6 exit code; evidence: $EVIDENCE_DIR" >&2
+    exit 24
+  fi
 
   local k6_exit_code
   k6_exit_code="$(tr -d '[:space:]' < "$EVIDENCE_DIR/$test_id-k6-exit-code.txt")"

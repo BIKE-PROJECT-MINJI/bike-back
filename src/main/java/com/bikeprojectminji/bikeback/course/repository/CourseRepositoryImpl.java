@@ -58,59 +58,41 @@ public class CourseRepositoryImpl implements CourseRepositoryCustom {
     @Override
     public List<CourseListRow> findPublicListPageAfter(Long cursorId, int limitPlusOne) {
         if (cursorId == null) {
-            TypedQuery<CourseListRow> query = entityManager.createQuery("""
-                    select new com.bikeprojectminji.bikeback.course.repository.CourseListRow(
-                        c.id,
-                        c.title,
-                        c.distanceKm,
-                        c.estimatedDurationMin
-                    )
-                    from CourseEntity c
-                    where c.visibility = :visibility
-                      and c.reportHidden = false
-                    order by c.displayOrder asc, c.id asc
-                    """, CourseListRow.class);
-            query.setParameter("visibility", CourseVisibility.PUBLIC);
-            query.setMaxResults(limitPlusOne);
-            return query.getResultList();
+            Query query = entityManager.createNativeQuery("""
+                    select course_id, title, distance_km, estimated_duration_min
+                    from course_list_summaries
+                    order by display_order asc, course_id asc
+                    limit :limit
+                    """);
+            query.setParameter("limit", limitPlusOne);
+            return toCourseListRows(query.getResultList());
         }
 
-        List<CoursePageCursorAnchor> anchors = entityManager.createQuery("""
-                        select new com.bikeprojectminji.bikeback.course.repository.CoursePageCursorAnchor(
-                            c.id,
-                            c.displayOrder
-                        )
-                        from CourseEntity c
-                        where c.id = :id
-                        """, CoursePageCursorAnchor.class)
+        List<?> anchors = entityManager.createNativeQuery("""
+                        select course_id, display_order
+                        from course_list_summaries where course_id = :id
+                        """)
                 .setParameter("id", cursorId)
                 .getResultList();
         if (anchors.isEmpty()) {
             return Collections.emptyList();
         }
 
-        CoursePageCursorAnchor anchor = anchors.get(0);
-        TypedQuery<CourseListRow> query = entityManager.createQuery("""
-                select new com.bikeprojectminji.bikeback.course.repository.CourseListRow(
-                    c.id,
-                    c.title,
-                    c.distanceKm,
-                    c.estimatedDurationMin
+        CoursePageCursorAnchor anchor = toCursorAnchor(anchors.get(0));
+        Query query = entityManager.createNativeQuery("""
+                select course_id, title, distance_km, estimated_duration_min
+                from course_list_summaries
+                where (
+                    display_order > :displayOrder
+                    or (display_order = :displayOrder and course_id > :id)
                 )
-                from CourseEntity c
-                where c.visibility = :visibility
-                  and c.reportHidden = false
-                  and (
-                      c.displayOrder > :displayOrder
-                      or (c.displayOrder = :displayOrder and c.id > :id)
-                  )
-                order by c.displayOrder asc, c.id asc
-                """, CourseListRow.class);
-        query.setParameter("visibility", CourseVisibility.PUBLIC);
+                order by display_order asc, course_id asc
+                limit :limit
+                """);
         query.setParameter("displayOrder", anchor.displayOrder());
         query.setParameter("id", anchor.id());
-        query.setMaxResults(limitPlusOne);
-        return query.getResultList();
+        query.setParameter("limit", limitPlusOne);
+        return toCourseListRows(query.getResultList());
     }
 
     @Override
@@ -179,5 +161,27 @@ public class CourseRepositoryImpl implements CourseRepositoryCustom {
     }
 
     private record FeaturedCourseDistanceRow(Long courseId, Integer distanceFromUserM) {
+    }
+
+    private List<CourseListRow> toCourseListRows(List<?> rawRows) {
+        List<CourseListRow> rows = new ArrayList<>();
+        for (Object rawRow : rawRows) {
+            Object[] columns = (Object[]) rawRow;
+            rows.add(new CourseListRow(
+                    ((Number) columns[0]).longValue(),
+                    (String) columns[1],
+                    (BigDecimal) columns[2],
+                    ((Number) columns[3]).intValue()
+            ));
+        }
+        return rows;
+    }
+
+    private CoursePageCursorAnchor toCursorAnchor(Object rawRow) {
+        Object[] columns = (Object[]) rawRow;
+        return new CoursePageCursorAnchor(
+                ((Number) columns[0]).longValue(),
+                ((Number) columns[1]).intValue()
+        );
     }
 }

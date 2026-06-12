@@ -14,6 +14,16 @@ class GraphHopperReadinessScriptTest {
     void awsWrapperWaitsForGraphHopperRouteReadiness() throws Exception {
         String script = Files.readString(Path.of("ops/loadtest/run-aws-compose-k6.sh"));
 
+        assertThat(script).contains("for candidate in 8080");
+        assertThat(script).contains("/health");
+        assertThat(script).doesNotContain("status\" == \"401\"");
+        assertThat(script).contains("remote-exit-code.txt");
+        assertThat(script).contains("scp_from_instance_optional");
+        assertThat(script).contains("graphhopper_attempt=");
+        assertThat(script).contains("starting_k6");
+        assertThat(script).contains("attempt\" == \"$REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS");
+        assertThat(script).contains("GRAPHHOPPER_CACHE_ARCHIVE_URL");
+        assertThat(script).contains("restore_graphhopper_cache");
         assertThat(script).contains("graphhopper_route_status");
         assertThat(script).contains("/route?profile=bike");
         assertThat(script).contains("graphhopper_route_ready_status=");
