@@ -275,7 +275,7 @@ restore_graphhopper_cache() {
   fi
   echo "restore_graphhopper_cache source=$GRAPHHOPPER_CACHE_ARCHIVE_URL"
   write_remote_stage "cache_restore_start"
-  docker compose --env-file .env.test -f docker-compose.test.yml run --rm --no-deps --entrypoint sh graphhopper-prepare -c \
+  docker compose --env-file .env.test -f docker-compose.test.yml run -T --rm --no-deps --entrypoint sh graphhopper-prepare -c \
     "set -eu; mkdir -p /data; curl -fsSL '$GRAPHHOPPER_CACHE_ARCHIVE_URL' -o /tmp/graphhopper-cache.tgz; tar -xzf /tmp/graphhopper-cache.tgz -C /data; test -d /data/graph-cache"
   write_remote_stage "cache_restore_done"
 }
@@ -285,7 +285,7 @@ export_graphhopper_cache() {
     return 0
   fi
   echo "export_graphhopper_cache target=ops/loadtest/results/$TEST_ID-graphhopper-cache.tgz"
-  docker compose --env-file .env.test -f docker-compose.test.yml run --rm --no-deps --entrypoint sh graphhopper-prepare -c \
+  docker compose --env-file .env.test -f docker-compose.test.yml run -T --rm --no-deps --entrypoint sh graphhopper-prepare -c \
     "set -eu; test -d /data/graph-cache; tar -czf - -C /data graph-cache" \
     > ops/loadtest/results/"$TEST_ID"-graphhopper-cache.tgz
 }
@@ -324,7 +324,7 @@ echo "health_status=$status"
 write_remote_stage "health_ready status=$status"
 
 graphhopper_route_status() {
-  docker compose --env-file .env.test -f docker-compose.test.yml run --rm --no-deps --entrypoint sh graphhopper-prepare -c \
+  docker compose --env-file .env.test -f docker-compose.test.yml run -T --rm --no-deps --entrypoint sh graphhopper-prepare -c \
     "curl -sS -o /tmp/graphhopper-route-ready.json -w '%{http_code}' --max-time 10 'http://graphhopper:8989/route?profile=bike&point=37.481247,126.952739&point=37.551200,126.988200&points_encoded=false&elevation=true'" \
     2>/tmp/"$LABEL"-graphhopper-ready.err || true
 }
