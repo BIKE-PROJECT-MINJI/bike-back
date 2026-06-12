@@ -27,6 +27,7 @@ SSH_CONNECT_TIMEOUT_SECONDS="${SSH_CONNECT_TIMEOUT_SECONDS:-10}"
 REMOTE_HEALTH_MAX_ATTEMPTS="${REMOTE_HEALTH_MAX_ATTEMPTS:-120}"
 REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS="${REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS:-180}"
 GRAPHHOPPER_CACHE_ARCHIVE_URL="${GRAPHHOPPER_CACHE_ARCHIVE_URL:-}"
+GRAPHHOPPER_CACHE_EXPORT="${GRAPHHOPPER_CACHE_EXPORT:-false}"
 INSTANCE_TTL_SECONDS="${INSTANCE_TTL_SECONDS:-14400}"
 ALLOW_AFTER_K6_FAILURE="${ALLOW_AFTER_K6_FAILURE:-false}"
 
@@ -213,7 +214,7 @@ run_remote_case() {
   log "running $label compose+k6"
   local remote_status
   set +e
-  ssh_run "LABEL='$label' REMOTE_TAR='$remote_tar' REMOTE_DIR='$remote_dir' TEST_ID='$test_id' RUN_DURATION='$RUN_DURATION' REMOTE_SECRET_ENV='$REMOTE_SECRET_ENV' K6_AI_ROUTE_VUS='$K6_AI_ROUTE_VUS' K6_COURSE_MAP_READ_VUS='$K6_COURSE_MAP_READ_VUS' K6_FREE_RIDE_VUS='$K6_FREE_RIDE_VUS' K6_COURSE_FOLLOW_VUS='$K6_COURSE_FOLLOW_VUS' REMOTE_HEALTH_MAX_ATTEMPTS='$REMOTE_HEALTH_MAX_ATTEMPTS' REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS='$REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS' RESET_GRAPHHOPPER_CACHE='$RESET_GRAPHHOPPER_CACHE' GRAPHHOPPER_CACHE_ARCHIVE_URL='$GRAPHHOPPER_CACHE_ARCHIVE_URL' bash -s" <<'REMOTE'
+  ssh_run "LABEL='$label' REMOTE_TAR='$remote_tar' REMOTE_DIR='$remote_dir' TEST_ID='$test_id' RUN_DURATION='$RUN_DURATION' REMOTE_SECRET_ENV='$REMOTE_SECRET_ENV' K6_AI_ROUTE_VUS='$K6_AI_ROUTE_VUS' K6_COURSE_MAP_READ_VUS='$K6_COURSE_MAP_READ_VUS' K6_FREE_RIDE_VUS='$K6_FREE_RIDE_VUS' K6_COURSE_FOLLOW_VUS='$K6_COURSE_FOLLOW_VUS' REMOTE_HEALTH_MAX_ATTEMPTS='$REMOTE_HEALTH_MAX_ATTEMPTS' REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS='$REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS' RESET_GRAPHHOPPER_CACHE='$RESET_GRAPHHOPPER_CACHE' GRAPHHOPPER_CACHE_ARCHIVE_URL='$GRAPHHOPPER_CACHE_ARCHIVE_URL' GRAPHHOPPER_CACHE_EXPORT='$GRAPHHOPPER_CACHE_EXPORT' bash -s" <<'REMOTE'
 	set -Eeuo pipefail
 	mkdir -p "$REMOTE_DIR"
 	tar -xzf "$REMOTE_TAR" -C "$REMOTE_DIR"
@@ -264,6 +265,16 @@ restore_graphhopper_cache() {
   echo "restore_graphhopper_cache source=$GRAPHHOPPER_CACHE_ARCHIVE_URL"
   docker compose --env-file .env.test -f docker-compose.test.yml run --rm --no-deps --entrypoint sh graphhopper-prepare -c \
     "set -eu; mkdir -p /data; curl -fsSL '$GRAPHHOPPER_CACHE_ARCHIVE_URL' -o /tmp/graphhopper-cache.tgz; tar -xzf /tmp/graphhopper-cache.tgz -C /data; test -d /data/graph-cache"
+}
+
+export_graphhopper_cache() {
+  if [[ "$GRAPHHOPPER_CACHE_EXPORT" != "true" ]]; then
+    return 0
+  fi
+  echo "export_graphhopper_cache target=ops/loadtest/results/$TEST_ID-graphhopper-cache.tgz"
+  docker compose --env-file .env.test -f docker-compose.test.yml run --rm --no-deps --entrypoint sh graphhopper-prepare -c \
+    "set -eu; test -d /data/graph-cache; tar -czf - -C /data graph-cache" \
+    > ops/loadtest/results/"$TEST_ID"-graphhopper-cache.tgz
 }
 
 restore_graphhopper_cache
@@ -355,6 +366,7 @@ docker compose --env-file .env.test -f docker-compose.test.yml logs --since=20m 
   > ops/loadtest/results/"$TEST_ID"-routing-logs.txt || true
 docker compose --env-file .env.test -f docker-compose.test.yml ps \
   > ops/loadtest/results/"$TEST_ID"-compose-ps.txt || true
+export_graphhopper_cache
 if [[ "$RESET_GRAPHHOPPER_CACHE" == "true" ]]; then
   docker compose --env-file .env.test -f docker-compose.test.yml down -v
 else
@@ -389,6 +401,8 @@ REMOTE
     "$EVIDENCE_DIR/$test_id-health.err"
   scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-graphhopper-ready.err" \
     "$EVIDENCE_DIR/$test_id-graphhopper-ready.err"
+  scp_from_instance_optional "$remote_dir/dev/bike-back/ops/loadtest/results/$test_id-graphhopper-cache.tgz" \
+    "$EVIDENCE_DIR/$test_id-graphhopper-cache.tgz"
 
   if [[ "$remote_status" != "0" ]]; then
     echo "$label remote run failed with exit code $remote_status" >&2
