@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.airoute.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -12,6 +13,7 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.service.AiRoutePlannerService;
 import com.bikeprojectminji.bikeback.airoute.service.AiRouteQuotaService;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
+import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,17 +40,25 @@ class AiRouteControllerTest {
     private AiRouteQuotaService aiRouteQuotaService;
 
     @Test
-    @DisplayName("AI 경로 추천 REST는 access token이 없으면 거부한다")
-    void planRequiresAuthentication() throws Exception {
+    @DisplayName("AI 경로 추천 REST는 비로그인 요청에 게스트 device id가 없으면 400을 반환한다")
+    void planRequiresGuestDeviceIdWhenAnonymous() throws Exception {
+        willThrow(new BadRequestException("게스트 device id가 필요합니다."))
+                .given(aiRouteQuotaService)
+                .checkGuestAllowed(null, "127.0.0.1");
+
         mockMvc.perform(post("/api/v1/ai-routes/plan")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validRequestJson()))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isBadRequest());
     }
 
     @Test
-    @DisplayName("텍스트 기반 AI 경로 추천 REST는 access token이 없으면 거부한다")
-    void planFromTextRequiresAuthentication() throws Exception {
+    @DisplayName("텍스트 기반 AI 경로 추천 REST는 비로그인 요청에 게스트 device id가 없으면 400을 반환한다")
+    void planFromTextRequiresGuestDeviceIdWhenAnonymous() throws Exception {
+        willThrow(new BadRequestException("게스트 device id가 필요합니다."))
+                .given(aiRouteQuotaService)
+                .checkGuestAllowed(null, "127.0.0.1");
+
         mockMvc.perform(post("/api/v1/ai-routes/plan/from-text")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -58,7 +68,7 @@ class AiRouteControllerTest {
                                   "text": "오르막이 많은 곳 추천"
                                 }
                                 """))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -87,7 +97,37 @@ class AiRouteControllerTest {
                         .content(validRequestJson()))
                 .andExpect(status().isOk());
 
-        verify(aiRouteQuotaService).checkAllowed("1");
+        verify(aiRouteQuotaService).checkAuthenticatedAllowed("1");
+    }
+
+    @Test
+    @DisplayName("AI 경로 추천 REST는 게스트 device id 기준으로 quota를 확인한다")
+    void planChecksQuotaByGuestDeviceId() throws Exception {
+        given(aiRoutePlannerService.plan(eq(null), any())).willReturn(new AiRoutePlanResponse(
+                "plan-guest-1",
+                "FALLBACK",
+                "게스트 추천 경로",
+                "LOW",
+                null,
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                70,
+                null,
+                null,
+                List.of(),
+                false
+        ));
+
+        mockMvc.perform(post("/api/v1/ai-routes/plan")
+                        .header("X-Guest-Device-Id", "guest-device-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestJson()))
+                .andExpect(status().isOk());
+
+        verify(aiRouteQuotaService).checkGuestAllowed("guest-device-1", "127.0.0.1");
+        verify(aiRoutePlannerService).plan(eq(null), any());
     }
 
     @Test
@@ -122,7 +162,7 @@ class AiRouteControllerTest {
                                 """))
                 .andExpect(status().isOk());
 
-        verify(aiRouteQuotaService).checkAllowed("1");
+        verify(aiRouteQuotaService).checkAuthenticatedAllowed("1");
         verify(aiRoutePlannerService).planFromText(eq("1"), any());
     }
 

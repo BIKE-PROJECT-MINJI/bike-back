@@ -5,6 +5,7 @@ public record RegisterRequest(
         String password,
         String displayName,
         String profileImageUrl,
-        String legacyExternalId
+        String legacyExternalId,
+        String inviteCode
 ) {
 }

@@ -41,6 +41,9 @@ public class UserEntity {
     @Column(name = "account_status", nullable = false, length = 20)
     private String accountStatus = "ACTIVE";
 
+    @Column(name = "beta_access_granted", nullable = false)
+    private boolean betaAccessGranted = false;
+
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
 
@@ -85,6 +88,10 @@ public class UserEntity {
         this.externalId = "deleted:" + id + ":" + now.toInstant().toEpochMilli();
     }
 
+    public void grantBetaAccess() {
+        this.betaAccessGranted = true;
+    }
+
     public boolean isDeleted() {
         return "DELETED".equals(accountStatus);
     }
@@ -123,6 +130,10 @@ public class UserEntity {
 
     public String getAccountStatus() {
         return accountStatus;
+    }
+
+    public boolean isBetaAccessGranted() {
+        return betaAccessGranted;
     }
 
     public OffsetDateTime getDeletedAt() {

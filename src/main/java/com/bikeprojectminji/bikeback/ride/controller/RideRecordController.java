@@ -2,9 +2,11 @@ package com.bikeprojectminji.bikeback.ride.controller;
 
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
+import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordSummaryRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordListResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordResponse;
+import com.bikeprojectminji.bikeback.ride.dto.RideRecordTraceRequest;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,6 +33,23 @@ public class RideRecordController {
             @RequestBody CreateRideRecordRequest request
     ) {
         return ApiResponse.success(rideRecordService.saveRideRecord(jwt.getSubject(), request));
+    }
+
+    @PostMapping("/summary")
+    public ApiResponse<RideRecordResponse> saveRideRecordSummary(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestBody CreateRideRecordSummaryRequest request
+    ) {
+        return ApiResponse.success(rideRecordService.saveRideRecordSummary(jwt.getSubject(), request));
+    }
+
+    @PostMapping("/{rideRecordId}/trace")
+    public ApiResponse<RideRecordResponse> saveRideRecordTrace(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long rideRecordId,
+            @RequestBody RideRecordTraceRequest request
+    ) {
+        return ApiResponse.success(rideRecordService.saveRideRecordTrace(jwt.getSubject(), rideRecordId, request));
     }
 
     @GetMapping
