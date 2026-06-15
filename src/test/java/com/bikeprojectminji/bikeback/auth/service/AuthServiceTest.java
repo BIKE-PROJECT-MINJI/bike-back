@@ -5,12 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 
 import com.bikeprojectminji.bikeback.auth.dto.LoginRequest;
 import com.bikeprojectminji.bikeback.auth.dto.LoginResponse;
 import com.bikeprojectminji.bikeback.auth.dto.RefreshTokenRequest;
 import com.bikeprojectminji.bikeback.auth.dto.RegisterRequest;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
+import com.bikeprojectminji.bikeback.beta.service.BetaInvitationService;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.UnauthorizedException;
 import com.bikeprojectminji.bikeback.auth.repository.KakaoAccountLinkRepository;
@@ -68,6 +70,9 @@ class AuthServiceTest {
     @Mock
     private AccountDeletionService accountDeletionService;
 
+    @Mock
+    private BetaInvitationService betaInvitationService;
+
     private final Clock clock = Clock.fixed(Instant.parse("2026-04-02T00:00:00Z"), ZoneOffset.UTC);
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
@@ -75,7 +80,7 @@ class AuthServiceTest {
     @DisplayName("회원가입은 사용자를 저장하고 JWT를 발급한다")
     void registerReturnsIssuedJwt() {
         AuthService authService = createAuthService();
-        RegisterRequest request = new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null);
+        RegisterRequest request = new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null, null);
         UserEntity savedUser = new UserEntity(null, "bikeoasis@example.com", passwordEncoder.encode("example-password"), "bikeoasis", null);
         ReflectionTestUtils.setField(savedUser, "id", 1L);
 
@@ -111,7 +116,7 @@ class AuthServiceTest {
     @DisplayName("신규 회원가입은 externalId를 비워 두지 않고 저장한다")
     void registerAssignsExternalIdForNewUser() {
         AuthService authService = createAuthService();
-        RegisterRequest request = new RegisterRequest("fresh@example.com", "example-password", "fresh-rider", null, null);
+        RegisterRequest request = new RegisterRequest("fresh@example.com", "example-password", "fresh-rider", null, null, null);
         UserEntity savedUser = new UserEntity("generated-external-id", "fresh@example.com", passwordEncoder.encode("example-password"), "fresh-rider", null);
         ReflectionTestUtils.setField(savedUser, "id", 1L);
 
@@ -138,6 +143,39 @@ class AuthServiceTest {
         ArgumentCaptor<UserEntity> userCaptor = forClass(UserEntity.class);
         org.mockito.Mockito.verify(userRepository).save(userCaptor.capture());
         assertThat(userCaptor.getValue().getExternalId()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("초대 코드 회원가입은 사용자에게 베타 접근권을 부여하고 코드를 사용 처리한다")
+    void registerWithInviteCodeGrantsBetaAccess() {
+        AuthService authService = createAuthService();
+        RegisterRequest request = new RegisterRequest("beta@example.com", "example-password", "beta-rider", null, null, "BIKE-2026");
+        UserEntity savedUser = new UserEntity("generated-external-id", "beta@example.com", passwordEncoder.encode("example-password"), "beta-rider", null);
+        ReflectionTestUtils.setField(savedUser, "id", 7L);
+
+        given(userRepository.existsByEmail("beta@example.com")).willReturn(false);
+        given(userRepository.save(any(UserEntity.class))).willReturn(savedUser);
+        given(jwtEncoder.encode(any(JwtEncoderParameters.class))).willReturn(
+                Jwt.withTokenValue("jwt-token")
+                        .header("alg", "HS256")
+                        .subject("7")
+                        .issuedAt(clock.instant())
+                        .expiresAt(clock.instant().plusSeconds(900))
+                        .build()
+        ).willReturn(
+                Jwt.withTokenValue("refresh-token")
+                        .header("alg", "HS256")
+                        .subject("7")
+                        .issuedAt(clock.instant())
+                        .expiresAt(clock.instant().plusSeconds(1209600))
+                        .build()
+        );
+
+        LoginResponse response = authService.register(request);
+
+        assertThat(response.userId()).isEqualTo(7L);
+        assertThat(savedUser.isBetaAccessGranted()).isTrue();
+        verify(betaInvitationService).consumeForUser("BIKE-2026", 7L);
     }
 
     @Test
@@ -332,7 +370,7 @@ class AuthServiceTest {
         AuthService authService = createAuthService();
         given(userRepository.existsByEmail("bikeoasis@example.com")).willReturn(true);
 
-        assertThatThrownBy(() -> authService.register(new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null)))
+        assertThatThrownBy(() -> authService.register(new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null, null)))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("이미 사용 중인 이메일입니다.");
     }
@@ -362,7 +400,7 @@ class AuthServiceTest {
                         .build()
         );
 
-        LoginResponse response = authService.register(new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, "legacy-device-1"));
+        LoginResponse response = authService.register(new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, "legacy-device-1", null));
 
         assertThat(response.userId()).isEqualTo(1L);
         assertThat(legacyUser.getEmail()).isEqualTo("bikeoasis@example.com");
@@ -408,20 +446,25 @@ class AuthServiceTest {
     }
 
     private AuthService createAuthService(RefreshTokenStore store) {
+        AuthTokenService authTokenService = new AuthTokenService(
+                store,
+                jwtEncoder,
+                clock,
+                "bike-back-test",
+                900L,
+                1209600L
+        );
         return new AuthService(
                 userRepository,
                 kakaoAccountLinkRepository,
                 userConsentRepository,
                 accountDeletionService,
-                store,
+                betaInvitationService,
+                authTokenService,
                 kakaoAccountClient,
-                jwtEncoder,
                 jwtDecoder,
                 passwordEncoder,
-                clock,
-                "bike-back-test",
-                900L,
-                1209600L
+                clock
         );
     }
 

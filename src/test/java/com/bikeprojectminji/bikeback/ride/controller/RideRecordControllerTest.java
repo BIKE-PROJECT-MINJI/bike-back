@@ -3,7 +3,6 @@ package com.bikeprojectminji.bikeback.ride.controller;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -89,6 +88,83 @@ class RideRecordControllerTest {
     }
 
     @Test
+    @DisplayName("웹 HUD 요약 저장 API는 인증된 사용자의 요약 저장 결과를 응답한다")
+    void saveRideRecordSummaryReturnsWrappedResponse() throws Exception {
+        given(rideRecordService.saveRideRecordSummary(org.mockito.ArgumentMatchers.eq("1"), org.mockito.ArgumentMatchers.any()))
+                .willReturn(new RideRecordResponse(1002L, 1L, 0, "FINALIZING"));
+
+        mockMvc.perform(post("/api/v1/ride-records/summary")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "clientRideId": "web-hud-ride-001",
+                                  "startedAt": "2026-03-29T10:00:00+09:00",
+                                  "endedAt": "2026-03-29T11:00:00+09:00",
+                                  "summary": {
+                                    "distanceM": 18250,
+                                    "durationSec": 3600
+                                  }
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rideRecordId").value(1002))
+                .andExpect(jsonPath("$.data.routePointCount").value(0))
+                .andExpect(jsonPath("$.data.finalizationStatus").value("FINALIZING"));
+    }
+
+    @Test
+    @DisplayName("웹 HUD 요약 저장 API는 비로그인 요청이면 401을 반환한다")
+    void saveRideRecordSummaryReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(post("/api/v1/ride-records/summary")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    @DisplayName("웹 HUD trace 저장 API는 인증된 사용자의 trace 저장 결과를 응답한다")
+    void saveRideRecordTraceReturnsWrappedResponse() throws Exception {
+        given(rideRecordService.saveRideRecordTrace(org.mockito.ArgumentMatchers.eq("1"), org.mockito.ArgumentMatchers.eq(1002L), org.mockito.ArgumentMatchers.any()))
+                .willReturn(new RideRecordResponse(1002L, 1L, 2, "FINALIZING"));
+
+        mockMvc.perform(post("/api/v1/ride-records/1002/trace")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "routePoints": [
+                                    {
+                                      "pointOrder": 1,
+                                      "latitude": 37.5665,
+                                      "longitude": 126.9780
+                                    },
+                                    {
+                                      "pointOrder": 2,
+                                      "latitude": 37.5671,
+                                      "longitude": 126.9792
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rideRecordId").value(1002))
+                .andExpect(jsonPath("$.data.routePointCount").value(2))
+                .andExpect(jsonPath("$.data.finalizationStatus").value("FINALIZING"));
+    }
+
+    @Test
+    @DisplayName("웹 HUD trace 저장 API는 비로그인 요청이면 401을 반환한다")
+    void saveRideRecordTraceReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(post("/api/v1/ride-records/1002/trace")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
     @DisplayName("자유 주행 기록 목록 API는 인증된 사용자의 기록과 상태를 응답한다")
     void listRideRecordsReturnsWrappedResponse() throws Exception {
         given(rideRecordService.listRideRecords("1"))
@@ -110,6 +186,14 @@ class RideRecordControllerTest {
                 .andExpect(jsonPath("$.data.items[0].rideRecordId").value(1001))
                 .andExpect(jsonPath("$.data.items[0].finalizationStatus").value("READY"))
                 .andExpect(jsonPath("$.data.items[0].linkedCourseId").value(2001));
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 목록 API는 비로그인 요청이면 401을 반환한다")
+    void listRideRecordsReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(get("/api/v1/ride-records"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
     }
 
     @Test
@@ -138,6 +222,22 @@ class RideRecordControllerTest {
                 .andExpect(jsonPath("$.data.distanceM").value(18250))
                 .andExpect(jsonPath("$.data.durationSec").value(3600))
                 .andExpect(jsonPath("$.data.linkedCourseId").value(2001));
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 상세 API는 비로그인 요청이면 401을 반환한다")
+    void getRideRecordStatusReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(get("/api/v1/ride-records/1001"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 재생성 API는 비로그인 요청이면 401을 반환한다")
+    void regenerateRideRecordReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(post("/api/v1/ride-records/1001/regenerate"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
     }
 
     @Test

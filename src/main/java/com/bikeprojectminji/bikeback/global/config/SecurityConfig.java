@@ -36,9 +36,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/login").permitAll()
                         .requestMatchers("/api/v1/auth/kakao/login").permitAll()
                         .requestMatchers("/api/v1/auth/refresh").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/beta-invitations/verify").permitAll()
                         .requestMatchers("/health", "/health/monitor").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/weather/current").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/ai-routes/plan").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ai-routes/plan").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ai-routes/plan/from-text").permitAll()
                         .requestMatchers("/ws/v1/ai-routes/**").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses/featured").permitAll()
@@ -48,12 +50,22 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses/*/download").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses/*/ride-policy/evaluate").permitAll()
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/profile/me", "/api/v1/profile/me/activity-summary").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/profile/me/preferences").authenticated()
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/profile/me/preferences").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/me").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/account/me").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/location/me/recent").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/addresses/search").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/me/achievements").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/events", "/api/v1/events/batch").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/ride-records").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ride-records/summary").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/ride-records").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/ride-records/*").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ride-records/*/trace").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ride-records/*/regenerate").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/courses/*/reports").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses/*/share").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/courses/*").authenticated()
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/courses/*/visibility").authenticated()
@@ -64,11 +76,13 @@ public class SecurityConfig {
                         .authenticationEntryPoint((request, response, exception) -> {
                             response.setStatus(401);
                             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
                             response.getWriter().write(objectMapper.writeValueAsString(new ApiResponse<>(401, "로그인 정보가 필요합니다.", null)));
                         })
                         .accessDeniedHandler((request, response, exception) -> {
                             response.setStatus(403);
                             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
                             response.getWriter().write(objectMapper.writeValueAsString(new ApiResponse<>(403, "이 리소스에 접근할 권한이 없습니다.", null)));
                         })
                 );

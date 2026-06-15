@@ -44,7 +44,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("회원가입 API는 success 래퍼로 JWT 응답을 반환한다")
     void registerReturnsWrappedResponse() throws Exception {
-        RegisterRequest request = new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null);
+        RegisterRequest request = new RegisterRequest("bikeoasis@example.com", "example-password", "bikeoasis", null, null, null);
         given(authService.register(request))
                 .willReturn(new LoginResponse("Bearer", "access-token", "refresh-token", 900, 1209600, 1L, "bikeoasis"));
 
@@ -67,6 +67,29 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.data.accessExpiresInSec").value(900))
                 .andExpect(jsonPath("$.data.refreshExpiresInSec").value(1209600))
                 .andExpect(jsonPath("$.data.userId").value(1));
+    }
+
+    @Test
+    @DisplayName("회원가입 API는 초대 코드를 서비스 요청으로 전달한다")
+    void registerPassesInviteCode() throws Exception {
+        RegisterRequest request = new RegisterRequest("beta@example.com", "example-password", "beta-rider", null, null, "BIKE-2026");
+        given(authService.register(request))
+                .willReturn(new LoginResponse("Bearer", "access-token", "refresh-token", 900, 1209600, 2L, "beta-rider"));
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "beta@example.com",
+                                  "password": "example-password",
+                                  "displayName": "beta-rider",
+                                  "inviteCode": "BIKE-2026"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.userId").value(2))
+                .andExpect(jsonPath("$.data.displayName").value("beta-rider"));
     }
 
     @Test

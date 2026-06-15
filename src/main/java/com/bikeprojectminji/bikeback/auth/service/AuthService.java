@@ -9,28 +9,18 @@ import com.bikeprojectminji.bikeback.auth.dto.RegisterRequest;
 import com.bikeprojectminji.bikeback.auth.entity.KakaoAccountLinkEntity;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.auth.entity.UserConsentEntity;
+import com.bikeprojectminji.bikeback.beta.service.BetaInvitationService;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.UnauthorizedException;
 import com.bikeprojectminji.bikeback.auth.repository.KakaoAccountLinkRepository;
 import com.bikeprojectminji.bikeback.auth.repository.UserConsentRepository;
 import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.DateTimeException;
-import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.Period;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -39,8 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AuthService {
 
-    private static final String TOKEN_TYPE_BEARER = "Bearer";
-    private static final String TOKEN_TYPE_ACCESS = "access";
     private static final String TOKEN_TYPE_REFRESH = "refresh";
 
     // 사용자 계정 aggregate는 auth 도메인이 소유하고,
@@ -50,44 +38,35 @@ public class AuthService {
     private final KakaoAccountLinkRepository kakaoAccountLinkRepository;
     private final UserConsentRepository userConsentRepository;
     private final AccountDeletionService accountDeletionService;
-    private final RefreshTokenStore refreshTokenStore;
+    private final BetaInvitationService betaInvitationService;
+    private final AuthTokenService authTokenService;
     private final KakaoAccountClient kakaoAccountClient;
-    private final JwtEncoder jwtEncoder;
     private final JwtDecoder jwtDecoder;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
-    private final String issuer;
-    private final long accessTokenValiditySec;
-    private final long refreshTokenValiditySec;
 
     public AuthService(
             UserRepository userRepository,
             KakaoAccountLinkRepository kakaoAccountLinkRepository,
             UserConsentRepository userConsentRepository,
             AccountDeletionService accountDeletionService,
-            RefreshTokenStore refreshTokenStore,
+            BetaInvitationService betaInvitationService,
+            AuthTokenService authTokenService,
             KakaoAccountClient kakaoAccountClient,
-            JwtEncoder jwtEncoder,
             JwtDecoder jwtDecoder,
             PasswordEncoder passwordEncoder,
-            Clock clock,
-            @Value("${auth.jwt.issuer}") String issuer,
-            @Value("${auth.jwt.token-validity-sec}") long accessTokenValiditySec,
-            @Value("${auth.jwt.refresh-token-validity-sec:1209600}") long refreshTokenValiditySec
+            Clock clock
     ) {
         this.userRepository = userRepository;
         this.kakaoAccountLinkRepository = kakaoAccountLinkRepository;
         this.userConsentRepository = userConsentRepository;
         this.accountDeletionService = accountDeletionService;
-        this.refreshTokenStore = refreshTokenStore;
+        this.betaInvitationService = betaInvitationService;
+        this.authTokenService = authTokenService;
         this.kakaoAccountClient = kakaoAccountClient;
-        this.jwtEncoder = jwtEncoder;
         this.jwtDecoder = jwtDecoder;
         this.passwordEncoder = passwordEncoder;
         this.clock = clock;
-        this.issuer = issuer;
-        this.accessTokenValiditySec = accessTokenValiditySec;
-        this.refreshTokenValiditySec = refreshTokenValiditySec;
     }
 
     @Transactional
@@ -99,7 +78,8 @@ public class AuthService {
         }
 
         UserEntity savedUser = userRepository.save(resolveRegisterUser(request));
-        return issueLoginResponse(savedUser);
+        grantBetaAccessIfInviteCodeProvided(request, savedUser);
+        return authTokenService.issueLoginResponse(savedUser);
     }
 
     @Transactional(readOnly = true)
@@ -113,7 +93,7 @@ public class AuthService {
             throw new UnauthorizedException("이메일 또는 비밀번호가 올바르지 않습니다.");
         }
 
-        return issueLoginResponse(user);
+        return authTokenService.issueLoginResponse(user);
     }
 
     @Transactional
@@ -124,7 +104,7 @@ public class AuthService {
                 .map(link -> updateLinkedKakaoUser(link, profile))
                 .orElseGet(() -> createKakaoUser(profile));
         upsertUserConsent(user.getId(), request, ageBand);
-        return issueLoginResponse(user);
+        return authTokenService.issueLoginResponse(user);
     }
 
     @Transactional(readOnly = true)
@@ -134,9 +114,9 @@ public class AuthService {
         try {
             org.springframework.security.oauth2.jwt.Jwt jwt = jwtDecoder.decode(request.refreshToken());
             validateRefreshToken(jwt);
-            validateStoredRefreshToken(jwt, request.refreshToken());
+            authTokenService.validateStoredRefreshToken(jwt, request.refreshToken());
             UserEntity user = findUserBySubject(jwt.getSubject());
-            return issueLoginResponse(user);
+            return authTokenService.issueLoginResponse(user);
         } catch (JwtException | IllegalArgumentException exception) {
             throw new UnauthorizedException("로그인 정보가 필요합니다.");
         }
@@ -152,7 +132,7 @@ public class AuthService {
 
     public void logout(String subject) {
         UserEntity user = findUserBySubject(subject);
-        refreshTokenStore.delete(String.valueOf(user.getId()));
+        authTokenService.deleteRefreshToken(String.valueOf(user.getId()));
     }
 
     @Transactional
@@ -161,7 +141,7 @@ public class AuthService {
         accountDeletionService.deleteOwnedData(user.getId());
         kakaoAccountLinkRepository.deleteByUserId(user.getId());
         userConsentRepository.deleteByUserId(user.getId());
-        refreshTokenStore.delete(String.valueOf(user.getId()));
+        authTokenService.deleteRefreshToken(String.valueOf(user.getId()));
         user.markDeleted(clock);
     }
 
@@ -177,23 +157,6 @@ public class AuthService {
             return userRepository.findByExternalId(subject)
                     .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다."));
         }
-    }
-
-    private LoginResponse issueLoginResponse(UserEntity user) {
-        // 로그인/회원가입/리프레시는 모두 같은 토큰 응답 계약을 써야 하므로,
-        // access/refresh 발급을 한 메서드에서 묶어 응답 필드 정합성을 유지한다.
-        String accessToken = issueToken(user, TOKEN_TYPE_ACCESS, accessTokenValiditySec);
-        String refreshToken = issueToken(user, TOKEN_TYPE_REFRESH, refreshTokenValiditySec);
-        saveRefreshTokenSession(user, refreshToken);
-        return new LoginResponse(
-                TOKEN_TYPE_BEARER,
-                accessToken,
-                refreshToken,
-                accessTokenValiditySec,
-                refreshTokenValiditySec,
-                user.getId(),
-                user.getDisplayName()
-        );
     }
 
     private UserEntity updateLinkedKakaoUser(KakaoAccountLinkEntity link, KakaoAccountProfile profile) {
@@ -255,79 +218,12 @@ public class AuthService {
         return "gaja-rider";
     }
 
-    private String issueToken(UserEntity user, String tokenType, long validitySec) {
-        // 토큰은 현재 userId를 subject로 고정하고,
-        // 앱이 자주 쓰는 email/displayName과 토큰 타입만 claim으로 최소 포함한다.
-        Instant issuedAt = clock.instant();
-        Instant expiresAt = issuedAt.plusSeconds(validitySec);
-
-        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256)
-                .type("JWT")
-                .build();
-
-        JwtClaimsSet.Builder claimsBuilder = JwtClaimsSet.builder()
-                .issuer(issuer)
-                .issuedAt(issuedAt)
-                .expiresAt(expiresAt)
-                .subject(String.valueOf(user.getId()))
-                .claim("tokenType", tokenType)
-                .claim("displayName", user.getDisplayName());
-        if (user.getEmail() != null) {
-            claimsBuilder.claim("email", user.getEmail());
-        }
-
-        if (TOKEN_TYPE_REFRESH.equals(tokenType)) {
-            claimsBuilder.claim("jti", UUID.randomUUID().toString());
-        }
-
-        JwtClaimsSet claims = claimsBuilder.build();
-
-        return jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
-    }
-
     private void validateRefreshToken(org.springframework.security.oauth2.jwt.Jwt jwt) {
         if (!TOKEN_TYPE_REFRESH.equals(jwt.getClaimAsString("tokenType"))) {
             throw new UnauthorizedException("로그인 정보가 필요합니다.");
         }
         if (jwt.getSubject() == null || jwt.getSubject().isBlank()) {
             throw new UnauthorizedException("로그인 정보가 필요합니다.");
-        }
-    }
-
-    private void validateStoredRefreshToken(org.springframework.security.oauth2.jwt.Jwt jwt, String refreshToken) {
-        // refresh token은 auth 도메인이 마지막 유효 토큰 해시를 별도로 보관하고,
-        // 요청 토큰이 현재 활성 세션과 다르면 재사용 또는 위조로 간주해 401로 차단한다.
-        RefreshTokenSession storedSession = refreshTokenStore.findBySubject(jwt.getSubject())
-                .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다."));
-
-        if (!jwt.getSubject().equals(storedSession.subject())) {
-            throw new UnauthorizedException("로그인 정보가 필요합니다.");
-        }
-
-        if (!hashToken(refreshToken).equals(storedSession.tokenHash())) {
-            throw new UnauthorizedException("로그인 정보가 필요합니다.");
-        }
-    }
-
-    private void saveRefreshTokenSession(UserEntity user, String refreshToken) {
-        refreshTokenStore.save(
-                String.valueOf(user.getId()),
-                new RefreshTokenSession(String.valueOf(user.getId()), hashToken(refreshToken)),
-                Duration.ofSeconds(refreshTokenValiditySec)
-        );
-    }
-
-    private String hashToken(String token) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(token.getBytes(StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder();
-            for (byte current : bytes) {
-                builder.append(String.format("%02x", current));
-            }
-            return builder.toString();
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("refresh token 해시에 실패했습니다.", exception);
         }
     }
 
@@ -346,5 +242,13 @@ public class AuthService {
         }
         legacyUser.claimLocalAccount(request.email(), passwordHash, request.displayName(), request.profileImageUrl());
         return legacyUser;
+    }
+
+    private void grantBetaAccessIfInviteCodeProvided(RegisterRequest request, UserEntity user) {
+        if (request.inviteCode() == null || request.inviteCode().isBlank()) {
+            return;
+        }
+        betaInvitationService.consumeForUser(request.inviteCode(), user.getId());
+        user.grantBetaAccess();
     }
 }

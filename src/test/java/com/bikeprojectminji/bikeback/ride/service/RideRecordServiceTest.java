@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.location.service.RecentLocationCacheService;
+import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordSummaryRequest;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
+import com.bikeprojectminji.bikeback.ride.dto.RideRecordTraceRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordPointRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordSummaryRequest;
@@ -96,6 +99,85 @@ class RideRecordServiceTest {
         assertThat(response.rideRecordId()).isEqualTo(1001L);
         assertThat(response.finalizationStatus()).isEqualTo("FINALIZING");
         verify(rideRecordFinalizationService).requestFinalization(1001L);
+    }
+
+    @Test
+    @DisplayName("웹 HUD 요약 저장은 route point 없이 기록만 저장하고 후처리를 요청하지 않는다")
+    void saveRideRecordSummaryDoesNotPersistPointsOrRequestFinalization() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity savedRideRecord = new RideRecordEntity(
+                1L,
+                "web-hud-ride-001",
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                18250,
+                3600
+        );
+        ReflectionTestUtils.setField(savedRideRecord, "id", 1002L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.save(any(RideRecordEntity.class))).willReturn(savedRideRecord);
+
+        RideRecordResponse response = rideRecordService.saveRideRecordSummary("1", new CreateRideRecordSummaryRequest(
+                "web-hud-ride-001",
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                new RideRecordSummaryRequest(18250, 3600)
+        ));
+
+        assertThat(response.rideRecordId()).isEqualTo(1002L);
+        assertThat(response.ownerUserId()).isEqualTo(1L);
+        assertThat(response.routePointCount()).isZero();
+        assertThat(response.finalizationStatus()).isEqualTo("FINALIZING");
+        verify(rideRecordPointRepository, never()).saveAll(any());
+        verifyNoInteractions(recentLocationCacheService, rideRecordFinalizationService);
+    }
+
+    @Test
+    @DisplayName("웹 HUD trace 저장은 기존 요약 기록에 포인트를 저장하고 후처리를 요청한다")
+    void saveRideRecordTracePersistsPointsAndRequestsFinalization() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity rideRecord = new RideRecordEntity(
+                1L,
+                "web-hud-ride-001",
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                18250,
+                3600
+        );
+        ReflectionTestUtils.setField(rideRecord, "id", 1002L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(1002L, 1L)).willReturn(Optional.of(rideRecord));
+        given(rideRecordPointRepository.countByRideRecordId(1002L)).willReturn(0L);
+        given(rideRecordRepository.save(any(RideRecordEntity.class))).willReturn(rideRecord);
+
+        RideRecordResponse response = rideRecordService.saveRideRecordTrace("1", 1002L, new RideRecordTraceRequest(List.of(
+                new RideRecordPointRequest(2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792)),
+                new RideRecordPointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780))
+        )));
+
+        assertThat(response.rideRecordId()).isEqualTo(1002L);
+        assertThat(response.routePointCount()).isEqualTo(2);
+        assertThat(response.finalizationStatus()).isEqualTo("FINALIZING");
+        verify(rideRecordPointRepository).saveAll(org.mockito.ArgumentMatchers.argThat(points -> {
+            java.util.List<com.bikeprojectminji.bikeback.ride.entity.RideRecordPointEntity> savedPoints = new java.util.ArrayList<>();
+            points.forEach(savedPoints::add);
+            return savedPoints.size() == 2
+                    && savedPoints.get(0).getPointOrder().equals(1)
+                    && savedPoints.get(1).getPointOrder().equals(2);
+        }));
+        verify(recentLocationCacheService).saveCompleted(
+                eq("1"),
+                eq(1002L),
+                eq(2),
+                eq(BigDecimal.valueOf(37.5671)),
+                eq(BigDecimal.valueOf(126.9792)),
+                eq(OffsetDateTime.parse("2026-03-29T11:00:00+09:00"))
+        );
+        verify(rideRecordFinalizationService).requestFinalization(1002L);
     }
 
     @Test
@@ -261,5 +343,30 @@ class RideRecordServiceTest {
         assertThatThrownBy(() -> rideRecordService.regenerateRideRecord("1", 999L))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("자유 주행 기록을 찾을 수 없습니다.");
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 재처리는 raw point가 없으면 BadRequestException을 던진다")
+    void regenerateRideRecordRejectsSummaryOnlyRecord() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity rideRecord = new RideRecordEntity(
+                1L,
+                "web-hud-ride-001",
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                18250,
+                3600
+        );
+        ReflectionTestUtils.setField(rideRecord, "id", 1002L);
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(1002L, 1L)).willReturn(Optional.of(rideRecord));
+        given(rideRecordPointRepository.countByRideRecordId(1002L)).willReturn(0L);
+
+        assertThatThrownBy(() -> rideRecordService.regenerateRideRecord("1", 1002L))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("trace가 없는 자유 주행 기록은 재처리할 수 없습니다.");
+
+        verifyNoInteractions(rideRecordFinalizationService);
     }
 }

@@ -43,6 +43,13 @@ public class GlobalExceptionHandler {
                 .body(new ApiResponse<>(403, exception.getMessage(), null));
     }
 
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConflict(ConflictException exception, HttpServletRequest request) {
+        log.warn("conflict request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiResponse<>(409, exception.getMessage(), null));
+    }
+
     @ExceptionHandler(TooManyRequestsException.class)
     public ResponseEntity<ApiResponse<Void>> handleTooManyRequests(TooManyRequestsException exception, HttpServletRequest request) {
         log.warn("too_many_requests request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());

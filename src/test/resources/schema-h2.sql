@@ -10,6 +10,7 @@ CREATE TABLE users (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     account_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    beta_access_granted BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at TIMESTAMP WITH TIME ZONE
 );
 
@@ -32,6 +33,15 @@ CREATE TABLE user_consents (
     age_verified_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     consented_at TIMESTAMP WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE beta_invitation_codes (
+    id BIGSERIAL PRIMARY KEY,
+    code VARCHAR(40) NOT NULL UNIQUE,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    used_by_user_id BIGINT,
+    used_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
 CREATE TABLE user_preference (
