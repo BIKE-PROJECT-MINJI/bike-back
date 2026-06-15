@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Bean;
 
 @SpringBootTest(classes = {
         BicycleRoutingService.class,
+        BicycleRouteQualityValidator.class,
         BicycleRoutingServiceIntegrationTest.TestRoutingConfig.class
 })
 class BicycleRoutingServiceIntegrationTest {
@@ -45,6 +46,7 @@ class BicycleRoutingServiceIntegrationTest {
         assertThat(plan.status()).isEqualTo("SUCCESS");
         assertThat(plan.provider()).isEqualTo("KAKAO_MOBILITY");
         assertThat(plan.fallbackUsed()).isFalse();
+        assertThat(plan.qualityStatus()).isEqualTo("VALID_WITH_WARNINGS");
         assertThat(plan.candidates())
                 .extracting(BicycleRouteCandidate::routeType)
                 .containsExactly("RECOMMENDED", "SCENIC", "BIKE_PATH");
@@ -61,6 +63,7 @@ class BicycleRoutingServiceIntegrationTest {
         assertThat(plan.status()).isEqualTo("FALLBACK_USED");
         assertThat(plan.provider()).isEqualTo("FAKE");
         assertThat(plan.fallbackUsed()).isTrue();
+        assertThat(plan.fallbackReason()).contains("primary provider");
         assertThat(plan.candidates()).isNotEmpty();
     }
 

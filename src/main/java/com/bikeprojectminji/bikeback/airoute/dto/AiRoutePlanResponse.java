@@ -19,7 +19,8 @@ public record AiRoutePlanResponse(
         RecommendationExplanationResponse explanation,
         List<ProviderEvidenceBadgeResponse> evidenceBadges,
         boolean aiGenerated,
-        AiRouteElevationSummaryResponse elevationSummary
+        AiRouteElevationSummaryResponse elevationSummary,
+        AiRouteRoutingMetadataResponse routingMetadata
 ) {
 
     public AiRoutePlanResponse(
@@ -53,6 +54,44 @@ public record AiRoutePlanResponse(
                 explanation,
                 evidenceBadges,
                 aiGenerated,
+                null,
+                null
+        );
+    }
+
+    public AiRoutePlanResponse(
+            String planId,
+            String status,
+            String summary,
+            String confidence,
+            WeatherData weather,
+            WindData wind,
+            List<AiRoutePointResponse> routePoints,
+            List<AiRouteRiskResponse> risks,
+            List<String> actions,
+            int recommendationScore,
+            RecommendationScoreResponse scoreBreakdown,
+            RecommendationExplanationResponse explanation,
+            List<ProviderEvidenceBadgeResponse> evidenceBadges,
+            boolean aiGenerated,
+            AiRouteElevationSummaryResponse elevationSummary
+    ) {
+        this(
+                planId,
+                status,
+                summary,
+                confidence,
+                weather,
+                wind,
+                routePoints,
+                risks,
+                actions,
+                recommendationScore,
+                scoreBreakdown,
+                explanation,
+                evidenceBadges,
+                aiGenerated,
+                elevationSummary,
                 null
         );
     }

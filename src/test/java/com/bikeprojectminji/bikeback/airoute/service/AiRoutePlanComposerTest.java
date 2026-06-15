@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteCandidate;
+import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePlan;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePoint;
 import com.bikeprojectminji.bikeback.routing.service.ElevationSummary;
 import com.bikeprojectminji.bikeback.routing.service.RouteEvidenceBadge;
@@ -120,6 +121,41 @@ class AiRoutePlanComposerTest {
         assertThat(response.scoreBreakdown().unknownPenalty()).isGreaterThan(0);
         assertThat(response.evidenceBadges()).extracting("source")
                 .contains("graphhopper.road_class", "graphhopper.surface", "graphhopper.elevation");
+    }
+
+    @Test
+    @DisplayName("route plan metadata는 AI route 응답에 fallback과 품질 상태로 포함된다")
+    void composeRouteCandidateIncludesRoutingMetadata() {
+        AiRoutePlanRequest request = new AiRoutePlanRequest(
+                BigDecimal.valueOf(37.48),
+                BigDecimal.valueOf(126.95),
+                BigDecimal.valueOf(37.50),
+                BigDecimal.valueOf(126.98),
+                "관악 순환",
+                "BIKE_PATH_FIRST"
+        );
+        BicycleRoutePlan routePlan = new BicycleRoutePlan(
+                "FALLBACK_USED",
+                "GRAPHHOPPER",
+                true,
+                "self-host 실패 후 hosted GraphHopper 경로 후보를 찾았습니다.",
+                List.of(climbCandidate()),
+                "VALID_WITH_WARNINGS",
+                "고도 값은 있지만 일부 노면 detail이 부족합니다.",
+                "self-host 실패 후 hosted GraphHopper 사용"
+        );
+
+        AiRoutePlanResponse response = composer.composeWithRouteCandidate(
+                request,
+                new AiRouteConditionContext(Optional.empty(), "공사 정보 미확인", "노면 정보 미확인"),
+                climbCandidate(),
+                routePlan
+        );
+
+        assertThat(response.routingMetadata().provider()).isEqualTo("GRAPHHOPPER");
+        assertThat(response.routingMetadata().fallbackUsed()).isTrue();
+        assertThat(response.routingMetadata().fallbackReason()).contains("hosted GraphHopper");
+        assertThat(response.routingMetadata().qualityStatus()).isEqualTo("VALID_WITH_WARNINGS");
     }
 
     @Test

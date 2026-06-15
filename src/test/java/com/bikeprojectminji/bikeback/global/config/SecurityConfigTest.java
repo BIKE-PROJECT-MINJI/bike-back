@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 class SecurityConfigTest {
 
@@ -32,6 +34,21 @@ class SecurityConfigTest {
 
         assertThatThrownBy(() -> securityConfig.accessTokenAuthentication(refreshToken))
                 .isInstanceOf(BadCredentialsException.class);
+    }
+
+    @Test
+    @DisplayName("로컬 웹 콘솔 origin은 API CORS 허용 origin으로 등록된다")
+    void localWebConsoleOriginIsCorsAllowed() {
+        UrlBasedCorsConfigurationSource source = (UrlBasedCorsConfigurationSource) securityConfig.corsConfigurationSource(
+                "http://127.0.0.1:8081,http://localhost:8081"
+        );
+
+        CorsConfiguration configuration = source.getCorsConfigurations().get("/**");
+
+        assertThat(configuration.getAllowedOrigins())
+                .containsExactly("http://127.0.0.1:8081", "http://localhost:8081");
+        assertThat(configuration.getAllowedMethods()).contains("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
+        assertThat(configuration.getAllowedHeaders()).contains("Authorization", "Content-Type");
     }
 
     private Jwt jwt(String tokenType, List<String> roles) {

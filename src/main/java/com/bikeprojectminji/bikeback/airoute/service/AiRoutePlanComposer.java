@@ -5,8 +5,10 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteElevationSummaryResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePointResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteRiskResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRouteRoutingMetadataResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.ProviderEvidenceBadgeResponse;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteCandidate;
+import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePlan;
 import com.bikeprojectminji.bikeback.routing.service.ElevationSummary;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
 import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
@@ -70,6 +72,15 @@ public class AiRoutePlanComposer {
             AiRouteConditionContext context,
             BicycleRouteCandidate candidate
     ) {
+        return composeWithRouteCandidate(request, context, candidate, null);
+    }
+
+    public AiRoutePlanResponse composeWithRouteCandidate(
+            AiRoutePlanRequest request,
+            AiRouteConditionContext context,
+            BicycleRouteCandidate candidate,
+            BicycleRoutePlan routePlan
+    ) {
         Optional<CurrentWeatherResponse> weather = context.weather();
         List<AiRouteRiskResponse> risks = detailsFactory.buildRisks(weather, context);
         List<ProviderEvidenceBadgeResponse> evidenceBadges = detailsFactory.buildEvidenceBadges(weather, context);
@@ -105,7 +116,8 @@ public class AiRoutePlanComposer {
                 detailsFactory.buildExplanation(request, score, evidenceBadges),
                 evidenceBadges,
                 false,
-                toElevationSummaryResponse(candidate.elevationSummary())
+                toElevationSummaryResponse(candidate.elevationSummary()),
+                AiRouteRoutingMetadataResponse.from(routePlan)
         );
     }
 

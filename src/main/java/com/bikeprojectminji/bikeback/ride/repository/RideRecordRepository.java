@@ -25,6 +25,8 @@ public interface RideRecordRepository extends JpaRepository<RideRecordEntity, Lo
 
     Optional<RideRecordEntity> findFirstByOwnerUserIdAndFinalizationStatusOrderByEndedAtDescIdDesc(Long ownerUserId, String finalizationStatus);
 
+    List<RideRecordEntity> findByEndedAtLessThanEqual(OffsetDateTime endedAt);
+
     @Query("""
             select new com.bikeprojectminji.bikeback.ride.repository.RideRecordActivityAggregate(
                 count(r),

@@ -196,6 +196,10 @@ public class CourseEntity {
         this.shareToken = null;
     }
 
+    public void detachRideRecordSource() {
+        this.sourceRideRecordId = null;
+    }
+
     public Long getId() {
         return id;
     }

@@ -2,6 +2,7 @@ package com.bikeprojectminji.bikeback.ride.controller;
 
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -13,6 +14,7 @@ import com.bikeprojectminji.bikeback.ride.dto.RideRecordListItemResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordListResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.ride.service.RideRecordDeletionService;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.DisplayName;
@@ -39,6 +41,9 @@ class RideRecordControllerTest {
 
     @MockitoBean
     private RideRecordService rideRecordService;
+
+    @MockitoBean
+    private RideRecordDeletionService rideRecordDeletionService;
 
     @Test
     @DisplayName("자유 주행 기록 저장 API는 인증된 사용자의 저장 결과를 응답한다")
@@ -251,5 +256,23 @@ class RideRecordControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404))
                 .andExpect(jsonPath("$.message").value("자유 주행 기록을 찾을 수 없습니다."));
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 삭제 API는 인증된 사용자의 기록을 삭제하고 204를 반환한다")
+    void deleteRideRecordReturnsNoContent() throws Exception {
+        mockMvc.perform(delete("/api/v1/ride-records/1001")
+                        .with(jwt().jwt(jwt -> jwt.subject("1"))))
+                .andExpect(status().isNoContent());
+
+        org.mockito.Mockito.verify(rideRecordDeletionService).deleteRideRecord("1", 1001L);
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 삭제 API는 비로그인 요청이면 401을 반환한다")
+    void deleteRideRecordReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(delete("/api/v1/ride-records/1001"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
     }
 }
