@@ -14,11 +14,13 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.client.RestClient;
 
 @Component
+@ConditionalOnProperty(prefix = "weather", name = "provider", havingValue = "open-meteo", matchIfMissing = true)
 public class OpenMeteoWeatherProvider implements WeatherProviderPort {
 
     private static final Logger log = LoggerFactory.getLogger(OpenMeteoWeatherProvider.class);

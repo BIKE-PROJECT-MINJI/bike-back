@@ -7,7 +7,10 @@ import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusRespon
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordListResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordTraceRequest;
+import com.bikeprojectminji.bikeback.ride.service.RideRecordDeletionService;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -22,9 +25,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class RideRecordController {
 
     private final RideRecordService rideRecordService;
+    private final RideRecordDeletionService rideRecordDeletionService;
 
-    public RideRecordController(RideRecordService rideRecordService) {
+    public RideRecordController(RideRecordService rideRecordService, RideRecordDeletionService rideRecordDeletionService) {
         this.rideRecordService = rideRecordService;
+        this.rideRecordDeletionService = rideRecordDeletionService;
     }
 
     @PostMapping
@@ -71,5 +76,14 @@ public class RideRecordController {
             @PathVariable Long rideRecordId
     ) {
         return ApiResponse.success(rideRecordService.regenerateRideRecord(jwt.getSubject(), rideRecordId));
+    }
+
+    @DeleteMapping("/{rideRecordId}")
+    public ResponseEntity<Void> deleteRideRecord(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long rideRecordId
+    ) {
+        rideRecordDeletionService.deleteRideRecord(jwt.getSubject(), rideRecordId);
+        return ResponseEntity.noContent().build();
     }
 }

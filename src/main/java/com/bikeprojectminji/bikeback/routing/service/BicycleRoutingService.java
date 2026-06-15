@@ -3,15 +3,23 @@ package com.bikeprojectminji.bikeback.routing.service;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import java.math.BigDecimal;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
 public class BicycleRoutingService {
 
     private final List<BicycleRoutingClient> routingClients;
+    private final BicycleRouteQualityValidator qualityValidator;
 
     public BicycleRoutingService(List<BicycleRoutingClient> routingClients) {
+        this(routingClients, new BicycleRouteQualityValidator());
+    }
+
+    @Autowired
+    public BicycleRoutingService(List<BicycleRoutingClient> routingClients, BicycleRouteQualityValidator qualityValidator) {
         this.routingClients = routingClients;
+        this.qualityValidator = qualityValidator;
     }
 
     public BicycleRoutePlan route(BicycleRouteRequest request) {
@@ -19,12 +27,20 @@ public class BicycleRoutingService {
         for (int index = 0; index < routingClients.size(); index++) {
             BicycleRoutingProviderResult result = routingClients.get(index).route(request);
             if ("SUCCESS".equals(result.status()) && !result.candidates().isEmpty()) {
+                BicycleRouteQuality quality = qualityValidator.validate(result.candidates().get(0));
+                if (!quality.usable()) {
+                    continue;
+                }
+                boolean fallbackUsed = index > 0 || result.fallbackUsed();
                 return new BicycleRoutePlan(
-                        index == 0 ? "SUCCESS" : "FALLBACK_USED",
+                        fallbackUsed ? "FALLBACK_USED" : "SUCCESS",
                         result.provider(),
-                        index > 0,
-                        index == 0 ? "자전거 경로 후보를 찾았습니다." : "기본 provider 실패 후 fallback 경로 후보를 찾았습니다.",
-                        result.candidates()
+                        fallbackUsed,
+                        fallbackUsed ? "기본 provider 실패 후 fallback 경로 후보를 찾았습니다." : "자전거 경로 후보를 찾았습니다.",
+                        result.candidates(),
+                        quality.status(),
+                        quality.message(),
+                        fallbackReason(index, result)
                 );
             }
         }
@@ -33,8 +49,21 @@ public class BicycleRoutingService {
                 "NONE",
                 routingClients.size() > 1,
                 "자전거 경로 provider를 사용할 수 없습니다.",
-                List.of()
+                List.of(),
+                "INVALID",
+                "사용 가능한 경로 후보가 없습니다.",
+                routingClients.size() > 1 ? "모든 provider가 실패했습니다." : null
         );
+    }
+
+    private String fallbackReason(int providerIndex, BicycleRoutingProviderResult result) {
+        if (result.fallbackReason() != null && !result.fallbackReason().isBlank()) {
+            return result.fallbackReason();
+        }
+        if (providerIndex > 0) {
+            return "primary provider 실패 후 fallback provider 사용";
+        }
+        return null;
     }
 
     private void validate(BicycleRouteRequest request) {

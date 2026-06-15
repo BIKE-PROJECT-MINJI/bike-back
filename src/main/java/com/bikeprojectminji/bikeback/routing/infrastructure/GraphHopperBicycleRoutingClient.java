@@ -72,10 +72,18 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
             return providerFailure("missing_base_url");
         }
         BicycleRoutingProviderResult lastResult = BicycleRoutingProviderResult.providerFailure(PROVIDER);
-        for (String baseUrl : baseUrls) {
+        for (int baseUrlIndex = 0; baseUrlIndex < baseUrls.size(); baseUrlIndex++) {
+            String baseUrl = baseUrls.get(baseUrlIndex);
             for (int attempt = 0; attempt < retryMaxAttempts; attempt++) {
                 lastResult = routeOnce(baseUrl, request);
                 if ("SUCCESS".equals(lastResult.status())) {
+                    if (baseUrlIndex > 0) {
+                        return BicycleRoutingProviderResult.successWithFallback(
+                                PROVIDER,
+                                lastResult.candidates(),
+                                "self-host 실패 후 hosted GraphHopper 사용"
+                        );
+                    }
                     return lastResult;
                 }
             }

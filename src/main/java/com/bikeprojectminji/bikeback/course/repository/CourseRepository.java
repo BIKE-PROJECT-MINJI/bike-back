@@ -22,6 +22,8 @@ public interface CourseRepository extends JpaRepository<CourseEntity, Long>, Cou
 
     List<CourseEntity> findByOwnerUserIdAndSourceRideRecordIdIn(Long ownerUserId, List<Long> sourceRideRecordIds);
 
+    List<CourseEntity> findBySourceRideRecordIdIn(List<Long> sourceRideRecordIds);
+
     List<CourseEntity> findTop20ByVisibilityAndReportHiddenFalseOrderByIdDesc(CourseVisibility visibility);
 
     List<CourseEntity> findTop20ByVisibilityAndReportHiddenFalseAndTitleContainingIgnoreCaseOrderByIdDesc(CourseVisibility visibility, String title);

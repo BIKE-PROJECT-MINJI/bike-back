@@ -127,7 +127,8 @@ public class AiRoutePlannerService {
         return Optional.of(aiRoutePlanComposer.composeWithRouteCandidate(
                 request,
                 context,
-                routePlan.candidates().get(0)
+                routePlan.candidates().get(0),
+                routePlan
         ));
     }
 

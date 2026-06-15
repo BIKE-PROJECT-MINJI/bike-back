@@ -216,6 +216,8 @@ class GraphHopperBicycleRoutingClientTest {
         assertThat(selfHostedHits).hasValue(2);
         assertThat(result.status()).isEqualTo("SUCCESS");
         assertThat(result.provider()).isEqualTo("GRAPHHOPPER");
+        assertThat(result.fallbackUsed()).isTrue();
+        assertThat(result.fallbackReason()).contains("hosted GraphHopper");
         assertThat(result.candidates()).hasSize(1);
         assertThat(result.candidates().get(0).polyline()).hasSize(2);
     }
