@@ -9,7 +9,10 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -53,6 +56,46 @@ public class CourseRepositoryImpl implements CourseRepositoryCustom {
     }
 
     @Override
+    public List<CourseListRow> findPublicListPageAfter(Long cursorId, int limitPlusOne) {
+        if (cursorId == null) {
+            Query query = entityManager.createNativeQuery("""
+                    select course_id, title, distance_km, estimated_duration_min
+                    from course_list_summaries
+                    order by display_order asc, course_id asc
+                    limit :limit
+                    """);
+            query.setParameter("limit", limitPlusOne);
+            return toCourseListRows(query.getResultList());
+        }
+
+        List<?> anchors = entityManager.createNativeQuery("""
+                        select course_id, display_order
+                        from course_list_summaries where course_id = :id
+                        """)
+                .setParameter("id", cursorId)
+                .getResultList();
+        if (anchors.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        CoursePageCursorAnchor anchor = toCursorAnchor(anchors.get(0));
+        Query query = entityManager.createNativeQuery("""
+                select course_id, title, distance_km, estimated_duration_min
+                from course_list_summaries
+                where (
+                    display_order > :displayOrder
+                    or (display_order = :displayOrder and course_id > :id)
+                )
+                order by display_order asc, course_id asc
+                limit :limit
+                """);
+        query.setParameter("displayOrder", anchor.displayOrder());
+        query.setParameter("id", anchor.id());
+        query.setParameter("limit", limitPlusOne);
+        return toCourseListRows(query.getResultList());
+    }
+
+    @Override
     public List<FeaturedCourseDistanceCandidate> findFeaturedCoursesNear(BigDecimal lat, BigDecimal lon, int limit) {
         if (lat == null || lon == null || limit < 1) {
             return List.of();
@@ -83,15 +126,62 @@ public class CourseRepositoryImpl implements CourseRepositoryCustom {
         query.setParameter("limit", limit);
 
         List<?> rows = query.getResultList();
-        List<FeaturedCourseDistanceCandidate> candidates = new ArrayList<>();
+        List<FeaturedCourseDistanceRow> distanceRows = new ArrayList<>();
         for (Object row : rows) {
             Object[] columns = (Object[]) row;
-            Long courseId = ((Number) columns[0]).longValue();
-            CourseEntity course = entityManager.find(CourseEntity.class, courseId);
+            distanceRows.add(new FeaturedCourseDistanceRow(
+                    ((Number) columns[0]).longValue(),
+                    ((Number) columns[1]).intValue()
+            ));
+        }
+        if (distanceRows.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> courseIds = distanceRows.stream()
+                .map(FeaturedCourseDistanceRow::courseId)
+                .toList();
+        Map<Long, CourseEntity> coursesById = entityManager.createQuery(
+                        "select c from CourseEntity c where c.id in :ids",
+                        CourseEntity.class
+                )
+                .setParameter("ids", courseIds)
+                .getResultList()
+                .stream()
+                .collect(Collectors.toMap(CourseEntity::getId, Function.identity()));
+
+        List<FeaturedCourseDistanceCandidate> candidates = new ArrayList<>();
+        for (FeaturedCourseDistanceRow distanceRow : distanceRows) {
+            CourseEntity course = coursesById.get(distanceRow.courseId());
             if (course != null) {
-                candidates.add(new FeaturedCourseDistanceCandidate(course, ((Number) columns[1]).intValue()));
+                candidates.add(new FeaturedCourseDistanceCandidate(course, distanceRow.distanceFromUserM()));
             }
         }
         return candidates;
+    }
+
+    private record FeaturedCourseDistanceRow(Long courseId, Integer distanceFromUserM) {
+    }
+
+    private List<CourseListRow> toCourseListRows(List<?> rawRows) {
+        List<CourseListRow> rows = new ArrayList<>();
+        for (Object rawRow : rawRows) {
+            Object[] columns = (Object[]) rawRow;
+            rows.add(new CourseListRow(
+                    ((Number) columns[0]).longValue(),
+                    (String) columns[1],
+                    (BigDecimal) columns[2],
+                    ((Number) columns[3]).intValue()
+            ));
+        }
+        return rows;
+    }
+
+    private CoursePageCursorAnchor toCursorAnchor(Object rawRow) {
+        Object[] columns = (Object[]) rawRow;
+        return new CoursePageCursorAnchor(
+                ((Number) columns[0]).longValue(),
+                ((Number) columns[1]).intValue()
+        );
     }
 }

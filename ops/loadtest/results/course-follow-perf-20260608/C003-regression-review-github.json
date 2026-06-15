@@ -1,0 +1,37 @@
+{
+  "criterion": "C003",
+  "status": "pass",
+  "branch": "feature/course-follow-hotpath-performance",
+  "implementationCommit": "9a182bd",
+  "pullRequest": "https://github.com/BIKE-PROJECT-MINJI/bike-back/pull/38",
+  "issue": "https://github.com/BIKE-PROJECT-MINJI/bike-back/issues/37",
+  "reviewers": {
+    "total": 5,
+    "pass": 5,
+    "blockingIssues": 0,
+    "lanes": [
+      "goal-constraint",
+      "code-oop-tdd",
+      "security-aws-secret",
+      "qa-evidence",
+      "docs-slop"
+    ]
+  },
+  "verificationReceipts": {
+    "gradleTestExitCode": "C003-gradle-test-exit-code.txt",
+    "targetedGradleTestsExitCode": "C003-targeted-gradle-tests-exit-code.txt",
+    "bashSyntaxExitCode": "C003-bash-n-run-aws-compose-k6-exit-code.txt",
+    "nodeCheckK6ExitCode": "C003-node-check-k6-exit-code.txt",
+    "k6InspectExitCode": "C003-k6-inspect-course-free-exit-code.txt",
+    "gitDiffCheckExitCode": "C003-git-diff-check-exit-code.txt"
+  },
+  "documents": [
+    "docs/course-follow-performance-report-2026-06-08.md",
+    "docs/adr-course-follow-hotpath-performance-2026-06-08.md",
+    "docs/decision-log-2026-06-08-course-follow-performance.md"
+  ],
+  "residualRisks": [
+    "AI route from-text readiness/capacity is separated as follow-up.",
+    "Route snapshot cache is in-memory and single-JVM; multi-instance deployment needs shared cache or invalidation strategy."
+  ]
+}

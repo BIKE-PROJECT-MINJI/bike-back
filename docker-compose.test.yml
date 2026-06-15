@@ -1,0 +1,144 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: bike-test-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bike
+      POSTGRES_USER: bike
+      POSTGRES_PASSWORD: bike
+    volumes:
+      - bike_test_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bike -d bike"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: bike-test-redis
+    restart: unless-stopped
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - bike_test_redis_data:/data
+      - ./ops/redis/redis.aof.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  graphhopper-prepare:
+    image: curlimages/curl:8.17.0
+    container_name: bike-test-graphhopper-prepare
+    restart: "no"
+    user: root
+    environment:
+      GRAPHHOPPER_VERSION: ${GRAPHHOPPER_VERSION:-11.0}
+      GRAPHHOPPER_OSM_FILE: ${GRAPHHOPPER_OSM_FILE:-south-korea-latest.osm.pbf}
+    command:
+      - sh
+      - -c
+      - >
+        set -eu;
+        mkdir -p /runtime /data;
+        if [ ! -f /runtime/graphhopper-web-$${GRAPHHOPPER_VERSION}.jar ]; then
+          curl -L https://repo1.maven.org/maven2/com/graphhopper/graphhopper-web/$${GRAPHHOPPER_VERSION}/graphhopper-web-$${GRAPHHOPPER_VERSION}.jar -o /runtime/graphhopper-web-$${GRAPHHOPPER_VERSION}.jar;
+        fi;
+        if [ ! -f /data/$${GRAPHHOPPER_OSM_FILE} ]; then
+          curl -L https://download.geofabrik.de/asia/south-korea-latest.osm.pbf -o /data/$${GRAPHHOPPER_OSM_FILE};
+        fi;
+        ls -lh /runtime/graphhopper-web-$${GRAPHHOPPER_VERSION}.jar /data/$${GRAPHHOPPER_OSM_FILE}
+    volumes:
+      - bike_test_graphhopper_runtime:/runtime
+      - bike_test_graphhopper_data:/data
+
+  graphhopper:
+    image: eclipse-temurin:17-jre
+    container_name: bike-test-graphhopper
+    restart: unless-stopped
+    working_dir: /graphhopper
+    command:
+      - sh
+      - -c
+      - >
+        java -Xmx$${GRAPHHOPPER_JAVA_XMX:-2g}
+        -Ddw.graphhopper.datareader.file=/data/$${GRAPHHOPPER_OSM_FILE:-south-korea-latest.osm.pbf}
+        -Ddw.graphhopper.graph.location=/data/graph-cache
+        -jar /runtime/graphhopper-web-$${GRAPHHOPPER_VERSION:-11.0}.jar
+        server /graphhopper/config-bike.yml
+    environment:
+      GRAPHHOPPER_VERSION: ${GRAPHHOPPER_VERSION:-11.0}
+      GRAPHHOPPER_OSM_FILE: ${GRAPHHOPPER_OSM_FILE:-south-korea-latest.osm.pbf}
+      GRAPHHOPPER_JAVA_XMX: ${GRAPHHOPPER_JAVA_XMX:-2g}
+    volumes:
+      - ./ops/graphhopper:/graphhopper:ro
+      - bike_test_graphhopper_runtime:/runtime:ro
+      - bike_test_graphhopper_data:/data
+    depends_on:
+      graphhopper-prepare:
+        condition: service_completed_successfully
+
+  ai-route-worker:
+    build:
+      context: ../bike-ai-route
+    container_name: bike-test-ai-route-worker
+    restart: unless-stopped
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GOOGLE_MODEL: ${GOOGLE_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+
+  bike-back:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-runtime
+    container_name: bike-test-backend
+    restart: unless-stopped
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bike
+      SPRING_DATASOURCE_USERNAME: bike
+      SPRING_DATASOURCE_PASSWORD: bike
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:-30}
+      BIKE_ASYNC_CORE_POOL_SIZE: ${BIKE_ASYNC_CORE_POOL_SIZE:-4}
+      BIKE_ASYNC_MAX_POOL_SIZE: ${BIKE_ASYNC_MAX_POOL_SIZE:-8}
+      BIKE_ASYNC_QUEUE_CAPACITY: ${BIKE_ASYNC_QUEUE_CAPACITY:-500}
+      SPRING_DATA_REDIS_URL: redis://redis:6379
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?AUTH_JWT_SECRET must be set in .env.test}
+      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-bike-back-test-compose}
+      AUTH_JWT_TOKEN_VALIDITY_SEC: ${AUTH_JWT_TOKEN_VALIDITY_SEC:-900}
+      PORT: 8080
+      MANAGEMENT_PORT: 18081
+      MANAGEMENT_SERVER_ADDRESS: 0.0.0.0
+      ADDRESS_SEARCH_PROVIDER: ${ADDRESS_SEARCH_PROVIDER:-fake}
+      BICYCLE_ROUTING_PROVIDER: graphhopper
+      BICYCLE_ROUTING_FAKE_ENABLED: "false"
+      GRAPHHOPPER_BASE_URL: http://graphhopper:8989
+      GRAPHHOPPER_HOSTED_BASE_URL: ${GRAPHHOPPER_HOSTED_BASE_URL:-}
+      GRAPHHOPPER_API_KEY: ${GRAPHHOPPER_API_KEY:-}
+      GRAPHHOPPER_RETRY_MAX_ATTEMPTS: ${GRAPHHOPPER_RETRY_MAX_ATTEMPTS:-2}
+      AI_ROUTE_WORKER_BASE_URL: http://ai-route-worker:8091
+      SPRING_FLYWAY_ENABLED: "true"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:18081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      graphhopper:
+        condition: service_started
+      ai-route-worker:
+        condition: service_started
+
+volumes:
+  bike_test_postgres_data:
+  bike_test_redis_data:
+  bike_test_graphhopper_runtime:
+  bike_test_graphhopper_data:

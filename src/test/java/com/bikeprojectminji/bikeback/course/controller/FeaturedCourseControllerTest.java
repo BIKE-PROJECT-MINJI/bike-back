@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.bikeprojectminji.bikeback.course.dto.FeaturedCourseItemResponse;
 import com.bikeprojectminji.bikeback.course.dto.FeaturedCourseResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
+import com.bikeprojectminji.bikeback.course.service.CourseQueryService;
 import com.bikeprojectminji.bikeback.course.service.CourseReportService;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
 import com.bikeprojectminji.bikeback.ride.policy.service.RidePolicyService;
@@ -38,6 +39,9 @@ class FeaturedCourseControllerTest {
     private CourseService courseService;
 
     @MockitoBean
+    private CourseQueryService courseQueryService;
+
+    @MockitoBean
     private CourseReportService courseReportService;
 
     @MockitoBean
@@ -50,7 +54,7 @@ class FeaturedCourseControllerTest {
                 "distance",
                 List.of(new FeaturedCourseItemResponse(1L, "아라뱃길 루트", BigDecimal.valueOf(23.4), 95, 850, 1))
         );
-        given(courseService.getFeaturedCourses(BigDecimal.valueOf(37.5), BigDecimal.valueOf(127.0))).willReturn(response);
+        given(courseQueryService.getFeaturedCourses(BigDecimal.valueOf(37.5), BigDecimal.valueOf(127.0))).willReturn(response);
 
         mockMvc.perform(get("/api/v1/courses/featured")
                         .param("lat", "37.5")

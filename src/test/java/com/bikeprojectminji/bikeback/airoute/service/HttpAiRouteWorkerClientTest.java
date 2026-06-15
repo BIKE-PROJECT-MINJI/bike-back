@@ -15,12 +15,17 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
+@ExtendWith(OutputCaptureExtension.class)
 class HttpAiRouteWorkerClientTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -57,13 +62,30 @@ class HttpAiRouteWorkerClientTest {
 
     @Test
     @DisplayName("HTTP worker client는 worker 장애를 Optional.empty로 변환해 fallback을 보존한다")
-    void returnEmptyWhenWorkerFails() throws Exception {
+    void returnEmptyWhenWorkerFails(CapturedOutput output) throws Exception {
         startWorkerServer(500, "{\"message\":\"fail\"}");
         HttpAiRouteWorkerClient client = new HttpAiRouteWorkerClient("http://localhost:" + server.getAddress().getPort());
 
         Optional<AiRoutePlanResponse> response = client.plan(request(), context(), fallbackPlan());
 
         assertThat(response).isEmpty();
+        assertThat(output).contains("ai_route_worker_failed");
+        assertThat(output).contains("http_status");
+        assertThat(output).contains("status=500");
+    }
+
+    @Test
+    @DisplayName("HTTP worker client는 네트워크 장애도 fallback으로 보호하고 실패 로그를 남긴다")
+    void returnEmptyWhenWorkerConnectionFails(CapturedOutput output) throws Exception {
+        int unusedPort = unusedLocalPort();
+        HttpAiRouteWorkerClient client = new HttpAiRouteWorkerClient("http://localhost:" + unusedPort);
+
+        Optional<AiRoutePlanResponse> response = client.plan(request(), context(), fallbackPlan());
+
+        assertThat(response).isEmpty();
+        assertThat(output).contains("ai_route_worker_failed");
+        assertThat(output).contains("rest_client_exception");
+        assertThat(output).contains("exception=");
     }
 
     private CapturedExchange startWorkerServer(int status, String responseBody) throws IOException {
@@ -79,6 +101,12 @@ class HttpAiRouteWorkerClientTest {
         });
         server.start();
         return capturedExchange;
+    }
+
+    private int unusedLocalPort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
     }
 
     private String workerSuccessResponse() {

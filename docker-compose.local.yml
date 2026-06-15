@@ -33,6 +33,50 @@ services:
       timeout: 5s
       retries: 20
 
+  graphhopper:
+    image: eclipse-temurin:17-jre
+    container_name: bike-back-graphhopper
+    profiles:
+      - routing
+    restart: unless-stopped
+    working_dir: /graphhopper
+    command:
+      - sh
+      - -c
+      - >
+        java -Xmx$${GRAPHHOPPER_JAVA_XMX:-2g}
+        -Ddw.graphhopper.datareader.file=/data/$${GRAPHHOPPER_OSM_FILE:-south-korea-latest.osm.pbf}
+        -Ddw.graphhopper.graph.location=/data/graph-cache
+        -jar /graphhopper/graphhopper-web-$${GRAPHHOPPER_VERSION:-11.0}.jar
+        server /graphhopper/config-bike.yml
+    environment:
+      GRAPHHOPPER_VERSION: ${GRAPHHOPPER_VERSION:-11.0}
+      GRAPHHOPPER_OSM_FILE: ${GRAPHHOPPER_OSM_FILE:-south-korea-latest.osm.pbf}
+      GRAPHHOPPER_JAVA_XMX: ${GRAPHHOPPER_JAVA_XMX:-2g}
+    ports:
+      - "8989:8989"
+      - "8990:8990"
+    volumes:
+      - ./ops/graphhopper:/graphhopper:ro
+      - ./ops/graphhopper/data:/data
+
+  ai-route-worker:
+    build:
+      context: ../bike-ai-route
+    container_name: bike-ai-route-worker
+    profiles:
+      - routing
+    restart: unless-stopped
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GOOGLE_MODEL: ${GOOGLE_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+    ports:
+      - "8091:8091"
+
   postgres_exporter:
     image: quay.io/prometheuscommunity/postgres-exporter
     container_name: bike-back-postgres-exporter

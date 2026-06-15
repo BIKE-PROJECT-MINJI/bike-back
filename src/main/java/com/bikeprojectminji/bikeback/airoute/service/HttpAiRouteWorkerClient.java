@@ -2,6 +2,7 @@ package com.bikeprojectminji.bikeback.airoute.service;
 
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRouteElevationSummaryResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.ProviderEvidenceBadgeResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.RecommendationScoreResponse;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
@@ -9,12 +10,15 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.http.MediaType;
 import org.springframework.context.annotation.Primary;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -22,6 +26,8 @@ import org.springframework.web.client.RestClientException;
 @Primary
 @ConditionalOnProperty(name = "ai-route.worker.base-url")
 public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
+
+    private static final Logger log = LoggerFactory.getLogger(HttpAiRouteWorkerClient.class);
 
     private final RestClient restClient;
 
@@ -49,7 +55,19 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
                     .retrieve()
                     .body(AiRoutePlanResponse.class);
             return Optional.ofNullable(response);
-        } catch (RestClientException ignored) {
+        } catch (HttpStatusCodeException exception) {
+            // AI worker는 보조 설명 생성자다. 장애 시 fallback은 유지하되 운영자가 원인을 볼 수 있게 남긴다.
+            log.warn(
+                    "ai_route_worker_failed reason=http_status status={} endpoint=/v1/ai-routes/plan",
+                    exception.getStatusCode().value()
+            );
+            return Optional.empty();
+        } catch (RestClientException exception) {
+            // 네트워크/타임아웃도 사용자 응답은 backend fallback으로 보호하고, 로그에서만 추적한다.
+            log.warn(
+                    "ai_route_worker_failed reason=rest_client_exception exception={} endpoint=/v1/ai-routes/plan",
+                    exception.getClass().getSimpleName()
+            );
             return Optional.empty();
         }
     }
@@ -61,11 +79,14 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
             BigDecimal destinationLon,
             String destinationLabel,
             String rideStyle,
+            String elevationPreference,
+            String textIntent,
             CurrentWeatherResponse weather,
             String constructionSummary,
             String roadSurfaceSummary,
             int recommendationScore,
             RecommendationScoreResponse scoreBreakdown,
+            AiRouteElevationSummaryResponse elevationSummary,
             List<ProviderEvidenceBadgeResponse> evidenceBadges,
             AiRoutePlanResponse fallbackPlan
     ) {
@@ -82,11 +103,14 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
                     request.destinationLon(),
                     request.destinationLabel(),
                     request.rideStyle(),
+                    request.elevationPreference(),
+                    request.textIntent(),
                     context.weather().orElse(null),
                     context.constructionSummary(),
                     context.roadSurfaceSummary(),
                     fallbackPlan.recommendationScore(),
                     fallbackPlan.scoreBreakdown(),
+                    fallbackPlan.elevationSummary(),
                     fallbackPlan.evidenceBadges(),
                     fallbackPlan
             );

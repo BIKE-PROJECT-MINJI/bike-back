@@ -40,6 +40,7 @@ out/
 .env
 .env.*
 !.env.example
+!.env.test.example
 
 # Terraform local state
 ops/aws/alb-acm-route53/.terraform/

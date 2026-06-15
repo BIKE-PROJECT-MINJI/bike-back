@@ -22,4 +22,21 @@ class RuntimeConfigurationTest {
         assertThat(environment.getProperty("server.forward-headers-strategy"))
                 .isEqualTo("framework");
     }
+
+    @Test
+    @DisplayName("코스 생성처럼 insert가 많은 작업을 위해 Hibernate JDBC batching을 설정한다")
+    void hibernateJdbcBatchingIsConfiguredForInsertHeavyCourseCreation() {
+        assertThat(environment.getProperty("spring.jpa.properties.hibernate.jdbc.batch_size", Integer.class))
+                .isEqualTo(50);
+        assertThat(environment.getProperty("spring.jpa.properties.hibernate.order_inserts", Boolean.class))
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("비동기 실행기는 bounded pool 기본값을 가진다")
+    void asyncExecutorDefaultsAreBounded() {
+        assertThat(environment.getProperty("bike.async.core-pool-size", Integer.class)).isEqualTo(4);
+        assertThat(environment.getProperty("bike.async.max-pool-size", Integer.class)).isEqualTo(8);
+        assertThat(environment.getProperty("bike.async.queue-capacity", Integer.class)).isEqualTo(500);
+    }
 }

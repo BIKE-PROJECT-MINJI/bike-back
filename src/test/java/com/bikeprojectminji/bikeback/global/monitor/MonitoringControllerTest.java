@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.global.monitor;
 
 import static org.mockito.BDDMockito.given;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -32,6 +34,21 @@ class MonitoringControllerTest {
     private MonitoringService monitoringService;
 
     @Test
+    @DisplayName("모니터링 상태 API는 인증 없이는 의존성 상세를 노출하지 않는다")
+    void getMonitoringStatusRequiresAuthentication() throws Exception {
+        mockMvc.perform(get("/health/monitor"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("모니터링 상태 API는 일반 access token으로는 의존성 상세를 노출하지 않는다")
+    void getMonitoringStatusRejectsRegularUserToken() throws Exception {
+        mockMvc.perform(get("/health/monitor")
+                        .with(jwt().jwt(jwt -> accessToken(jwt, "regular-user"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     @DisplayName("모니터링 상태 API는 DB와 Redis 상태를 success 래퍼로 응답한다")
     void getMonitoringStatusReturnsWrappedResponse() throws Exception {
         given(monitoringService.getStatus()).willReturn(new MonitoringStatusResponse(
@@ -42,7 +59,9 @@ class MonitoringControllerTest {
                 new DependencyStatusResponse("ok", "PONG")
         ));
 
-        mockMvc.perform(get("/health/monitor"))
+        mockMvc.perform(get("/health/monitor")
+                        .with(jwt().jwt(jwt -> opsAccessToken(jwt, "ops-user"))
+                                .authorities(new SimpleGrantedAuthority("ROLE_OPS"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.message").value("success"))
@@ -64,10 +83,26 @@ class MonitoringControllerTest {
                 new DependencyStatusResponse("ok", "PONG")
         ));
 
-        mockMvc.perform(get("/health/monitor"))
+        mockMvc.perform(get("/health/monitor")
+                        .with(jwt().jwt(jwt -> opsAccessToken(jwt, "ops-user"))
+                                .authorities(new SimpleGrantedAuthority("ROLE_OPS"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("degraded"))
                 .andExpect(jsonPath("$.data.database.status").value("fail"))
                 .andExpect(jsonPath("$.data.database.detail").value("database timeout"));
+    }
+
+    private org.springframework.security.oauth2.jwt.Jwt.Builder accessToken(
+            org.springframework.security.oauth2.jwt.Jwt.Builder jwt,
+            String subject
+    ) {
+        return jwt.subject(subject).claim("tokenType", "access");
+    }
+
+    private org.springframework.security.oauth2.jwt.Jwt.Builder opsAccessToken(
+            org.springframework.security.oauth2.jwt.Jwt.Builder jwt,
+            String subject
+    ) {
+        return accessToken(jwt, subject).claim("roles", java.util.List.of("OPS"));
     }
 }

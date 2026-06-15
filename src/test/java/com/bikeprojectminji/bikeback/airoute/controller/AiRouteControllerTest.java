@@ -53,6 +53,25 @@ class AiRouteControllerTest {
     }
 
     @Test
+    @DisplayName("텍스트 기반 AI 경로 추천 REST는 비로그인 요청에 게스트 device id가 없으면 400을 반환한다")
+    void planFromTextRequiresGuestDeviceIdWhenAnonymous() throws Exception {
+        willThrow(new BadRequestException("게스트 device id가 필요합니다."))
+                .given(aiRouteQuotaService)
+                .checkGuestAllowed(null, "127.0.0.1");
+
+        mockMvc.perform(post("/api/v1/ai-routes/plan/from-text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "lat": 37.4812,
+                                  "lon": 126.9527,
+                                  "text": "오르막이 많은 곳 추천"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("AI 경로 추천 REST는 인증 subject 기준으로 quota를 확인한다")
     void planChecksQuotaByAuthenticatedSubject() throws Exception {
         given(aiRoutePlannerService.plan(eq("1"), any())).willReturn(new AiRoutePlanResponse(

@@ -13,10 +13,13 @@
 - 외부 날씨 API 연동과 stale/fallback 정책 구현
 - `/health`, `/health/monitor`, request id 기반 요청 추적 구성
 - k6 smoke/baseline/stress 부하 검증 스크립트 작성
+- AI 코스 생성에서 Gemini worker, self-host GraphHopper, 고도/도로 근거 기반 점수화 구현
 
 ## 3. 문제 정의
 
 자전거 주행 중 사용자가 지도, 날씨, 주행 상태를 여러 앱에서 번갈아 확인하면 주행 집중도가 떨어집니다. 백엔드는 코스 경로와 현재 위치를 기준으로 주행 가능 여부와 이탈 상태를 판단하고, 외부 날씨 API가 느리거나 실패해도 앱 응답이 흔들리지 않도록 보호해야 했습니다.
+
+AI 코스 생성에서는 "평지 위주", "오르막 많은 코스", "강이 보이는 코스" 같은 자연어 요청을 실제 자전거 도로망과 고도 근거로 검증해야 했습니다. 단순히 AI가 좌표를 만드는 방식은 도로망, 고도, 노면, 자전거도로 근거가 약했기 때문에 백엔드가 GraphHopper 경로를 source of truth로 삼고 AI 설명은 후보/서술 역할로 분리했습니다.
 
 ## 4. 핵심 기능
 
@@ -26,6 +29,8 @@
 - route snapshot cache로 route-points/download/ride-policy hot path 재사용
 - 자유 주행 기록 저장과 `FINALIZING -> READY/FAILED` 상태 전이
 - Open-Meteo current weather + hourly fallback + stale cache fallback
+- Gemini AI worker 텍스트 의도 해석 + self-host GraphHopper 경로 후보
+- elevation summary와 도로 근거 기반 추천 점수
 - `/health`, `/health/monitor`, Prometheus/Grafana 관측 지점
 - k6 시나리오 기반 API 부하 검증
 
@@ -40,6 +45,10 @@
 | route snapshot | [`CourseRouteSnapshotService`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/course/service/CourseRouteSnapshotService.java#L40-L94) | ordered route list와 projection index를 snapshot으로 재사용합니다. |
 | 외부 날씨 fallback | [`OpenMeteoWeatherProvider`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/weather/infrastructure/OpenMeteoWeatherProvider.java#L56-L171) | current payload 실패 시 hourly forecast snapshot으로 fallback합니다. |
 | stale weather fallback | [`WeatherService.getCurrent`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/weather/service/WeatherService.java#L63-L124) | 외부 지연과 사용자 응답을 분리하는 stale-first 보호 전략입니다. |
+| AI 경로 응답 조립 | [`AiRoutePlanComposer`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/airoute/service/AiRoutePlanComposer.java) | AI 설명 후보와 GraphHopper 경로 후보를 API 응답으로 조립합니다. |
+| 고도/도로 점수화 | [`RecommendationScoreCalculator`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/airoute/service/RecommendationScoreCalculator.java) | 평지/업힐/자전거도로 선호를 점수로 분리합니다. |
+| GraphHopper adapter | [`GraphHopperBicycleRoutingClient`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/routing/infrastructure/GraphHopperBicycleRoutingClient.java) | self-host GraphHopper 응답을 백엔드 routing DTO로 변환합니다. |
+| AI route ADR | [`docs/adr-ai-route-graphhopper-elevation.md`](docs/adr-ai-route-graphhopper-elevation.md) | 구현 이유, 선택지, tradeoff, 문제 해결 과정을 기록했습니다. |
 | `/health` | [`HealthController`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/global/health/HealthController.java#L8-L20) | public smoke check 기준입니다. |
 | `/health/monitor` | [`MonitoringController`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/global/monitor/MonitoringController.java#L7-L19) | DB/Redis 상태를 포함한 운영 확인 경로입니다. |
 | request id 추적 | [`HttpRequestLoggingFilter`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/global/logging/HttpRequestLoggingFilter.java#L14-L44) | `X-Request-Id`를 MDC와 응답 헤더에 연결합니다. |
@@ -192,10 +201,18 @@ npx expo start
 
 ```bash
 curl -i https://example.ngrok.app/health
-curl -i https://example.ngrok.app/health/monitor
 curl -i -X POST https://example.ngrok.app/api/v1/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"smoke@example.com","password":"Password123!","displayName":"Smoke"}'
+```
+
+`/health/monitor`는 DB/Redis 상세 상태를 포함하므로 `roles` claim에 `OPS`가 있는 access token이 필요합니다.
+일반 register/login 토큰에는 `OPS` role이 없으므로 운영 smoke에서는 별도로 발급한 OPS JWT를 사용합니다.
+
+```bash
+ACCESS_TOKEN=...
+curl -i https://example.ngrok.app/health/monitor \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
 상세 절차는 [`RN_Expo_Go_Ngrok_백엔드_스모크_런북.md`](../../DOCS/15_기능명세/backend/RN_Expo_Go_Ngrok_백엔드_스모크_런북.md)를 기준으로 합니다.

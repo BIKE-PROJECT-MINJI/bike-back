@@ -8,5 +8,7 @@ public interface CourseRepositoryCustom {
 
     List<CourseEntity> findPublicPageAfter(Long cursorId, int limitPlusOne);
 
+    List<CourseListRow> findPublicListPageAfter(Long cursorId, int limitPlusOne);
+
     List<FeaturedCourseDistanceCandidate> findFeaturedCoursesNear(BigDecimal lat, BigDecimal lon, int limit);
 }

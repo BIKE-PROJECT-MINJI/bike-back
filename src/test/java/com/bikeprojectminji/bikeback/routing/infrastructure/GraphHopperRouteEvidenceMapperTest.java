@@ -38,7 +38,7 @@ class GraphHopperRouteEvidenceMapperTest {
         assertThat(evidence.summary()).isEqualTo("GraphHopper OSM 자전거 경로 기준");
         assertThat(evidence.bikePathScore()).isEqualTo(70);
         assertThat(evidence.sceneryScore()).isEqualTo(65);
-        assertThat(evidence.badges()).hasSize(5);
+        assertThat(evidence.badges()).hasSize(7);
         assertThat(evidence.badges()).extracting("status").containsOnly("UNKNOWN");
     }
 
@@ -53,5 +53,18 @@ class GraphHopperRouteEvidenceMapperTest {
                 .filteredOn(badge -> "graphhopper.smoothness".equals(badge.source()))
                 .extracting("status", "severity")
                 .containsExactly(org.assertj.core.groups.Tuple.tuple("FAILED", "HIGH"));
+    }
+
+    @Test
+    @DisplayName("max_slope가 없어도 average_slope 급경사는 WARNING evidence로 변환된다")
+    void mapsAverageOnlySteepSlopeToWarningEvidence() {
+        GraphHopperRouteEvidence evidence = mapper.map(Map.of(
+                "average_slope", List.of(List.of(0, 2, 11.0))
+        ));
+
+        assertThat(evidence.badges())
+                .filteredOn(badge -> "graphhopper.slope".equals(badge.source()))
+                .extracting("status", "severity")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("WARNING", "MEDIUM"));
     }
 }

@@ -1,0 +1,61 @@
+{
+  "before": {
+    "checksRate": 1,
+    "httpReqFailedRate": 0,
+    "httpReqRate": 52.86595881605603,
+    "iterationRate": 14.40681376509479,
+    "overall": {
+      "p95": 4008.1131585000003,
+      "p99": 22793.776162000002
+    },
+    "courseFollow": {
+      "p95": 19823.792026,
+      "p99": 33603.90080980003
+    },
+    "freeRide": {
+      "p95": 1858.3231941,
+      "p99": 3373.979003510004
+    },
+    "routePoints": {
+      "p95": 36270.03922729999,
+      "p99": 44091.45791325999
+    }
+  },
+  "after": {
+    "checksRate": 1,
+    "httpReqFailedRate": 0,
+    "httpReqRate": 63.34864709245807,
+    "iterationRate": 14.138210613165466,
+    "overall": {
+      "p95": 3188.563704199999,
+      "p99": 5024.95695328
+    },
+    "courseFollow": {
+      "p95": 2938.2651512499997,
+      "p99": 4369.4353945999965
+    },
+    "freeRide": {
+      "p95": 2802.4127827999987,
+      "p99": 3859.21977274
+    },
+    "routePoints": {
+      "p95": 3691.953639599999,
+      "p99": 4607.2950856
+    }
+  },
+  "improvements": {
+    "overallP95ReductionPct": 20.447263385315953,
+    "overallP99ReductionPct": 77.95469729295132,
+    "courseFollowP95ReductionPct": 85.17808728321856,
+    "courseFollowP99ReductionPct": 86.99723755485635,
+    "httpReqRateIncreasePct": 19.82880574033649,
+    "iterationRateIncreasePct": -1.8644174646034757
+  },
+  "evidence": {
+    "dir": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/aws-20260608-course-follow-r8",
+    "beforeExitCode": "99",
+    "afterExitCode": "0",
+    "cleanup": "/mnt/e/bike-work/bike/.omo/ulw-loop/evidence/course-follow-perf-20260608/aws-20260608-course-follow-r8/C002-aws-cleanup.md",
+    "note": "r8 excludes AI route scenario: AI_ROUTE_VUS=0, FREE_RIDE_VUS=50, COURSE_FOLLOW_VUS=50, 100 VU total."
+  }
+}

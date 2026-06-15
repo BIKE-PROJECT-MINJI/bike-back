@@ -18,11 +18,20 @@ class RideRecordFinalizationTransactionBoundaryTest {
     private ApplicationContext applicationContext;
 
     @Test
-    @DisplayName("자유 주행 최종 처리는 별도 processor 빈에서 트랜잭션 프록시로 실행된다")
-    void finalizationProcessorRunsBehindTransactionalProxy() {
-        Object processor = applicationContext.getBean("rideRecordFinalizationProcessor");
+    @DisplayName("자유 주행 최종 경로 교체는 writer 빈에서 트랜잭션 프록시로 실행된다")
+    void finalizationWriterRunsBehindTransactionalProxy() {
+        Object processor = applicationContext.getBean("rideRecordFinalizationWriter");
 
         assertThat(processor).isNotNull();
         assertThat(AopUtils.isAopProxy(processor)).isTrue();
+    }
+
+    @Test
+    @DisplayName("자유 주행 최종 처리 실패 상태는 별도 트랜잭션 프록시로 기록된다")
+    void finalizationFailureServiceRunsBehindTransactionalProxy() {
+        Object failureService = applicationContext.getBean("rideRecordFinalizationFailureService");
+
+        assertThat(failureService).isNotNull();
+        assertThat(AopUtils.isAopProxy(failureService)).isTrue();
     }
 }

@@ -16,6 +16,7 @@ import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import java.math.BigDecimal;
 import com.bikeprojectminji.bikeback.course.entity.CourseReportReason;
+import com.bikeprojectminji.bikeback.course.service.CourseQueryService;
 import com.bikeprojectminji.bikeback.course.service.CourseReportService;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -35,10 +36,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class CourseController {
 
     private final CourseService courseService;
+    private final CourseQueryService courseQueryService;
     private final CourseReportService courseReportService;
 
-    public CourseController(CourseService courseService, CourseReportService courseReportService) {
+    public CourseController(
+            CourseService courseService,
+            CourseQueryService courseQueryService,
+            CourseReportService courseReportService
+    ) {
         this.courseService = courseService;
+        this.courseQueryService = courseQueryService;
         this.courseReportService = courseReportService;
     }
 
@@ -47,7 +54,7 @@ public class CourseController {
             @RequestParam(required = false) Long cursor,
             @RequestParam(required = false) Integer limit
     ) {
-        return ApiResponse.success(courseService.getCourses(cursor, limit));
+        return ApiResponse.success(courseQueryService.getCourses(cursor, limit));
     }
 
     @GetMapping("/{courseId}")
@@ -56,7 +63,7 @@ public class CourseController {
             @RequestParam(required = false) String shareToken,
             @AuthenticationPrincipal Jwt jwt
     ) {
-        return ApiResponse.success(courseService.getCourseDetail(courseId, jwt != null ? jwt.getSubject() : null, shareToken));
+        return ApiResponse.success(courseQueryService.getCourseDetail(courseId, jwt != null ? jwt.getSubject() : null, shareToken));
     }
 
     @GetMapping("/{courseId}/route-points")
@@ -65,7 +72,7 @@ public class CourseController {
             @RequestParam(required = false) String shareToken,
             @AuthenticationPrincipal Jwt jwt
     ) {
-        return ApiResponse.success(courseService.getCourseRoutePoints(courseId, jwt != null ? jwt.getSubject() : null, shareToken));
+        return ApiResponse.success(courseQueryService.getCourseRoutePoints(courseId, jwt != null ? jwt.getSubject() : null, shareToken));
     }
 
     @GetMapping("/search")
@@ -73,7 +80,7 @@ public class CourseController {
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String sort
     ) {
-        return ApiResponse.success(courseService.searchPublicCourses(q, sort));
+        return ApiResponse.success(courseQueryService.searchPublicCourses(q, sort));
     }
 
     @GetMapping("/featured")
@@ -82,7 +89,7 @@ public class CourseController {
             @RequestParam(required = false) BigDecimal lon
     ) {
         validateFeaturedLocationQuery(lat, lon);
-        return ApiResponse.success(courseService.getFeaturedCourses(lat, lon));
+        return ApiResponse.success(courseQueryService.getFeaturedCourses(lat, lon));
     }
 
     private void validateFeaturedLocationQuery(BigDecimal lat, BigDecimal lon) {
@@ -146,7 +153,7 @@ public class CourseController {
             @RequestParam(required = false) String shareToken,
             @AuthenticationPrincipal Jwt jwt
     ) {
-        return ApiResponse.success(courseService.downloadCourse(courseId, jwt != null ? jwt.getSubject() : null, shareToken));
+        return ApiResponse.success(courseQueryService.downloadCourse(courseId, jwt != null ? jwt.getSubject() : null, shareToken));
     }
 
     private CourseReportReason parseReportReason(CourseReportRequest request) {

@@ -31,7 +31,7 @@ class FeaturedCourseServiceTest {
     private BikeMetricsRecorder bikeMetricsRecorder;
 
     @InjectMocks
-    private CourseService courseService;
+    private CourseQueryService courseQueryService;
 
     @Test
     @DisplayName("위치가 없으면 featuredRank 기준 fallback 추천을 최대 3개 응답한다")
@@ -43,7 +43,7 @@ class FeaturedCourseServiceTest {
                 featuredCourse(4L, "송도 루트", 4, 37.3900000, 126.6500000)
         ));
 
-        FeaturedCourseResponse response = courseService.getFeaturedCourses(null, null);
+        FeaturedCourseResponse response = courseQueryService.getFeaturedCourses(null, null);
 
         assertThat(response.sortingMode()).isEqualTo("fallback");
         assertThat(response.courses()).hasSize(3);
@@ -62,7 +62,7 @@ class FeaturedCourseServiceTest {
                 featuredCourse(4L, "중간 코스", 4, 37.5400000, 127.0500000)
         ));
 
-        FeaturedCourseResponse response = courseService.getFeaturedCourses(
+        FeaturedCourseResponse response = courseQueryService.getFeaturedCourses(
                 BigDecimal.valueOf(37.5000000),
                 BigDecimal.valueOf(127.0000000)
         );
@@ -85,7 +85,7 @@ class FeaturedCourseServiceTest {
                 new FeaturedCourseDistanceCandidate(second, 6120)
         ));
 
-        FeaturedCourseResponse response = courseService.getFeaturedCourses(lat, lon);
+        FeaturedCourseResponse response = courseQueryService.getFeaturedCourses(lat, lon);
 
         assertThat(response.sortingMode()).isEqualTo("distance");
         assertThat(response.courses()).hasSize(2);
@@ -105,7 +105,7 @@ class FeaturedCourseServiceTest {
                 featuredCourse(2L, "가까운 코스", 1, 37.5001000, 127.0001000)
         ));
 
-        FeaturedCourseResponse response = courseService.getFeaturedCourses(lat, lon);
+        FeaturedCourseResponse response = courseQueryService.getFeaturedCourses(lat, lon);
 
         assertThat(response.sortingMode()).isEqualTo("distance");
         assertThat(response.courses()).extracting("id").containsExactly(2L, 1L);
@@ -116,7 +116,7 @@ class FeaturedCourseServiceTest {
     void getFeaturedCoursesReturnsEmptyResponse() {
         given(courseRepository.findFeaturedCourses()).willReturn(Collections.emptyList());
 
-        FeaturedCourseResponse response = courseService.getFeaturedCourses(null, null);
+        FeaturedCourseResponse response = courseQueryService.getFeaturedCourses(null, null);
 
         assertThat(response.sortingMode()).isEqualTo("fallback");
         assertThat(response.courses()).isEmpty();
