@@ -137,7 +137,10 @@ CREATE TABLE ride_record_points (
     altitude_m NUMERIC(8,2),
     distance_to_route_m NUMERIC(8,2),
     route_progress_pct NUMERIC(5,2),
-    CONSTRAINT uq_ride_record_points_record_order UNIQUE (ride_record_id, point_order)
+    CONSTRAINT uq_ride_record_points_record_order UNIQUE (ride_record_id, point_order),
+    CONSTRAINT fk_ride_record_points_ride_record
+        FOREIGN KEY (ride_record_id) REFERENCES ride_records (id)
+        ON DELETE CASCADE
 );
 
 CREATE TABLE ride_record_processed_points (
@@ -147,7 +150,10 @@ CREATE TABLE ride_record_processed_points (
     latitude NUMERIC(10,7) NOT NULL,
     longitude NUMERIC(10,7) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-    CONSTRAINT uq_ride_record_processed_points_record_order UNIQUE (ride_record_id, point_order)
+    CONSTRAINT uq_ride_record_processed_points_record_order UNIQUE (ride_record_id, point_order),
+    CONSTRAINT fk_ride_record_processed_points_ride_record
+        FOREIGN KEY (ride_record_id) REFERENCES ride_records (id)
+        ON DELETE CASCADE
 );
 
 CREATE TABLE client_events (
