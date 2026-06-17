@@ -103,7 +103,9 @@ class RideRecordDeletionIntegrationTest {
         assertThat(rideRecordProcessedPointRepository.countByRideRecordId(rideRecord.getId())).isZero();
         assertThat(courseRepository.findById(linkedCourse.getId()))
                 .get()
-                .extracting(CourseEntity::getSourceRideRecordId)
-                .isNull();
+                .satisfies(course -> {
+                    assertThat(course.getSourceRideRecordId()).isNull();
+                    assertThat(course.isSourceDetached()).isTrue();
+                });
     }
 }

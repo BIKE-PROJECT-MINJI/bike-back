@@ -24,7 +24,7 @@ class CourseControllerReadTest extends CourseControllerWebMvcTestSupport {
     @Test
     @DisplayName("코스 상세 API는 success 래퍼로 응답한다")
     void getCourseDetailReturnsWrappedResponse() throws Exception {
-        CourseDetailResponse response = new CourseDetailResponse(7L, "아라뱃길 루트", BigDecimal.valueOf(23.4), 95);
+        CourseDetailResponse response = new CourseDetailResponse(7L, "아라뱃길 루트", BigDecimal.valueOf(23.4), 95, null, false);
         given(courseQueryService.getCourseDetail(7L, null, null)).willReturn(response);
 
         mockMvc.perform(get("/api/v1/courses/7"))
@@ -34,7 +34,8 @@ class CourseControllerReadTest extends CourseControllerWebMvcTestSupport {
                 .andExpect(jsonPath("$.data.id").value(7))
                 .andExpect(jsonPath("$.data.title").value("아라뱃길 루트"))
                 .andExpect(jsonPath("$.data.distanceKm").value(23.4))
-                .andExpect(jsonPath("$.data.estimatedDurationMin").value(95));
+                .andExpect(jsonPath("$.data.estimatedDurationMin").value(95))
+                .andExpect(jsonPath("$.data.sourceDetached").value(false));
     }
 
     @Test

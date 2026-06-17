@@ -77,6 +77,7 @@ CREATE TABLE courses (
     start_longitude NUMERIC(10,7),
     owner_user_id BIGINT,
     source_ride_record_id BIGINT,
+    source_detached BOOLEAN NOT NULL DEFAULT FALSE,
     source_ai_route_session_id BIGINT,
     source_ai_route_candidate_id BIGINT,
     visibility VARCHAR(20) NOT NULL,

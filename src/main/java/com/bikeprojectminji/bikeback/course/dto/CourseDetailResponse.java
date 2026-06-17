@@ -7,10 +7,15 @@ public record CourseDetailResponse(
         String title,
         BigDecimal distanceKm,
         Integer estimatedDurationMin,
-        Long sourceRideRecordId
+        Long sourceRideRecordId,
+        boolean sourceDetached
 ) {
 
     public CourseDetailResponse(Long id, String title, BigDecimal distanceKm, Integer estimatedDurationMin) {
-        this(id, title, distanceKm, estimatedDurationMin, null);
+        this(id, title, distanceKm, estimatedDurationMin, null, false);
+    }
+
+    public CourseDetailResponse(Long id, String title, BigDecimal distanceKm, Integer estimatedDurationMin, Long sourceRideRecordId) {
+        this(id, title, distanceKm, estimatedDurationMin, sourceRideRecordId, false);
     }
 }

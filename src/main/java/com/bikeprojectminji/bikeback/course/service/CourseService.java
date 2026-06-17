@@ -275,7 +275,8 @@ public class CourseService {
                 course.getOwnerUserId(),
                 course.getVisibility().name(),
                 course.getTitle(),
-                course.getSourceRideRecordId()
+                course.getSourceRideRecordId(),
+                course.isSourceDetached()
         );
     }
 

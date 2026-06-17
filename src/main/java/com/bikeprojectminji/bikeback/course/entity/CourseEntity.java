@@ -53,6 +53,9 @@ public class CourseEntity {
     @Column(name = "source_ride_record_id")
     private Long sourceRideRecordId;
 
+    @Column(name = "source_detached", nullable = false)
+    private boolean sourceDetached;
+
     @Column(name = "source_ai_route_session_id")
     private Long sourceAiRouteSessionId;
 
@@ -197,6 +200,9 @@ public class CourseEntity {
     }
 
     public void detachRideRecordSource() {
+        if (this.sourceRideRecordId != null) {
+            this.sourceDetached = true;
+        }
         this.sourceRideRecordId = null;
     }
 
@@ -254,6 +260,10 @@ public class CourseEntity {
 
     public Long getSourceRideRecordId() {
         return sourceRideRecordId;
+    }
+
+    public boolean isSourceDetached() {
+        return sourceDetached;
     }
 
     public Long getSourceAiRouteSessionId() {

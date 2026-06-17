@@ -65,6 +65,36 @@ class CourseQueryServiceTest {
         assertThat(response.title()).isEqualTo("아라뱃길 루트");
         assertThat(response.distanceKm()).isEqualByComparingTo("23.4");
         assertThat(response.estimatedDurationMin()).isEqualTo(95);
+        assertThat(response.sourceDetached()).isFalse();
+    }
+
+    @Test
+    @DisplayName("코스 상세 조회는 삭제로 분리된 원본 기록 상태를 응답한다")
+    void getCourseDetailReturnsDetachedSourceStatus() {
+        CourseEntity entity = new CourseEntity(
+                "저장된 기록 코스",
+                "삭제된 자유 주행 기록에서 저장한 코스",
+                BigDecimal.valueOf(23.4),
+                95,
+                1,
+                false,
+                null,
+                BigDecimal.valueOf(37.5665),
+                BigDecimal.valueOf(126.9780),
+                1L,
+                1001L,
+                CourseVisibility.PRIVATE
+        );
+        ReflectionTestUtils.setField(entity, "id", 7L);
+        entity.detachRideRecordSource();
+        given(courseRepository.findById(7L)).willReturn(Optional.of(entity));
+        given(authService.findUserBySubject("1")).willReturn(user(1L));
+
+        CourseDetailResponse response = courseQueryService.getCourseDetail(7L, "1", null);
+
+        assertThat(response.id()).isEqualTo(7L);
+        assertThat(response.sourceRideRecordId()).isNull();
+        assertThat(response.sourceDetached()).isTrue();
     }
 
     @Test

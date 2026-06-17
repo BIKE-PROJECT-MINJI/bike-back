@@ -83,7 +83,8 @@ public class CourseQueryService {
                 course.getTitle(),
                 course.getDistanceKm(),
                 course.getEstimatedDurationMin(),
-                course.getSourceRideRecordId()
+                course.getSourceRideRecordId(),
+                course.isSourceDetached()
         );
     }
 

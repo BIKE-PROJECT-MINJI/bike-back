@@ -84,6 +84,7 @@ class RideRecordDeletionServiceTest {
         rideRecordDeletionService.deleteRideRecord("1", 1001L);
 
         assertThat(linkedCourse.getSourceRideRecordId()).isNull();
+        assertThat(linkedCourse.isSourceDetached()).isTrue();
         verify(rideRecordPointRepository).deleteByRideRecordIdIn(List.of(1001L));
         verify(rideRecordProcessedPointRepository).deleteByRideRecordIdIn(List.of(1001L));
         verify(rideRecordRepository).deleteAllByIdInBatch(List.of(1001L));
@@ -134,6 +135,7 @@ class RideRecordDeletionServiceTest {
 
         assertThat(deletedCount).isEqualTo(1);
         assertThat(linkedCourse.getSourceRideRecordId()).isNull();
+        assertThat(linkedCourse.isSourceDetached()).isTrue();
         verify(rideRecordPointRepository).deleteByRideRecordIdIn(List.of(1001L));
         verify(rideRecordProcessedPointRepository).deleteByRideRecordIdIn(List.of(1001L));
         verify(rideRecordRepository).deleteAllByIdInBatch(List.of(1001L));
