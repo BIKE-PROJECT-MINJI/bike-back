@@ -1,13 +1,22 @@
 package com.bikeprojectminji.bikeback.auth.entity;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
 import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "users")
@@ -46,6 +55,12 @@ public class UserEntity {
 
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false, length = 40)
+    private Set<UserRole> roles = EnumSet.of(UserRole.USER);
 
     protected UserEntity() {
     }
@@ -90,6 +105,10 @@ public class UserEntity {
 
     public void grantBetaAccess() {
         this.betaAccessGranted = true;
+    }
+
+    public void grantRole(UserRole role) {
+        roles.add(role);
     }
 
     public boolean isDeleted() {
@@ -138,5 +157,9 @@ public class UserEntity {
 
     public OffsetDateTime getDeletedAt() {
         return deletedAt;
+    }
+
+    public Set<UserRole> getRoles() {
+        return Collections.unmodifiableSet(roles);
     }
 }

@@ -44,6 +44,15 @@ CREATE TABLE beta_invitation_codes (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
+CREATE TABLE user_roles (
+    user_id BIGINT NOT NULL,
+    role VARCHAR(40) NOT NULL,
+    CONSTRAINT pk_user_roles PRIMARY KEY (user_id, role),
+    CONSTRAINT fk_user_roles_user
+        FOREIGN KEY (user_id) REFERENCES users (id)
+        ON DELETE CASCADE
+);
+
 CREATE TABLE user_preference (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL UNIQUE,

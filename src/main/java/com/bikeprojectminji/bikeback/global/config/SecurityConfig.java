@@ -71,6 +71,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/auth/me").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/account/me").authenticated()
                         .requestMatchers(HttpMethod.GET, "/health/monitor").hasAuthority("ROLE_OPS")
+                        .requestMatchers("/api/v1/admin/**").hasAuthority("ROLE_OPS_ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/v1/location/me/recent").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/addresses/search").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/me/achievements").authenticated()

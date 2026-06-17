@@ -101,6 +101,9 @@ public class AuthTokenService {
         if (user.getEmail() != null) {
             claimsBuilder.claim("email", user.getEmail());
         }
+        if (TOKEN_TYPE_ACCESS.equals(tokenType)) {
+            claimsBuilder.claim("roles", user.getRoles().stream().sorted().map(Enum::name).toList());
+        }
 
         if (TOKEN_TYPE_REFRESH.equals(tokenType)) {
             claimsBuilder.claim("jti", UUID.randomUUID().toString());
