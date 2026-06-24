@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.course.controller;
 
 import com.bikeprojectminji.bikeback.course.service.CourseReportService;
+import com.bikeprojectminji.bikeback.course.service.CoursePublicationService;
 import com.bikeprojectminji.bikeback.course.service.CourseQueryService;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
@@ -31,4 +32,7 @@ abstract class CourseControllerWebMvcTestSupport {
 
     @MockitoBean
     protected CourseReportService courseReportService;
+
+    @MockitoBean
+    protected CoursePublicationService coursePublicationService;
 }

@@ -1,32 +1,35 @@
 package com.bikeprojectminji.bikeback.course.controller;
 
-import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseDetailResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseDownloadResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseListResponse;
+import com.bikeprojectminji.bikeback.course.dto.CoursePublicationResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseReportRequest;
 import com.bikeprojectminji.bikeback.course.dto.CourseReportResponse;
-import com.bikeprojectminji.bikeback.course.dto.CourseShareResponse;
-import com.bikeprojectminji.bikeback.course.dto.CourseDownloadResponse;
-import com.bikeprojectminji.bikeback.course.dto.CreateCourseFromRideRecordRequest;
-import com.bikeprojectminji.bikeback.course.dto.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointsResponse;
-import com.bikeprojectminji.bikeback.course.dto.CourseListResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseShareResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.course.dto.CreateCourseFromRideRecordRequest;
 import com.bikeprojectminji.bikeback.course.dto.FeaturedCourseResponse;
 import com.bikeprojectminji.bikeback.course.dto.UpdateCourseRequest;
 import com.bikeprojectminji.bikeback.course.dto.UpdateCourseVisibilityRequest;
-import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
-import com.bikeprojectminji.bikeback.global.response.ApiResponse;
-import java.math.BigDecimal;
 import com.bikeprojectminji.bikeback.course.entity.CourseReportReason;
+import com.bikeprojectminji.bikeback.course.service.CoursePublicationService;
 import com.bikeprojectminji.bikeback.course.service.CourseQueryService;
 import com.bikeprojectminji.bikeback.course.service.CourseReportService;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
+import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.response.ApiResponse;
+import java.math.BigDecimal;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -38,15 +41,18 @@ public class CourseController {
     private final CourseService courseService;
     private final CourseQueryService courseQueryService;
     private final CourseReportService courseReportService;
+    private final CoursePublicationService coursePublicationService;
 
     public CourseController(
             CourseService courseService,
             CourseQueryService courseQueryService,
-            CourseReportService courseReportService
+            CourseReportService courseReportService,
+            CoursePublicationService coursePublicationService
     ) {
         this.courseService = courseService;
         this.courseQueryService = courseQueryService;
         this.courseReportService = courseReportService;
+        this.coursePublicationService = coursePublicationService;
     }
 
     @GetMapping
@@ -128,6 +134,22 @@ public class CourseController {
             @RequestBody UpdateCourseVisibilityRequest request
     ) {
         return ApiResponse.success(courseService.updateCourseVisibility(jwt.getSubject(), courseId, request));
+    }
+
+    @PostMapping("/{courseId}/publication")
+    public ApiResponse<CoursePublicationResponse> publishCourse(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long courseId
+    ) {
+        return ApiResponse.success(coursePublicationService.publishCourse(jwt.getSubject(), courseId));
+    }
+
+    @DeleteMapping("/{courseId}/publication")
+    public ApiResponse<CoursePublicationResponse> unpublishCourse(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long courseId
+    ) {
+        return ApiResponse.success(coursePublicationService.unpublishCourse(jwt.getSubject(), courseId));
     }
 
     @PostMapping("/{courseId}/reports")

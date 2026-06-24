@@ -98,6 +98,18 @@ CREATE TABLE course_reports (
     CONSTRAINT uq_course_reports_course_reporter UNIQUE (course_id, reporter_user_id)
 );
 
+CREATE TABLE course_publications (
+    id BIGSERIAL PRIMARY KEY,
+    course_id BIGINT NOT NULL,
+    owner_user_id BIGINT NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    published_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    unpublished_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT uq_course_publications_course UNIQUE (course_id)
+);
+
 CREATE TABLE course_list_summaries (
     course_id BIGINT PRIMARY KEY,
     title VARCHAR(120) NOT NULL,
@@ -199,6 +211,9 @@ CREATE INDEX idx_courses_public_list_page
 
 CREATE INDEX idx_course_list_summaries_page
     ON course_list_summaries (display_order, course_id);
+
+CREATE INDEX idx_course_publications_owner_status
+    ON course_publications (owner_user_id, status);
 
 CREATE TABLE ai_route_generation_sessions (
     id BIGSERIAL PRIMARY KEY,
