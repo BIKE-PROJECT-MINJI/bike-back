@@ -1,4 +1,4 @@
-# AI worker + self-host GraphHopper 로컬 런타임
+# AI 워커와 셀프호스트 GraphHopper 로컬 런타임
 
 ## 목적
 

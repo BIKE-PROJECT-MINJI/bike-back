@@ -1,4 +1,4 @@
-# AWS EC2 + GitHub Actions CI/CD
+# AWS EC2와 GitHub Actions CI/CD
 
 ## 목적
 
