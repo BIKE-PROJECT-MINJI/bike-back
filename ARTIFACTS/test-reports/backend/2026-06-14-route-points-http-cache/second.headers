@@ -1,0 +1,9 @@
+HTTP/1.1 304 
+X-Request-Id: 416bd1ad-1a3b-4c5a-9428-adae9ebb82aa
+ETag: W/"course-route-points-789aa4bb2fe8b1e5"
+Cache-Control: max-age=60, must-revalidate, private
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+X-Frame-Options: DENY
+Date: Sun, 14 Jun 2026 07:59:51 GMT
+

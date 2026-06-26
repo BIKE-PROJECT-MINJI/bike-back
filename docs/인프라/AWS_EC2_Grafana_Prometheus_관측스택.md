@@ -1,4 +1,4 @@
-# AWS EC2 Observability Stack (Grafana + Prometheus)
+# AWS EC2 관측 스택: Grafana와 Prometheus
 
 ## 1. 목적
 

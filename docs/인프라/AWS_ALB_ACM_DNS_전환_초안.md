@@ -64,7 +64,7 @@ Android App
 
 가비아 작업자가 실제로 입력해야 하는 값만 보려면 아래 문서를 본다.
 
-- `docs/gabia-dns-alb-acm-guide.md`
+- `가비아_DNS_ALB_ACM_작업가이드.md`
 
 ### 선택지: Route53으로 이동
 
@@ -74,11 +74,11 @@ Android App
 ## 저장소 반영 위치
 
 - Terraform 초안: `ops/aws/alb-acm-route53/`
-- 설명 문서: `docs/aws-alb-acm-route53.md`
-- 가비아 입력 가이드: `docs/gabia-dns-alb-acm-guide.md`
+- 설명 문서: `docs/인프라/AWS_ALB_ACM_DNS_전환_초안.md`
+- 가비아 입력 가이드: `docs/인프라/가비아_DNS_ALB_ACM_작업가이드.md`
 
-현재 저장소는 `ops/<capability>/<env>` 와 `docs/aws-*.md` 패턴을 쓰고 있어서,
-이 위치가 기존 구조와 가장 잘 맞는다.
+현재 저장소는 `ops/<capability>/<env>` 와 `docs/인프라/` 패턴을 쓰므로,
+인프라 작업 문서는 이 위치에서 관리한다.
 
 ## 적용 후 같이 바꿔야 하는 값
 

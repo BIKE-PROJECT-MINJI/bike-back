@@ -36,7 +36,7 @@ terraform apply -var-file=terraform.tfvars.discovered
 
 가비아 화면에서 실제로 무엇을 넣는지는 아래 문서를 같이 본다.
 
-- `/mnt/c/Users/alswl/Desktop/BIKE - 복사본/dev/bike-back/docs/gabia-dns-alb-acm-guide.md`
+- `/mnt/e/bike-work/bike/dev/bike-back/docs/인프라/가비아_DNS_ALB_ACM_작업가이드.md`
 
 아래 명령으로 ACM 검증용 레코드를 확인한다.
 

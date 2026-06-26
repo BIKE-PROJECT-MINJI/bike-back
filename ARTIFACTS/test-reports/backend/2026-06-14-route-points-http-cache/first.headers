@@ -1,0 +1,11 @@
+HTTP/1.1 200 
+X-Request-Id: a0e52ab0-7a78-4824-bb87-d1b5944e1d68
+ETag: W/"course-route-points-789aa4bb2fe8b1e5"
+Cache-Control: max-age=60, must-revalidate, private
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Content-Length: 824
+Date: Sun, 14 Jun 2026 07:58:02 GMT
+

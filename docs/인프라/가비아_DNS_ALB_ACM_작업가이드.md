@@ -1,7 +1,7 @@
 # 가비아 DNS 작업 가이드
 
 이 문서는 **가비아 DNS에서 무엇을 입력해야 하는지**만 따로 정리한 문서다.
-AWS ALB/ACM/Terraform 자체 설명은 `docs/aws-alb-acm-route53.md` 와
+AWS ALB/ACM/Terraform 자체 설명은 `AWS_ALB_ACM_DNS_전환_초안.md` 와
 `ops/aws/alb-acm-route53/APPLY_GABIA_CHECKLIST.md` 를 따른다.
 
 ## 지금 가비아에서 해야 하는 일

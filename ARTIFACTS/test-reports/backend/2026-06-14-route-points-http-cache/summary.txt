@@ -1,0 +1,7 @@
+courseId=1
+firstStatus=200
+secondStatus=304
+etag=W/"course-route-points-789aa4bb2fe8b1e5"
+pointCount=12
+secondBodyBytes=0
+cacheControl=max-age=60, must-revalidate, private
