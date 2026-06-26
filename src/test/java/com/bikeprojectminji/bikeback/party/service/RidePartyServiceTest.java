@@ -1,6 +1,8 @@
 package com.bikeprojectminji.bikeback.party.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
@@ -11,7 +13,12 @@ import com.bikeprojectminji.bikeback.course.entity.CourseVisibility;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.party.dto.CreateRidePartyRequest;
+import com.bikeprojectminji.bikeback.party.dto.RidePartyMemberListResponse;
+import com.bikeprojectminji.bikeback.party.dto.RidePartyResponse;
+import com.bikeprojectminji.bikeback.party.dto.RidePartySocketTokenResponse;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyEntity;
+import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberEntity;
+import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberRole;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberStatus;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyStatus;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyMemberRepository;
@@ -21,6 +28,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -44,6 +52,9 @@ class RidePartyServiceTest {
     @Mock
     private AuthService authService;
 
+    @Mock
+    private RidePartySocketTokenService socketTokenService;
+
     private final Clock clock = Clock.fixed(Instant.parse("2026-06-26T00:00:00Z"), ZoneOffset.UTC);
 
     @Test
@@ -58,6 +69,25 @@ class RidePartyServiceTest {
         assertThatThrownBy(() -> service.create("1", new CreateRidePartyRequest(10L, "비공개 파티", OffsetDateTime.now(clock), 4)))
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("공개 코스만 파티를 만들거나 참여할 수 있습니다.");
+    }
+
+    @Test
+    @DisplayName("파티 생성 기본 정원은 정책 기준 5명이다")
+    void createUsesDefaultCapacityFive() {
+        RidePartyService service = createService();
+        UserEntity user = user(1L);
+        CourseEntity course = course(10L, CourseVisibility.PUBLIC);
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(courseRepository.findById(10L)).willReturn(Optional.of(course));
+        given(partyRepository.save(any(RidePartyEntity.class))).willAnswer(invocation -> {
+            RidePartyEntity party = invocation.getArgument(0);
+            ReflectionTestUtils.setField(party, "id", 20L);
+            return party;
+        });
+
+        RidePartyResponse response = service.create("1", new CreateRidePartyRequest(10L, null, OffsetDateTime.now(clock), null));
+
+        assertThat(response.capacity()).isEqualTo(5);
     }
 
     @Test
@@ -78,8 +108,53 @@ class RidePartyServiceTest {
         verify(partyRepository).findByIdAndStatusForUpdate(20L, RidePartyStatus.OPEN);
     }
 
+    @Test
+    @DisplayName("파티 참여자 목록은 현재 참여자만 조회할 수 있다")
+    void listMembersReturnsJoinedMembersForCurrentMember() {
+        RidePartyService service = createService();
+        UserEntity user = user(2L);
+        RidePartyEntity party = new RidePartyEntity(10L, 1L, "공개 파티", OffsetDateTime.now(clock), 4);
+        ReflectionTestUtils.setField(party, "id", 20L);
+        given(authService.findUserBySubject("2")).willReturn(user);
+        given(partyRepository.findById(20L)).willReturn(Optional.of(party));
+        given(memberRepository.findByPartyIdAndUserId(20L, 2L))
+                .willReturn(Optional.of(member(20L, 2L, RidePartyMemberRole.MEMBER)));
+        given(memberRepository.findByPartyIdAndStatusOrderByJoinedAtAscIdAsc(20L, RidePartyMemberStatus.JOINED))
+                .willReturn(List.of(
+                        member(20L, 1L, RidePartyMemberRole.HOST),
+                        member(20L, 2L, RidePartyMemberRole.MEMBER)
+                ));
+
+        RidePartyMemberListResponse response = service.listMembers("2", 20L);
+
+        assertThat(response.items()).hasSize(2);
+        assertThat(response.items().get(0).role()).isEqualTo("HOST");
+        assertThat(response.items().get(1).userId()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("파티 socket token은 현재 참여자에게만 발급한다")
+    void issueSocketTokenRequiresJoinedMember() {
+        RidePartyService service = createService();
+        UserEntity user = user(2L);
+        RidePartyEntity party = new RidePartyEntity(10L, 1L, "공개 파티", OffsetDateTime.now(clock), 4);
+        ReflectionTestUtils.setField(party, "id", 20L);
+        OffsetDateTime expiresAt = OffsetDateTime.now(clock).plusMinutes(5);
+        given(authService.findUserBySubject("2")).willReturn(user);
+        given(partyRepository.findById(20L)).willReturn(Optional.of(party));
+        given(memberRepository.findByPartyIdAndUserId(20L, 2L))
+                .willReturn(Optional.of(member(20L, 2L, RidePartyMemberRole.MEMBER)));
+        given(socketTokenService.issue(20L, 2L))
+                .willReturn(new RidePartySocketTokenService.IssuedRidePartySocketToken("socket-token", expiresAt));
+
+        RidePartySocketTokenResponse response = service.issueSocketToken("2", 20L);
+
+        assertThat(response.socketToken()).isEqualTo("socket-token");
+        assertThat(response.expiresAt()).isEqualTo(expiresAt);
+    }
+
     private RidePartyService createService() {
-        return new RidePartyService(partyRepository, memberRepository, courseRepository, authService, clock);
+        return new RidePartyService(partyRepository, memberRepository, courseRepository, authService, socketTokenService, clock);
     }
 
     private UserEntity user(Long id) {
@@ -104,5 +179,9 @@ class RidePartyServiceTest {
         );
         ReflectionTestUtils.setField(course, "id", id);
         return course;
+    }
+
+    private RidePartyMemberEntity member(Long partyId, Long userId, RidePartyMemberRole role) {
+        return new RidePartyMemberEntity(partyId, userId, role, clock);
     }
 }
