@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.airoute.session;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.bikeprojectminji.bikeback.global.exception.TooManyRequestsException;
+import com.bikeprojectminji.bikeback.global.ratelimit.InMemoryFixedWindowRateLimiter;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -16,6 +17,7 @@ class AiRouteGenerationRateLimiterTest {
     void checkAllowedRejectsWhenPerMinuteLimitExceeded() {
         AiRouteGenerationRateLimiter limiter = new AiRouteGenerationRateLimiter(
                 Clock.fixed(Instant.parse("2026-06-12T00:40:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-12T00:40:00Z"), ZoneOffset.UTC)),
                 2,
                 30
         );
@@ -33,6 +35,7 @@ class AiRouteGenerationRateLimiterTest {
     void checkAllowedRejectsWhenDailyLimitExceeded() {
         AiRouteGenerationRateLimiter limiter = new AiRouteGenerationRateLimiter(
                 Clock.fixed(Instant.parse("2026-06-12T00:40:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-12T00:40:00Z"), ZoneOffset.UTC)),
                 10,
                 2
         );

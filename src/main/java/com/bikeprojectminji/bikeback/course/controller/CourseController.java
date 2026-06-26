@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.course.controller;
 
 import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.course.dto.CoursePublicationResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseReportRequest;
 import com.bikeprojectminji.bikeback.course.dto.CourseReportResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseShareResponse;
@@ -10,6 +11,7 @@ import com.bikeprojectminji.bikeback.course.dto.CourseDetailResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointsResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseListResponse;
 import com.bikeprojectminji.bikeback.course.dto.FeaturedCourseResponse;
+import com.bikeprojectminji.bikeback.course.dto.ImportGpxCourseRequest;
 import com.bikeprojectminji.bikeback.course.dto.UpdateCourseRequest;
 import com.bikeprojectminji.bikeback.course.dto.UpdateCourseVisibilityRequest;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
@@ -17,8 +19,10 @@ import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import java.math.BigDecimal;
 import com.bikeprojectminji.bikeback.course.entity.CourseReportReason;
 import com.bikeprojectminji.bikeback.course.service.CourseQueryService;
+import com.bikeprojectminji.bikeback.course.service.CoursePublicationService;
 import com.bikeprojectminji.bikeback.course.service.CourseReportService;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -38,15 +42,18 @@ public class CourseController {
     private final CourseService courseService;
     private final CourseQueryService courseQueryService;
     private final CourseReportService courseReportService;
+    private final CoursePublicationService coursePublicationService;
 
     public CourseController(
             CourseService courseService,
             CourseQueryService courseQueryService,
-            CourseReportService courseReportService
+            CourseReportService courseReportService,
+            CoursePublicationService coursePublicationService
     ) {
         this.courseService = courseService;
         this.courseQueryService = courseQueryService;
         this.courseReportService = courseReportService;
+        this.coursePublicationService = coursePublicationService;
     }
 
     @GetMapping
@@ -112,6 +119,14 @@ public class CourseController {
         return ApiResponse.success(courseService.createCourseFromRideRecord(jwt.getSubject(), request));
     }
 
+    @PostMapping("/import-gpx")
+    public ApiResponse<CourseWriteResponse> importGpxCourse(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestBody ImportGpxCourseRequest request
+    ) {
+        return ApiResponse.success(courseService.importGpxCourse(jwt.getSubject(), request));
+    }
+
     @PutMapping("/{courseId}")
     public ApiResponse<CourseWriteResponse> updateCourse(
             @AuthenticationPrincipal Jwt jwt,
@@ -128,6 +143,22 @@ public class CourseController {
             @RequestBody UpdateCourseVisibilityRequest request
     ) {
         return ApiResponse.success(courseService.updateCourseVisibility(jwt.getSubject(), courseId, request));
+    }
+
+    @PostMapping("/{courseId}/publication")
+    public ApiResponse<CoursePublicationResponse> publishCourse(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long courseId
+    ) {
+        return ApiResponse.success(coursePublicationService.publishCourse(jwt.getSubject(), courseId));
+    }
+
+    @DeleteMapping("/{courseId}/publication")
+    public ApiResponse<CoursePublicationResponse> unpublishCourse(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long courseId
+    ) {
+        return ApiResponse.success(coursePublicationService.unpublishCourse(jwt.getSubject(), courseId));
     }
 
     @PostMapping("/{courseId}/reports")

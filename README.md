@@ -48,7 +48,7 @@ AI 코스 생성에서는 "평지 위주", "오르막 많은 코스", "강이 �
 | AI 경로 응답 조립 | [`AiRoutePlanComposer`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/airoute/service/AiRoutePlanComposer.java) | AI 설명 후보와 GraphHopper 경로 후보를 API 응답으로 조립합니다. |
 | 고도/도로 점수화 | [`RecommendationScoreCalculator`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/airoute/service/RecommendationScoreCalculator.java) | 평지/업힐/자전거도로 선호를 점수로 분리합니다. |
 | GraphHopper adapter | [`GraphHopperBicycleRoutingClient`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/routing/infrastructure/GraphHopperBicycleRoutingClient.java) | self-host GraphHopper 응답을 백엔드 routing DTO로 변환합니다. |
-| AI route ADR | [`docs/adr-ai-route-graphhopper-elevation.md`](docs/adr-ai-route-graphhopper-elevation.md) | 구현 이유, 선택지, tradeoff, 문제 해결 과정을 기록했습니다. |
+| AI route ADR | [`docs/ADR/ADR_AI_코스생성_GraphHopper_고도_경로기준_선정.md`](docs/ADR/ADR_AI_코스생성_GraphHopper_고도_경로기준_선정.md) | 구현 이유, 선택지, tradeoff, 문제 해결 과정을 기록했습니다. |
 | `/health` | [`HealthController`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/global/health/HealthController.java#L8-L20) | public smoke check 기준입니다. |
 | `/health/monitor` | [`MonitoringController`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/global/monitor/MonitoringController.java#L7-L19) | DB/Redis 상태를 포함한 운영 확인 경로입니다. |
 | request id 추적 | [`HttpRequestLoggingFilter`](https://github.com/BIKE-PROJECT-MINJI/bike-back/blob/main/src/main/java/com/bikeprojectminji/bikeback/global/logging/HttpRequestLoggingFilter.java#L14-L44) | `X-Request-Id`를 MDC와 응답 헤더에 연결합니다. |
@@ -208,6 +208,8 @@ curl -i -X POST https://example.ngrok.app/api/v1/auth/register \
 
 `/health/monitor`는 DB/Redis 상세 상태를 포함하므로 `roles` claim에 `OPS`가 있는 access token이 필요합니다.
 일반 register/login 토큰에는 `OPS` role이 없으므로 운영 smoke에서는 별도로 발급한 OPS JWT를 사용합니다.
+주소검색, REST AI 추천, AI 생성 세션 quota는 기본적으로 Redis fixed-window 저장소를 사용합니다.
+로컬/운영 실행에서는 `BIKE_RATE_LIMIT_STORE=redis`를 유지하고, Spring test profile에서만 memory store를 사용합니다.
 
 ```bash
 ACCESS_TOKEN=...

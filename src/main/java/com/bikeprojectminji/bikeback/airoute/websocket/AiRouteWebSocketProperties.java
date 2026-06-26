@@ -29,7 +29,7 @@ public class AiRouteWebSocketProperties {
         this.allowedOrigins = allowedOrigins;
     }
 
-    String[] allowedOriginsArray() {
+    public String[] allowedOriginsArray() {
         List<String> normalizedOrigins = normalizedAllowedOrigins();
         return normalizedOrigins.toArray(String[]::new);
     }

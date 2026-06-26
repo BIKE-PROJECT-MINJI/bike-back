@@ -1,0 +1,396 @@
+# 커뮤니티·팟 백엔드 구조 조사 보고서
+
+작성일: 2026-06-17
+
+## 1. 조사 범위
+
+이번 조사는 커뮤니티/팟 기능 구현 전 ADR 작성을 위한 근거 수집이다. migration, Entity, Repository, Service, Controller, 테스트 구현은 하지 않았다.
+
+조사 대상은 다음이다.
+
+- User/Auth/Role 구조
+- Course 도메인 구조와 `sourceRideRecordId` 연결
+- Flyway/FK/DB 네이밍
+- 목록 조회, projection, cursor, N+1 방지 패턴
+- 테스트 구조
+- 커뮤니티/팟 SDD 후보 DB/API/권한과 실제 코드의 매핑
+
+OMO `ulw-plan` 흐름과 LSP 스킬 기준을 확인했다. 다만 현재 세션에는 `lsp.*` MCP 호출 도구가 노출되어 있지 않아 LSP 진단/정의 이동은 실행하지 못했고, `rg` 검색과 실제 파일 읽기로 대체했다.
+
+## 2. Git 상태
+
+백엔드 저장소:
+
+- 경로: `/mnt/e/bike-work/bike/dev/bike-back`
+- 브랜치: `main...origin/main`
+- 원격: `https://github.com/BIKE-PROJECT-MINJI/bike-back.git`
+- 최근 기준 커밋: `94e4254 Merge pull request #48 from BIKE-PROJECT-MINJI/verify/deployment-candidate-smoke`
+
+조사 시작 직후에는 `ARTIFACTS/` untracked만 보였으나, 조사 중간에 다른 세션 또는 사용자 작업으로 보이는 변경이 추가 감지됐다.
+
+- `README.md` 수정
+- 기존 `docs/*.md` 다수 삭제 상태
+- `docs/ADR/`, `docs/README.md`, `docs/검토/`, `docs/인프라/` untracked
+- `ops/aws/alb-acm-route53/APPLY_GABIA_CHECKLIST.md` 수정
+- `ARTIFACTS/` untracked
+
+이번 세션에서 의도적으로 추가/수정한 파일은 이 보고서와 오케스트레이터 로그 두 파일뿐이다. 기존 변경은 되돌리지 않았다.
+
+## 3. 읽은 문서
+
+- `/mnt/c/Users/alswl/Desktop/BIKE - 복사본/AGENTS.md`
+- `/mnt/e/bike-work/bike/AGENTS.md`
+- `/mnt/e/bike-work/bike/dev/AGENTS.md`
+- `/mnt/c/Users/alswl/Desktop/BIKE - 복사본/CONTEXT_LEDGER.md`
+- `/mnt/c/Users/alswl/Desktop/BIKE - 복사본/SESSION_WORK_LOG.md`
+- `/mnt/c/Users/alswl/Desktop/BIKE - 복사본/DECISIONS.md`
+- `/mnt/c/Users/alswl/Desktop/BIKE - 복사본/TASKS.md`
+- `/mnt/c/Users/alswl/Desktop/BIKE - 복사본/API_CONTRACT.md`
+- `/mnt/c/Users/alswl/Desktop/BIKE - 복사본/RISKS.md`
+- `/mnt/e/bike-work/bike/DOCS/00_기준/00_핵심_정책/커뮤니티_팟_SDD_초안_2026-06-17.md`
+
+## 4. 현재 User/Auth/Role 구조
+
+### 주요 파일
+
+- `src/main/java/com/bikeprojectminji/bikeback/auth/entity/UserEntity.java`
+- `src/main/java/com/bikeprojectminji/bikeback/auth/repository/UserRepository.java`
+- `src/main/java/com/bikeprojectminji/bikeback/auth/service/AuthService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/auth/service/AuthTokenService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/global/config/SecurityConfig.java`
+- `src/main/java/com/bikeprojectminji/bikeback/beta/entity/BetaInvitationCodeEntity.java`
+- `src/main/java/com/bikeprojectminji/bikeback/beta/service/BetaInvitationService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/beta/controller/BetaInvitationController.java`
+
+### 구조 요약
+
+- 사용자 테이블은 `users`, PK는 `BIGSERIAL id`다.
+- `UserEntity`는 `externalId`, `email`, `passwordHash`, `displayName`, `profileImageUrl`, `accountStatus`, `betaAccessGranted`, `deletedAt`을 가진다.
+- 명시적인 `Role` enum이나 사용자 role 테이블은 없다.
+- `AuthMeResponse`는 현재 고정 문자열 `"USER"`를 반환한다.
+- JWT 발급은 `AuthTokenService.issueToken()`에서 수행한다.
+- 현재 access token claim에는 `tokenType`, `displayName`, 선택적 `email`만 들어간다.
+- `SecurityConfig`는 JWT의 `roles` claim을 읽어 `ROLE_` prefix를 붙일 수 있다.
+- 실제 발급 토큰에는 `roles` claim이 들어가지 않으므로, 현재 운영 경로에서 `ROLE_OPS` 또는 `OPS_ADMIN` 권한은 자동 부여되지 않는다.
+- 단, 테스트에서는 `roles=["OPS"]` 또는 `ROLE_OPS` authority를 직접 넣어 `/health/monitor` 권한을 검증한다.
+
+### 베타 초대코드 구조
+
+- `beta_invitation_codes` 테이블과 `BetaInvitationCodeEntity`가 이미 존재한다.
+- 초대코드는 현재 plain `code` unique 저장이다.
+- `expiresAt`, `usedByUserId`, `usedAt`, `createdAt`이 있다.
+- `POST /api/v1/beta-invitations/verify`는 비로그인 허용이다.
+- 회원가입 `RegisterRequest.inviteCode`가 있으면 `BetaInvitationService.consumeForUser()`를 호출하고 `UserEntity.grantBetaAccess()`로 `users.beta_access_granted=true`를 만든다.
+- 초대코드 발급 API, 관리자 발급 주체, code hash 저장, beta 권한 만료 정책은 없다.
+
+### `OPS_ADMIN` 영향 파일
+
+`OPS_ADMIN`을 추가하려면 다음 영향이 있다.
+
+- `UserEntity`: role 저장 방식 결정 필요. 지금은 `betaAccessGranted`만 있고 운영자 권한 컬럼/테이블이 없다.
+- `AuthTokenService`: JWT 발급 시 roles claim을 넣어야 한다.
+- `SecurityConfig`: 현재는 `ROLE_OPS`를 쓰므로 `OPS_ADMIN`을 그대로 쓸지, `OPS`와 매핑할지 결정 필요.
+- `AuthService.getCurrentUser()`: `AuthMeResponse.role`이 고정 `"USER"`라 관리자 표시가 불가능하다.
+- migration: `users`에 role 컬럼을 추가할지, `user_roles` 테이블을 만들지 ADR 필요.
+- 테스트: `SecurityConfigTest`, `MonitoringControllerTest`, 향후 admin controller test 영향.
+
+### 초대코드/beta 권한 위치 후보
+
+- 이미 있는 `users.beta_access_granted`는 “베타 기능 잠금 해제 여부”에 적합하다.
+- 커뮤니티 공개 조회는 게스트 허용이므로 beta 권한을 요구하지 않는다.
+- 복사/저장/반응/신고/팟 참여는 `betaAccessGranted`를 공통 정책으로 검사하는 `BetaAccessPolicy` 또는 service-level guard가 필요하다.
+- 현재 `SecurityConfig`에서 beta 권한을 authority로 처리하지 않기 때문에, 컨트롤러 path matcher보다 service 정책으로 시작하는 편이 기존 구조와 더 맞다.
+
+## 5. 현재 Course 도메인 구조
+
+### 주요 파일
+
+- `src/main/java/com/bikeprojectminji/bikeback/course/entity/CourseEntity.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/entity/CourseVisibility.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/repository/CourseRepository.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/repository/CourseRepositoryCustom.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/repository/CourseRepositoryImpl.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/repository/CourseListRow.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/service/CourseService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/service/CourseQueryService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/service/CourseAccessPolicy.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/service/CourseReportService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/controller/CourseController.java`
+
+### Course Entity
+
+`CourseEntity`는 현재 다음 책임을 직접 가진다.
+
+- 기본 코스 메타: title, description, distanceKm, estimatedDurationMin, displayOrder
+- 추천/노출: curated, featuredRank, startLatitude, startLongitude
+- 소유권: ownerUserId
+- 출처: sourceRideRecordId, sourceAiRouteSessionId, sourceAiRouteCandidateId
+- 공개 범위: visibility
+- 링크 공유: shareToken
+- 신고 숨김: reportHidden, reportHiddenReason, reportHiddenAt
+
+SDD의 `course_publications`, `course_moderations`가 맡으려는 책임 일부가 이미 `courses` 본테이블에 들어 있다. 따라서 “그대로 컬럼 추가”보다 “기존 컬럼과 새 publication 모델의 경계”를 ADR로 먼저 정해야 한다.
+
+### Course와 RideRecord 연결
+
+- `CourseService.createCourseFromRideRecord()`는 사용자 소유 `RideRecordEntity`를 확인하고, processed point를 `course_route_points`로 복제한 뒤 `courses.source_ride_record_id`를 저장한다.
+- 이미 같은 `owner_user_id + source_ride_record_id`로 저장된 Course가 있으면 거부한다.
+- `RideRecordDeletionService`는 RideRecord 삭제 전에 `courseRepository.findBySourceRideRecordIdIn()`으로 연결 Course를 찾고 `CourseEntity.detachRideRecordSource()`를 호출한다.
+- Course 자체는 삭제하지 않는다.
+- 현재 DTO에는 `sourceRideRecordId`가 있으나 `sourceDetached` 필드는 없다.
+
+`sourceDetached`를 추가하려면 Course가 처음부터 source 없이 만들어진 경우와 “있었는데 삭제로 끊긴 경우”를 구분할 저장 근거가 필요하다. 현재는 `sourceRideRecordId=null`만 남아 구분할 수 없다.
+
+### 현재 Course API
+
+- `GET /api/v1/courses`: 공개 목록, 게스트 가능, cursor/limit
+- `GET /api/v1/courses/{courseId}`: 상세, 게스트 가능하되 visibility/shareToken/owner 정책 적용
+- `GET /api/v1/courses/{courseId}/route-points`: route point 조회
+- `GET /api/v1/courses/search`: 공개 검색, 현재 sort는 `latest`만 허용
+- `GET /api/v1/courses/featured`: 추천 Course, 위치 기반 PostGIS 거리 후보 또는 fallback
+- `POST /api/v1/courses`: 인증 필요, RideRecord 기반 Course 생성
+- `PUT /api/v1/courses/{courseId}`: 소유자 수정
+- `PATCH /api/v1/courses/{courseId}/visibility`: 소유자 visibility 변경
+- `POST /api/v1/courses/{courseId}/reports`: 인증 필요, 신고
+- `POST /api/v1/courses/{courseId}/share`: 인증 필요, shareToken 생성/조회
+- `GET /api/v1/courses/{courseId}/download`: route download
+
+### 삭제/소유자/권한 검증
+
+- Course 삭제 API는 현재 확인되지 않았다.
+- 소유자 검증은 `CourseAccessPolicy.assertOwned()`가 담당한다.
+- 읽기 검증은 `CourseAccessPolicy.assertReadable()`가 visibility, owner, shareToken 기준으로 처리한다.
+- 신고 숨김 검증은 `assertNotReportHidden()`으로 처리하며, 숨김 Course는 owner 외에는 403이다.
+- SDD의 “관리자 숨김 상태일 때만 공개 목록 제외”와 달리 현재는 신고 threshold 또는 high-risk 신고 1회로 `courses.report_hidden=true`가 자동 설정된다.
+
+## 6. 현재 Flyway/FK/DB 네이밍
+
+### migration 위치와 번호 규칙
+
+- 위치: `src/main/resources/db/migration`
+- 규칙: `V번호__설명.sql`
+- 현재 `V1`부터 `V25`까지 존재한다.
+- 테스트는 Flyway를 끄고 `src/test/resources/schema-h2.sql`을 직접 로딩한다.
+
+### 주요 테이블
+
+- `users`: 사용자
+- `beta_invitation_codes`: 베타 초대코드
+- `courses`: Course 본문/공개/신고 일부
+- `course_route_points`: Course 좌표
+- `course_reports`: 신고
+- `course_list_summaries`: 공개 목록 read model
+- `ride_records`: 주행 기록
+- `ride_record_points`: raw point
+- `ride_record_processed_points`: processed point
+- `ai_route_generation_sessions`: AI 생성 세션
+- `ai_route_candidates`: AI 후보
+
+### FK/제약 네이밍
+
+- FK는 `fk_{table}_{target}` 형태가 많다.
+  - 예: `fk_courses_owner_user`
+  - 예: `fk_course_reports_course`
+  - 예: `fk_ride_record_points_ride_record`
+- unique index는 `uq_{table}_{columns}` 형태가 많다.
+  - 예: `uq_courses_owner_source_ride_record`
+  - 예: `uq_course_reports_course_reporter`
+- 일반 index는 `idx_{table}_{columns}` 형태가 많다.
+  - 예: `idx_courses_public_list_page`
+  - 예: `idx_course_list_summaries_page`
+
+### H2 테스트 스키마
+
+- `application-test.yml`에서 `spring.flyway.enabled=false`
+- `spring.sql.init.schema-locations=classpath:schema-h2.sql`
+- 따라서 migration을 추가하면 `schema-h2.sql`도 수동 동기화가 필요하다.
+- H2 스키마에는 일부 PostgreSQL 기능을 맞추기 위한 `CREATE DOMAIN IF NOT EXISTS JSONB AS VARCHAR(4000)`가 있다.
+
+## 7. 현재 조회/N+1 방지 패턴
+
+### Course 공개 목록
+
+현재 Course 공개 목록은 `course_list_summaries` read model을 사용한다.
+
+- `CourseQueryService.getCourses(cursor, limit)`
+- `CourseRepositoryImpl.findPublicListPageAfter(cursorId, limitPlusOne)`
+- native query로 `course_list_summaries`에서 `course_id`, `title`, `distance_km`, `estimated_duration_min`만 읽는다.
+- `CourseListRow` projection record로 받는다.
+- cursor는 `display_order + course_id` 기반이다.
+- 목록 응답 DTO는 `CourseListItemResponse(id, title, distanceKm, estimatedDurationMin)`만 포함한다.
+
+이 패턴은 커뮤니티 공개 목록에서 그대로 재사용할 수 있다. 다만 SDD의 최신순/인기순/거리순, `likedByMe`, `bookmarkedByMe`는 현재 구조에 없다.
+
+### Featured Course 거리 조회
+
+`CourseRepositoryImpl.findFeaturedCoursesNear()`는 PostGIS native query로 가까운 curated course id와 distance를 먼저 구한 뒤, 해당 id 목록을 batch fetch한다. 이후 native 결과 순서를 유지한다.
+
+이 방식은 거리순 공개 목록 ADR에서 참고할 수 있다. 다만 현재는 featured 3개 추천용이고 cursor pagination까지 포함하지 않는다.
+
+### 집계/성능 테스트 패턴
+
+- `ProfileActivitySummaryIntegrationTest`는 Hibernate `Statistics.getPrepareStatementCount()`로 쿼리 수를 검증한다.
+- `CourseRepositoryImplTest`는 `course_list_summaries` read model 사용과 Entity hydration 회피를 Mockito로 검증한다.
+- Course 목록의 N+1 방지 패턴은 EntityGraph보다 projection/read model/native query 중심이다.
+
+### 현재 쓰는 방식과 쓰지 않는 방식
+
+- projection record: 사용 중
+- native query: 사용 중
+- JPQL constructor projection: activity aggregate에서 사용 중
+- cursor pagination: Course 공개 목록에서 사용 중
+- page/size: 관리자 화면은 아직 없음
+- EntityGraph: 확인되지 않음
+- QueryDSL: 사용 흔적 없음
+
+## 8. 현재 테스트 구조
+
+### Controller 테스트
+
+- `@WebMvcTest` + `@Import(SecurityConfig.class)` + `MockMvc`가 기본 패턴이다.
+- 인증 필요 API는 `spring-security-test`의 `jwt()`를 사용한다.
+- 예:
+  - `CourseControllerReadTest`
+  - `CourseControllerMutationTest`
+  - `CourseControllerReportShareTest`
+  - `RideRecordControllerTest`
+  - `AuthControllerTest`
+  - `BetaInvitationControllerTest`
+
+### Service 테스트
+
+- 순수 service 단위 테스트는 Mockito 기반이다.
+- 통합이 필요한 경우 `@SpringBootTest` + `@ActiveProfiles("test")`를 사용한다.
+- 예:
+  - `CourseQueryServiceTest`
+  - `CourseServiceTest`
+  - `CourseReportServiceIntegrationTest`
+  - `BetaInvitationServiceIntegrationTest`
+  - `RideRecordDeletionIntegrationTest`
+
+### Repository/DB 테스트
+
+- 별도 `@DataJpaTest` 패턴은 확인되지 않았다.
+- custom repository는 Mockito 기반 `CourseRepositoryImplTest`로 native query 생성과 mapping을 검증한다.
+- 실제 DB 동작은 `@SpringBootTest` + H2 schema로 검증한다.
+
+### PostGIS/Redis 테스트
+
+- 기본 test profile은 H2와 local Redis URL을 설정한다.
+- PostGIS 실제 함수는 `JdbcCourseRouteGeometryRepository`에서 PostgreSQL 여부를 확인하고, 테스트에서는 일부 fallback 또는 mock 성격으로 다룬다.
+- Redis는 refresh token, recent location, weather last-success 등에 쓰이지만 커뮤니티/팟 기능에는 아직 직접 연결되지 않았다.
+
+### 커뮤니티/팟 구현 시 최소 테스트 후보
+
+- Controller: 공개 목록 게스트 200, 복사/반응/신고/팟 참여 비로그인 401, beta 없음 403 또는 정책 오류, owner/admin 권한 검증.
+- Service: publication 공개전환, reaction unique, report 접수, moderation 숨김/복구, copy lineage, pot join/cancel/no-show.
+- Repository: 공개 목록 cursor, 최신순/인기순/거리순 query, `likedByMe`/`bookmarkedByMe` bulk 조회, 관리자 page/size.
+- Integration: H2 schema 동기화, unique/FK 제약, 정원 초과 동시성은 가능하면 실제 DB 또는 lock 테스트.
+- 성능 회귀: 목록 API query count 또는 custom repository query 호출 검증.
+
+## 9. SDD 후보별 매핑 표
+
+| 후보 | 기존 구조와 맞는 점 | 충돌/조정 필요점 | 후속 ADR 필요 여부 |
+|---|---|---|---|
+| `course_publications` | `courses.visibility`, `report_hidden`, `course_list_summaries`가 공개 목록 책임 일부를 이미 수행 | 공개 메타/카운터/moderation을 본테이블에서 분리할지, 기존 `visibility`와 어떻게 공존할지 결정 필요 | 필요 |
+| `course_copies` | Course 생성 시 RideRecord/AI 후보를 복제하는 패턴은 있음 | 공개 Course를 `publicationId` 기준으로 복사한 이력 테이블은 없음 | 필요 |
+| `course_reactions` | 없음 | 좋아요/북마크 모델, unique, 카운터 정합성, `likedByMe`/`bookmarkedByMe` 조회 필요 | 필요 |
+| `course_reports` | 이미 `course_reports` 테이블, Entity, Repository, Service, API 존재 | 현재는 신고 threshold/high-risk로 자동 `report_hidden`; SDD는 관리자 검토 후 숨김. `publication_id`가 아니라 `course_id` 기준 | 필요 |
+| `course_moderations` | `courses.report_hidden*`가 현재 숨김 상태를 직접 보유 | 관리자 검토 이력/처리자/복구 모델 없음. `OPS_ADMIN` 권한도 미완성 | 필요 |
+| `ride_pots` | Course와 User, JWT auth, service/controller 패턴 재사용 가능 | 팟 도메인은 없음. course 기반인지 publication 기반인지 결정 필요 | 필요 |
+| `ride_pot_members` | unique 제약/상태 enum 패턴은 기존 migration에서 참고 가능 | 멤버 상태, host/member 권한, 정원 초과 동시성 제어 미정 | 필요 |
+| `ride_pot_events` | 이벤트 감사 개념은 `client_events`, achievement/event dispatcher에서 참고 가능 | 팟 상태 변경 감사 로그는 없음 | 필요 |
+| `user_reliability_stats` | `users` PK와 profile/auth 구조 재사용 가능 | 노쇼 카운트는 민감 지표라 조회 권한, 정정/보존 정책 필요 | 필요 |
+| beta 초대코드 | `beta_invitation_codes`, `users.beta_access_granted`, 회원가입 invite consume 존재 | 발급 API, code hash, createdBy, 14일 고정 정책, 기존 사용자 redeem API 없음 | 필요 |
+| AI rate limit 테이블 | REST AI quota와 AI session limiter가 이미 있음 | 둘 다 인메모리 Map 기반. 재시작/다중 인스턴스에서 한도 보존 안 됨. DB/Redis 테이블 없음 | 필요 |
+| 공개 Course 조회 게스트 가능 | `GET /api/v1/courses`, 상세, route-points, download, search, featured가 permitAll | community 전용 path와 hidden 404/403 정책 미정 | 부분 필요 |
+| 복사/저장 로그인 + 초대코드 필요 | Course 생성은 이미 authenticated | beta 권한 검사가 Course 저장/복사에 적용되지 않음 | 필요 |
+| 공개 목록 cursor pagination | 현재 `/api/v1/courses`가 cursor/limit 지원 | 최신순/인기순/거리순 cursor는 없음. 현재 cursor는 display_order/id | 필요 |
+| 관리자 화면 page/size | 없음 | admin controller, OPS_ADMIN, page/size query 필요 | 필요 |
+| 최신순/인기순/거리순 | search sort는 `latest`만 허용. featured distance 추천은 있음 | public list sort 다중화와 cursor key 설계 필요 | 필요 |
+| `likedByMe`, `bookmarkedByMe` | 없음 | reaction bulk 조회 또는 read model 확장 필요 | 필요 |
+| 관리자 숨김 상태일 때만 공개 목록 제외 | 현재 숨김이면 목록 제외 구조는 있음 | 숨김이 관리자 검토가 아니라 신고 threshold로 자동 발생 | 필요 |
+| 팟 기본 5명/최대 10명 | 없음 | 정책 상수/DB capacity/동시성 제어 필요 | 필요 |
+| 방장 팟 취소, 멤버 본인 참여 취소 | 없음 | host/member role, 상태 이벤트 필요 | 필요 |
+| 방장이 출발 시간 이후 노쇼 처리 | 없음 | scheduledStartAt, no-show 가능 시점, 정정 정책 필요 | 필요 |
+| 노쇼 카운트는 본인과 `OPS_ADMIN`만 조회 | `/health/monitor`에 `ROLE_OPS` 보호 예시 있음 | 사용자 권한 모델과 JWT roles claim 발급 미완성 | 필요 |
+
+## 10. 구현 전 반드시 결정할 것
+
+1. `OPS_ADMIN`을 `ROLE_OPS`와 같은 권한으로 볼지, 새 `ROLE_OPS_ADMIN`으로 분리할지.
+2. 사용자 권한을 `users.role` 단일 컬럼으로 둘지, `user_roles` 별도 테이블로 둘지.
+3. JWT 발급 시 roles claim을 어디서 조립할지.
+4. beta 권한을 `users.beta_access_granted` service guard로 볼지, JWT authority로 승격할지.
+5. `course_publications`를 새 source of truth로 둘지, 기존 `courses.visibility/report_hidden`을 유지하면서 read model로 둘지.
+6. 기존 `course_reports.course_id`를 유지할지, community 신고는 `publication_id` 기준 새 테이블/컬럼으로 분리할지.
+7. 신고 자동 숨김 정책을 제거/변경할지, 기존 API와 호환 유지할지.
+8. `sourceDetached`를 저장 컬럼으로 둘지, 이벤트/이력 기반으로 계산할지.
+9. 공개 Course 복사를 기존 `courses` 복제와 어떤 관계로 둘지.
+10. 공개 목록 `latest/popular/distance`별 cursor key를 어떻게 설계할지.
+11. `likedByMe`, `bookmarkedByMe`를 목록 read model에 포함할지, 현재 page ids 기준 bulk query로 합성할지.
+12. publication 카운터 증감을 트랜잭션 즉시 업데이트로 할지, 이벤트/배치 보정까지 MVP에 넣을지.
+13. 팟이 `course_id` 기준인지 `publication_id` 기준인지.
+14. 팟 정원 초과 동시성 제어를 pessimistic lock, optimistic lock, conditional update 중 무엇으로 할지.
+15. no-show 통계를 얼마나 보존하고 누가 정정할 수 있는지.
+16. AI rate limit을 현재 인메모리 유지, Redis 이전, DB 테이블화 중 무엇으로 할지.
+
+## 11. 추천 ADR 목록과 우선순위
+
+1. 사용자 권한/베타/OPS_ADMIN ADR
+   - 이유: community moderation, no-show stats, admin API의 전제다.
+2. Course publication 분리 ADR
+   - 이유: 현재 `courses`에 공개/신고 상태가 이미 있어 SDD와 충돌 가능성이 가장 크다.
+3. Course report/moderation 전환 ADR
+   - 이유: 현재 자동 숨김 정책과 SDD의 관리자 검토 정책이 다르다.
+4. 공개 Course 목록 조회 성능 ADR
+   - 이유: 최신순/인기순/거리순, cursor, `likedByMe`, `bookmarkedByMe`가 쿼리 설계에 직접 영향 준다.
+5. Course copy lineage ADR
+   - 이유: `publicationId` 기준 복사와 원본 Course/AI/Ride 출처 관계를 정해야 한다.
+6. 팟 REST MVP 상태/권한/동시성 ADR
+   - 이유: 정원, 방장/멤버 취소, 노쇼 처리는 동시성과 권한 버그 가능성이 높다.
+7. user reliability stats ADR
+   - 이유: 노쇼 카운트는 민감 정보라 조회 권한과 보존/정정 기준이 필요하다.
+8. AI rate limit persistence ADR
+   - 이유: 현재 인메모리 구현은 배포/다중 인스턴스와 맞지 않는다.
+
+## 12. 후속 구현 프롬프트 작성 시 주의점
+
+- 바로 migration을 만들라고 지시하지 말고, 위 ADR 중 1~4를 먼저 닫게 해야 한다.
+- 기존 `course_reports`와 `courses.report_hidden`을 무시하고 새 신고/관리 테이블을 만들면 정책이 이중화된다.
+- `OPS_ADMIN`은 단순 `SecurityConfig` matcher 추가로 끝나지 않는다. 발급 토큰에 roles claim이 없다.
+- Course 공개 목록은 이미 read model이 있으므로, 새 목록 API도 Entity 반복 조회 대신 projection/read model/bulk reaction 조회 기준으로 작성해야 한다.
+- H2 테스트 스키마는 Flyway migration과 자동 동기화되지 않으므로 구현 프롬프트에 `schema-h2.sql` 동기화를 포함해야 한다.
+- `likedByMe`, `bookmarkedByMe`는 row별 repository 호출 금지 조건을 명시해야 한다.
+- 팟 정원 초과는 단위 테스트만으로 부족하므로, 가능하면 실제 DB 통합 테스트 또는 lock/conditional update 검증이 필요하다.
+- 기존 사용자 변경이 많은 작업이므로 PR은 `1 API 또는 1 도메인 경계 = 1 PR`로 쪼개는 편이 안전하다.
+
+## 13. 조사 근거 검색
+
+대표 검색/확인 명령:
+
+- `rg -n "class .*User|enum .*Role|ROLE_|Authority|SecurityConfig|Jwt|Token|Beta|Invitation|OPS_ADMIN|ADMIN|USER" src/main/java src/test/java src/main/resources -S`
+- `rg -n "class .*Course|sourceRideRecordId|source_ride_record|CourseReport|CourseList|likedByMe|bookmarkedByMe|visibility|Publication|Reaction|Moderation" src/main/java src/test/java src/main/resources -S`
+- `rg --files src/main/resources/db src/test/resources | sort`
+- `rg -n "@SpringBootTest|@WebMvcTest|@DataJpaTest|MockMvc|TestRestTemplate|CourseRepositoryImplTest|IntegrationTest" src/test/java src/test/resources -S`
+- `rg -n "@Query|EntityGraph|Pageable|Slice<|countBy|findPublicListPageAfter|createNativeQuery|Statistics|getPrepareStatementCount" src/main/java src/test/java -S`
+
+대표 근거 파일:
+
+- `src/main/java/com/bikeprojectminji/bikeback/global/config/SecurityConfig.java`
+- `src/main/java/com/bikeprojectminji/bikeback/auth/service/AuthTokenService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/auth/entity/UserEntity.java`
+- `src/main/java/com/bikeprojectminji/bikeback/beta/entity/BetaInvitationCodeEntity.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/entity/CourseEntity.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/service/CourseQueryService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/repository/CourseRepositoryImpl.java`
+- `src/main/java/com/bikeprojectminji/bikeback/course/service/CourseReportService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/ride/service/RideRecordDeletionService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/airoute/service/AiRouteQuotaService.java`
+- `src/main/java/com/bikeprojectminji/bikeback/airoute/session/AiRouteGenerationRateLimiter.java`
+- `src/main/resources/db/migration/V19__create_course_reports.sql`
+- `src/main/resources/db/migration/V24__create_course_list_summaries.sql`
+- `src/main/resources/db/migration/V25__create_beta_invitation_codes.sql`
+- `src/test/resources/schema-h2.sql`
+- `src/test/java/com/bikeprojectminji/bikeback/course/repository/CourseRepositoryImplTest.java`
+- `src/test/java/com/bikeprojectminji/bikeback/profile/service/ProfileActivitySummaryIntegrationTest.java`
+

@@ -114,6 +114,7 @@ class CourseServiceTest {
         assertThat(response.ownerUserId()).isEqualTo(1L);
         assertThat(response.visibility()).isEqualTo("PRIVATE");
         assertThat(response.sourceRideRecordId()).isEqualTo(1001L);
+        assertThat(response.sourceDetached()).isFalse();
         InOrder inOrder = inOrder(courseRoutePointRepository, courseRouteGeometryRepository);
         inOrder.verify(courseRoutePointRepository).saveAll(any());
         inOrder.verify(courseRoutePointRepository).flush();

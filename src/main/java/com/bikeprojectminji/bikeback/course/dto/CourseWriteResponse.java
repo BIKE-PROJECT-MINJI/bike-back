@@ -5,10 +5,15 @@ public record CourseWriteResponse(
         Long ownerUserId,
         String visibility,
         String title,
-        Long sourceRideRecordId
+        Long sourceRideRecordId,
+        boolean sourceDetached
 ) {
 
     public CourseWriteResponse(Long courseId, Long ownerUserId, String visibility, String title) {
-        this(courseId, ownerUserId, visibility, title, null);
+        this(courseId, ownerUserId, visibility, title, null, false);
+    }
+
+    public CourseWriteResponse(Long courseId, Long ownerUserId, String visibility, String title, Long sourceRideRecordId) {
+        this(courseId, ownerUserId, visibility, title, sourceRideRecordId, false);
     }
 }

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 
 import com.bikeprojectminji.bikeback.auth.dto.LoginResponse;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
+import com.bikeprojectminji.bikeback.auth.entity.UserRole;
 import com.bikeprojectminji.bikeback.global.exception.UnauthorizedException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -75,6 +76,39 @@ class AuthTokenServiceTest {
         );
         assertThat(sessionCaptor.getValue().subject()).isEqualTo("1");
         assertThat(sessionCaptor.getValue().tokenHash()).isEqualTo(tokenHash("refresh-token"));
+    }
+
+    @Test
+    @DisplayName("access token은 사용자 role을 roles claim으로 발급한다")
+    void issueLoginResponseAddsRolesClaimToAccessToken() {
+        AuthTokenService authTokenService = createAuthTokenService();
+        UserEntity user = new UserEntity(null, "ops@example.com", "password-hash", "ops-rider", null);
+        ReflectionTestUtils.setField(user, "id", 9L);
+        user.grantRole(UserRole.OPS_ADMIN);
+        given(jwtEncoder.encode(any(JwtEncoderParameters.class))).willReturn(
+                Jwt.withTokenValue("access-token")
+                        .header("alg", "HS256")
+                        .subject("9")
+                        .issuedAt(clock.instant())
+                        .expiresAt(clock.instant().plusSeconds(900))
+                        .build()
+        ).willReturn(
+                Jwt.withTokenValue("refresh-token")
+                        .header("alg", "HS256")
+                        .subject("9")
+                        .issuedAt(clock.instant())
+                        .expiresAt(clock.instant().plusSeconds(1209600))
+                        .build()
+        );
+
+        authTokenService.issueLoginResponse(user);
+
+        ArgumentCaptor<JwtEncoderParameters> tokenCaptor = ArgumentCaptor.forClass(JwtEncoderParameters.class);
+        verify(jwtEncoder, org.mockito.Mockito.times(2)).encode(tokenCaptor.capture());
+        JwtEncoderParameters accessTokenParameters = tokenCaptor.getAllValues().get(0);
+        assertThat(accessTokenParameters.getClaims().getClaims().get("roles"))
+                .asList()
+                .containsExactly("USER", "OPS_ADMIN");
     }
 
     @Test

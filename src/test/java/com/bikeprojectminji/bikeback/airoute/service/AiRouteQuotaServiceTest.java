@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.airoute.service;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.bikeprojectminji.bikeback.global.exception.TooManyRequestsException;
+import com.bikeprojectminji.bikeback.global.ratelimit.InMemoryFixedWindowRateLimiter;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -16,6 +17,7 @@ class AiRouteQuotaServiceTest {
     void checkAllowedRejectsRequestsOverPerMinuteLimit() {
         AiRouteQuotaService quotaService = new AiRouteQuotaService(
                 Clock.fixed(Instant.parse("2026-05-27T14:35:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-05-27T14:35:00Z"), ZoneOffset.UTC)),
                 2,
                 20,
                 3
@@ -34,6 +36,7 @@ class AiRouteQuotaServiceTest {
     void checkGuestAllowedRejectsRequestsOverDailyLimit() {
         AiRouteQuotaService quotaService = new AiRouteQuotaService(
                 Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC)),
                 20,
                 20,
                 3
@@ -49,10 +52,68 @@ class AiRouteQuotaServiceTest {
     }
 
     @Test
+    @DisplayName("게스트 AI 경로 quota도 IP와 device id 조합 기준으로 1분 제한을 적용한다")
+    void checkGuestAllowedRejectsRequestsOverPerMinuteLimit() {
+        AiRouteQuotaService quotaService = new AiRouteQuotaService(
+                Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC)),
+                2,
+                20,
+                10
+        );
+
+        quotaService.checkGuestAllowed("guest-device-1", "127.0.0.1");
+        quotaService.checkGuestAllowed("guest-device-1", "127.0.0.1");
+
+        assertThatThrownBy(() -> quotaService.checkGuestAllowed("guest-device-1", "127.0.0.1"))
+                .isInstanceOf(TooManyRequestsException.class)
+                .hasMessage("AI 경로 추천 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.");
+    }
+
+    @Test
+    @DisplayName("게스트 AI 경로 quota는 device id를 바꿔도 IP 기준 1분 제한을 초과하면 429 예외를 던진다")
+    void checkGuestAllowedRejectsDeviceRotationOverPerMinuteIpLimit() {
+        AiRouteQuotaService quotaService = new AiRouteQuotaService(
+                Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC)),
+                2,
+                20,
+                10
+        );
+
+        quotaService.checkGuestAllowed("guest-device-1", "127.0.0.1");
+        quotaService.checkGuestAllowed("guest-device-2", "127.0.0.1");
+
+        assertThatThrownBy(() -> quotaService.checkGuestAllowed("guest-device-3", "127.0.0.1"))
+                .isInstanceOf(TooManyRequestsException.class)
+                .hasMessage("AI 경로 추천 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.");
+    }
+
+    @Test
+    @DisplayName("게스트 AI 경로 quota는 device id를 바꿔도 IP 기준 하루 제한을 초과하면 429 예외를 던진다")
+    void checkGuestAllowedRejectsDeviceRotationOverDailyIpLimit() {
+        AiRouteQuotaService quotaService = new AiRouteQuotaService(
+                Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC)),
+                20,
+                20,
+                2
+        );
+
+        quotaService.checkGuestAllowed("guest-device-1", "127.0.0.1");
+        quotaService.checkGuestAllowed("guest-device-2", "127.0.0.1");
+
+        assertThatThrownBy(() -> quotaService.checkGuestAllowed("guest-device-3", "127.0.0.1"))
+                .isInstanceOf(TooManyRequestsException.class)
+                .hasMessage("오늘 사용할 수 있는 AI 코스 생성 횟수를 모두 사용했습니다.");
+    }
+
+    @Test
     @DisplayName("로그인 사용자 AI 경로 quota는 user subject 기준으로 하루 20회를 초과하면 429 예외를 던진다")
     void checkAuthenticatedAllowedRejectsRequestsOverDailyLimit() {
         AiRouteQuotaService quotaService = new AiRouteQuotaService(
                 Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC)),
                 30,
                 2,
                 3

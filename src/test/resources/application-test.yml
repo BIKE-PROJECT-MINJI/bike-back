@@ -22,3 +22,7 @@ auth:
     secret: test-only-jwt-secret-32-byte-key!
     issuer: bike-back-test
     token-validity-sec: 900
+
+bike:
+  rate-limit:
+    store: memory

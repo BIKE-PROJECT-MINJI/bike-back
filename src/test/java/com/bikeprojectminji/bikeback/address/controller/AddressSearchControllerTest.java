@@ -1,13 +1,14 @@
 package com.bikeprojectminji.bikeback.address.controller;
 
 import static org.mockito.BDDMockito.given;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.bikeprojectminji.bikeback.address.dto.AddressCandidateResponse;
 import com.bikeprojectminji.bikeback.address.dto.AddressSearchResponse;
+import com.bikeprojectminji.bikeback.address.service.AddressSearchRateLimitService;
 import com.bikeprojectminji.bikeback.address.service.AddressSearchService;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import java.math.BigDecimal;
@@ -36,8 +37,11 @@ class AddressSearchControllerTest {
     @MockitoBean
     private AddressSearchService addressSearchService;
 
+    @MockitoBean
+    private AddressSearchRateLimitService addressSearchRateLimitService;
+
     @Test
-    @DisplayName("주소 검색 API는 인증된 사용자에게 후보와 상태를 success 래퍼로 반환한다")
+    @DisplayName("주소 검색 API는 비로그인 사용자에게도 후보와 상태를 success 래퍼로 반환한다")
     void searchReturnsWrappedAddressCandidates() throws Exception {
         given(addressSearchService.search("북악스카이웨이", 1, 3))
                 .willReturn(new AddressSearchResponse(
@@ -62,7 +66,6 @@ class AddressSearchControllerTest {
                 ));
 
         mockMvc.perform(get("/api/v1/addresses/search")
-                        .with(jwt().jwt(jwt -> jwt.subject("1")))
                         .param("query", "북악스카이웨이")
                         .param("page", "1")
                         .param("size", "3"))
@@ -77,14 +80,7 @@ class AddressSearchControllerTest {
                 .andExpect(jsonPath("$.data.candidates[0].lat").value(37.6026))
                 .andExpect(jsonPath("$.data.candidates[0].lon").value(126.9803))
                 .andExpect(jsonPath("$.data.query").doesNotExist());
-    }
 
-    @Test
-    @DisplayName("주소 검색 API는 비로그인 요청이면 401을 반환한다")
-    void searchReturnsUnauthorizedWithoutToken() throws Exception {
-        mockMvc.perform(get("/api/v1/addresses/search")
-                        .param("query", "북악스카이웨이"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value(401));
+        verify(addressSearchRateLimitService).checkAllowed("127.0.0.1");
     }
 }
