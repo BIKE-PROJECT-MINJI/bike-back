@@ -209,7 +209,7 @@ public class RideRecordService {
             throw new BadRequestException("trace가 없는 자유 주행 기록은 재처리할 수 없습니다.");
         }
         rideRecordFinalizationService.markForRegeneration(rideRecord);
-        rideRecordFinalizationService.requestFinalization(rideRecordId);
+        registerFinalizationAfterCommit(rideRecordId);
         return rideRecordFinalizationService.getStatus(rideRecord);
     }
 

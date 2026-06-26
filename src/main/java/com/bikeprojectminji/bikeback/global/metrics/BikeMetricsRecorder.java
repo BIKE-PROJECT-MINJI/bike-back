@@ -1,10 +1,13 @@
 package com.bikeprojectminji.bikeback.global.metrics;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Duration;
 import org.springframework.stereotype.Component;
 
 @Component
 public class BikeMetricsRecorder {
+
+    private static final int MAX_TAG_VALUE_LENGTH = 60;
 
     private final MeterRegistry meterRegistry;
 
@@ -72,6 +75,31 @@ public class BikeMetricsRecorder {
         meterRegistry.counter("bike_ride_record_finalization_failed_total").increment();
     }
 
+    public void recordRideFinalizationJobAcquired() {
+        meterRegistry.counter("bike_ride_finalization_job_acquired_total").increment();
+    }
+
+    public void recordRideFinalizationJobRetry(String errorCode) {
+        meterRegistry.counter(
+                "bike_ride_finalization_job_retry_total",
+                "error_code", normalize(errorCode)
+        ).increment();
+    }
+
+    public void recordRideFinalizationJobTerminalFailure(String errorCode) {
+        meterRegistry.counter(
+                "bike_ride_finalization_job_terminal_failure_total",
+                "error_code", normalize(errorCode)
+        ).increment();
+    }
+
+    public void recordRideFinalizationJobDuration(String outcome, Duration duration) {
+        meterRegistry.timer(
+                "bike_ride_finalization_job_duration",
+                "outcome", normalize(outcome)
+        ).record(duration);
+    }
+
     public void recordCourseRouteCacheHit(String consumer) {
         meterRegistry.counter("bike_course_route_cache_hit_total", "consumer", normalize(consumer)).increment();
     }
@@ -88,6 +116,13 @@ public class BikeMetricsRecorder {
         meterRegistry.counter("bike_course_route_snapshot_load_total", "consumer", normalize(consumer)).increment();
     }
 
+    public void recordCourseRouteSnapshotLoadDuration(String consumer, Duration duration) {
+        meterRegistry.timer(
+                "bike_course_route_snapshot_load_duration",
+                "consumer", normalize(consumer)
+        ).record(duration);
+    }
+
     public void recordCourseRouteCacheEviction(String reason) {
         meterRegistry.counter("bike_course_route_cache_eviction_total", "reason", normalize(reason)).increment();
     }
@@ -100,10 +135,32 @@ public class BikeMetricsRecorder {
         ).increment();
     }
 
+    public void recordProviderCall(String provider, String operation, String outcome, Duration duration) {
+        meterRegistry.counter(
+                "bike_provider_call_total",
+                "provider", normalize(provider),
+                "operation", normalize(operation),
+                "outcome", normalize(outcome)
+        ).increment();
+        meterRegistry.timer(
+                "bike_provider_latency",
+                "provider", normalize(provider),
+                "operation", normalize(operation),
+                "outcome", normalize(outcome)
+        ).record(duration);
+    }
+
     private String normalize(String value) {
         if (value == null || value.isBlank()) {
             return "unknown";
         }
-        return value.trim().toLowerCase().replace(' ', '_');
+        String normalized = value.trim()
+                .toLowerCase()
+                .replace(' ', '_')
+                .replaceAll("[^a-z0-9_.:-]", "_");
+        if (normalized.length() > MAX_TAG_VALUE_LENGTH) {
+            return normalized.substring(0, MAX_TAG_VALUE_LENGTH);
+        }
+        return normalized;
     }
 }

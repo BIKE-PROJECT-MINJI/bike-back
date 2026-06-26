@@ -166,6 +166,25 @@ CREATE TABLE ride_record_processed_points (
         ON DELETE CASCADE
 );
 
+CREATE TABLE ride_finalization_jobs (
+    id BIGSERIAL PRIMARY KEY,
+    ride_record_id BIGINT NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    next_run_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    locked_by VARCHAR(120),
+    locked_until TIMESTAMP WITH TIME ZONE,
+    last_error_code VARCHAR(80),
+    last_error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT uq_ride_finalization_jobs_ride_record UNIQUE (ride_record_id),
+    CONSTRAINT fk_ride_finalization_jobs_ride_record
+        FOREIGN KEY (ride_record_id) REFERENCES ride_records (id)
+        ON DELETE CASCADE
+);
+
 CREATE TABLE client_events (
     id BIGSERIAL PRIMARY KEY,
     event_name VARCHAR(100) NOT NULL,
@@ -190,6 +209,12 @@ CREATE UNIQUE INDEX uq_courses_owner_source_ride_record
 
 CREATE INDEX idx_ride_records_owner_status_ended_at
     ON ride_records (owner_user_id, finalization_status, ended_at);
+
+CREATE INDEX idx_ride_finalization_jobs_runnable
+    ON ride_finalization_jobs (status, next_run_at, id);
+
+CREATE INDEX idx_ride_finalization_jobs_expired_running
+    ON ride_finalization_jobs (status, locked_until, id);
 
 CREATE INDEX idx_courses_owner_created_at
     ON courses (owner_user_id, created_at);

@@ -92,6 +92,8 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
     }
 
     private BicycleRoutingProviderResult routeOnce(String baseUrl, BicycleRouteRequest request) {
+        long startedAtNanos = System.nanoTime();
+        String outcome = "success";
         try {
             GraphHopperRouteResponse response = restClient.get()
                     .uri(ignored -> {
@@ -118,6 +120,7 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
                     .retrieve()
                     .body(GraphHopperRouteResponse.class);
             if (response == null || response.paths() == null || response.paths().isEmpty()) {
+                outcome = "empty_response";
                 return providerFailure("empty_response");
             }
             List<BicycleRouteCandidate> candidates = response.paths().stream()
@@ -126,13 +129,25 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
                     .filter(candidate -> !candidate.polyline().isEmpty())
                     .toList();
             if (candidates.isEmpty()) {
+                outcome = "invalid_response";
                 return providerFailure("invalid_response");
             }
             return BicycleRoutingProviderResult.success(PROVIDER, candidates);
         } catch (HttpStatusCodeException exception) {
-            return providerFailure(reasonForStatus(exception.getStatusCode().value()));
+            outcome = reasonForStatus(exception.getStatusCode().value());
+            return providerFailure(outcome);
         } catch (RestClientException | IllegalArgumentException exception) {
-            return providerFailure(exception instanceof IllegalArgumentException ? "illegal_argument" : "rest_client_exception");
+            outcome = exception instanceof IllegalArgumentException ? "illegal_argument" : "rest_client_exception";
+            return providerFailure(outcome);
+        } finally {
+            if (bikeMetricsRecorder != null) {
+                bikeMetricsRecorder.recordProviderCall(
+                        PROVIDER,
+                        "route",
+                        outcome,
+                        Duration.ofNanos(System.nanoTime() - startedAtNanos)
+                );
+            }
         }
     }
 

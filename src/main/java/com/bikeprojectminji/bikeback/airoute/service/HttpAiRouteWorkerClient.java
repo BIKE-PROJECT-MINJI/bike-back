@@ -6,10 +6,12 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRouteElevationSummaryResponse
 import com.bikeprojectminji.bikeback.airoute.dto.ProviderEvidenceBadgeResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.RecommendationScoreResponse;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
+import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,8 +32,17 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
     private static final Logger log = LoggerFactory.getLogger(HttpAiRouteWorkerClient.class);
 
     private final RestClient restClient;
+    private final BikeMetricsRecorder bikeMetricsRecorder;
 
-    public HttpAiRouteWorkerClient(@Value("${ai-route.worker.base-url}") String baseUrl) {
+    public HttpAiRouteWorkerClient(String baseUrl) {
+        this(baseUrl, new BikeMetricsRecorder(io.micrometer.core.instrument.Metrics.globalRegistry));
+    }
+
+    @Autowired
+    public HttpAiRouteWorkerClient(
+            @Value("${ai-route.worker.base-url}") String baseUrl,
+            BikeMetricsRecorder bikeMetricsRecorder
+    ) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(3));
         requestFactory.setReadTimeout(Duration.ofSeconds(8));
@@ -39,6 +50,7 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
                 .baseUrl(baseUrl)
                 .requestFactory(requestFactory)
                 .build();
+        this.bikeMetricsRecorder = bikeMetricsRecorder;
     }
 
     @Override
@@ -47,6 +59,8 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
             AiRouteConditionContext context,
             AiRoutePlanResponse fallbackPlan
     ) {
+        long startedAtNanos = System.nanoTime();
+        String outcome = "success";
         try {
             AiRoutePlanResponse response = restClient.post()
                     .uri("/v1/ai-routes/plan")
@@ -56,6 +70,7 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
                     .body(AiRoutePlanResponse.class);
             return Optional.ofNullable(response);
         } catch (HttpStatusCodeException exception) {
+            outcome = "http_" + exception.getStatusCode().value();
             // AI worker는 보조 설명 생성자다. 장애 시 fallback은 유지하되 운영자가 원인을 볼 수 있게 남긴다.
             log.warn(
                     "ai_route_worker_failed reason=http_status status={} endpoint=/v1/ai-routes/plan",
@@ -63,12 +78,20 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
             );
             return Optional.empty();
         } catch (RestClientException exception) {
+            outcome = "rest_client_exception";
             // 네트워크/타임아웃도 사용자 응답은 backend fallback으로 보호하고, 로그에서만 추적한다.
             log.warn(
                     "ai_route_worker_failed reason=rest_client_exception exception={} endpoint=/v1/ai-routes/plan",
                     exception.getClass().getSimpleName()
             );
             return Optional.empty();
+        } finally {
+            bikeMetricsRecorder.recordProviderCall(
+                    "AI_ROUTE_WORKER",
+                    "plan",
+                    outcome,
+                    Duration.ofNanos(System.nanoTime() - startedAtNanos)
+            );
         }
     }
 

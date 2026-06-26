@@ -57,6 +57,8 @@ public class KakaoMobilityBicycleRoutingClient implements BicycleRoutingClient {
         if (restApiKey == null || restApiKey.isBlank()) {
             return providerFailure("missing_api_key");
         }
+        long startedAtNanos = System.nanoTime();
+        String outcome = "success";
         try {
             KakaoBicycleDirectionsResponse response = restClient.get()
                     .uri(uriBuilder -> uriBuilder
@@ -69,6 +71,7 @@ public class KakaoMobilityBicycleRoutingClient implements BicycleRoutingClient {
                     .retrieve()
                     .body(KakaoBicycleDirectionsResponse.class);
             if (response == null || response.routes() == null || response.routes().isEmpty()) {
+                outcome = "empty_response";
                 return providerFailure("empty_response");
             }
             return BicycleRoutingProviderResult.success(PROVIDER, response.routes().stream()
@@ -76,9 +79,20 @@ public class KakaoMobilityBicycleRoutingClient implements BicycleRoutingClient {
                     .map(route -> route.toCandidate(request.preference()))
                     .toList());
         } catch (HttpStatusCodeException exception) {
-            return providerFailure(reasonForStatus(exception.getStatusCode()));
+            outcome = reasonForStatus(exception.getStatusCode());
+            return providerFailure(outcome);
         } catch (RestClientException exception) {
+            outcome = "rest_client_exception";
             return providerFailure("rest_client_exception");
+        } finally {
+            if (bikeMetricsRecorder != null) {
+                bikeMetricsRecorder.recordProviderCall(
+                        PROVIDER,
+                        "route",
+                        outcome,
+                        Duration.ofNanos(System.nanoTime() - startedAtNanos)
+                );
+            }
         }
     }
 

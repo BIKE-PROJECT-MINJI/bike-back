@@ -38,7 +38,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@SpringBootTest
+@SpringBootTest(properties = "bike.app-role=all")
 @ActiveProfiles("test")
 class RideRecordFinalizationIntegrationTest {
 
@@ -56,6 +56,9 @@ class RideRecordFinalizationIntegrationTest {
 
     @Autowired
     private RideRecordRepository rideRecordRepository;
+
+    @Autowired
+    private RideFinalizationJobWorker rideFinalizationJobWorker;
 
     @Autowired
     private CourseRepository courseRepository;
@@ -217,6 +220,7 @@ class RideRecordFinalizationIntegrationTest {
 
     private RideRecordFinalizationStatusResponse awaitReady(Long rideRecordId) throws Exception {
         for (int i = 0; i < 20; i++) {
+            rideFinalizationJobWorker.processDueJobs();
             RideRecordFinalizationStatusResponse status = rideRecordService.getRideRecordStatus("1", rideRecordId);
             if (!"FINALIZING".equals(status.status())) {
                 return status;
