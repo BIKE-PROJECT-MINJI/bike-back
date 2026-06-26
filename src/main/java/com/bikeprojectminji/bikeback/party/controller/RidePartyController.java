@@ -3,7 +3,9 @@ package com.bikeprojectminji.bikeback.party.controller;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import com.bikeprojectminji.bikeback.party.dto.CreateRidePartyRequest;
 import com.bikeprojectminji.bikeback.party.dto.RidePartyListResponse;
+import com.bikeprojectminji.bikeback.party.dto.RidePartyMemberListResponse;
 import com.bikeprojectminji.bikeback.party.dto.RidePartyResponse;
+import com.bikeprojectminji.bikeback.party.dto.RidePartySocketTokenResponse;
 import com.bikeprojectminji.bikeback.party.service.RidePartyService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -38,6 +40,21 @@ public class RidePartyController {
     @PostMapping("/{partyId}/join")
     public ApiResponse<RidePartyResponse> join(@AuthenticationPrincipal Jwt jwt, @PathVariable Long partyId) {
         return ApiResponse.success(ridePartyService.join(jwt.getSubject(), partyId));
+    }
+
+    @PostMapping("/{partyId}/members")
+    public ApiResponse<RidePartyResponse> joinMember(@AuthenticationPrincipal Jwt jwt, @PathVariable Long partyId) {
+        return ApiResponse.success(ridePartyService.join(jwt.getSubject(), partyId));
+    }
+
+    @GetMapping("/{partyId}/members")
+    public ApiResponse<RidePartyMemberListResponse> listMembers(@AuthenticationPrincipal Jwt jwt, @PathVariable Long partyId) {
+        return ApiResponse.success(ridePartyService.listMembers(jwt.getSubject(), partyId));
+    }
+
+    @PostMapping("/{partyId}/socket-token")
+    public ApiResponse<RidePartySocketTokenResponse> issueSocketToken(@AuthenticationPrincipal Jwt jwt, @PathVariable Long partyId) {
+        return ApiResponse.success(ridePartyService.issueSocketToken(jwt.getSubject(), partyId));
     }
 
     @PostMapping("/{partyId}/leave")
