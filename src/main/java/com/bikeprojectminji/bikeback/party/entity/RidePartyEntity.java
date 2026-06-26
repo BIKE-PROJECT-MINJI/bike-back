@@ -55,6 +55,10 @@ public class RidePartyEntity {
         this.status = RidePartyStatus.OPEN;
     }
 
+    public void cancelByReport() {
+        this.status = RidePartyStatus.CANCELED;
+    }
+
     public Long getId() {
         return id;
     }

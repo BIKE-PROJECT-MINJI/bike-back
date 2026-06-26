@@ -11,7 +11,10 @@ import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.party.dto.CreateRidePartyRequest;
 import com.bikeprojectminji.bikeback.party.dto.RidePartyListResponse;
+import com.bikeprojectminji.bikeback.party.dto.RidePartyMemberListResponse;
+import com.bikeprojectminji.bikeback.party.dto.RidePartyMemberResponse;
 import com.bikeprojectminji.bikeback.party.dto.RidePartyResponse;
+import com.bikeprojectminji.bikeback.party.dto.RidePartySocketTokenResponse;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyEntity;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberEntity;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberRole;
@@ -32,14 +35,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class RidePartyService {
 
-    private static final int DEFAULT_CAPACITY = 6;
-    private static final int MIN_CAPACITY = 2;
-    private static final int MAX_CAPACITY = 50;
+    private static final int DEFAULT_CAPACITY = 5;
+    private static final int MIN_CAPACITY = 1;
+    private static final int MAX_CAPACITY = 10;
 
     private final RidePartyRepository partyRepository;
     private final RidePartyMemberRepository memberRepository;
     private final CourseRepository courseRepository;
     private final AuthService authService;
+    private final RidePartySocketTokenService socketTokenService;
     private final Clock clock;
 
     public RidePartyService(
@@ -47,12 +51,14 @@ public class RidePartyService {
             RidePartyMemberRepository memberRepository,
             CourseRepository courseRepository,
             AuthService authService,
+            RidePartySocketTokenService socketTokenService,
             Clock clock
     ) {
         this.partyRepository = partyRepository;
         this.memberRepository = memberRepository;
         this.courseRepository = courseRepository;
         this.authService = authService;
+        this.socketTokenService = socketTokenService;
         this.clock = clock;
     }
 
@@ -112,6 +118,33 @@ public class RidePartyService {
         return toResponse(party, joinedCount + 1, true, Objects.equals(party.getHostUserId(), user.getId()));
     }
 
+    @Transactional(readOnly = true)
+    public RidePartyMemberListResponse listMembers(String subject, Long partyId) {
+        UserEntity user = authService.findUserBySubject(subject);
+        RidePartyEntity party = findOpenParty(partyId);
+        assertCurrentJoinedMember(party.getId(), user.getId());
+        List<RidePartyMemberResponse> members = memberRepository
+                .findByPartyIdAndStatusOrderByJoinedAtAscIdAsc(party.getId(), RidePartyMemberStatus.JOINED)
+                .stream()
+                .map(member -> new RidePartyMemberResponse(
+                        member.getUserId(),
+                        member.getRole().name(),
+                        member.getStatus().name(),
+                        member.getJoinedAt()
+                ))
+                .toList();
+        return new RidePartyMemberListResponse(members);
+    }
+
+    @Transactional(readOnly = true)
+    public RidePartySocketTokenResponse issueSocketToken(String subject, Long partyId) {
+        UserEntity user = authService.findUserBySubject(subject);
+        RidePartyEntity party = findOpenParty(partyId);
+        assertCurrentJoinedMember(party.getId(), user.getId());
+        RidePartySocketTokenService.IssuedRidePartySocketToken issued = socketTokenService.issue(party.getId(), user.getId());
+        return new RidePartySocketTokenResponse(issued.token(), issued.expiresAt());
+    }
+
     @Transactional
     public RidePartyResponse leave(String subject, Long partyId) {
         UserEntity user = authService.findUserBySubject(subject);
@@ -158,7 +191,7 @@ public class RidePartyService {
     private int resolveCapacity(Integer capacity) {
         int resolved = capacity == null ? DEFAULT_CAPACITY : capacity;
         if (resolved < MIN_CAPACITY || resolved > MAX_CAPACITY) {
-            throw new BadRequestException("파티 정원은 2명 이상 50명 이하여야 합니다.");
+            throw new BadRequestException("파티 정원은 1명 이상 10명 이하여야 합니다.");
         }
         return resolved;
     }
@@ -181,6 +214,15 @@ public class RidePartyService {
         }
         return partyRepository.findByIdAndStatusForUpdate(partyId, RidePartyStatus.OPEN)
                 .orElseThrow(() -> new NotFoundException("파티를 찾을 수 없습니다."));
+    }
+
+    private RidePartyMemberEntity assertCurrentJoinedMember(Long partyId, Long userId) {
+        RidePartyMemberEntity member = memberRepository.findByPartyIdAndUserId(partyId, userId)
+                .orElseThrow(() -> new ForbiddenException("파티 참여자만 사용할 수 있습니다."));
+        if (member.getStatus() != RidePartyMemberStatus.JOINED) {
+            throw new ForbiddenException("파티 참여자만 사용할 수 있습니다.");
+        }
+        return member;
     }
 
     private Map<Long, List<RidePartyMemberEntity>> loadJoinedMembersByPartyId(List<RidePartyEntity> parties) {

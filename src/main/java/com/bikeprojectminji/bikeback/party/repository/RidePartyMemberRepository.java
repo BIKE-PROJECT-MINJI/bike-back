@@ -13,5 +13,7 @@ public interface RidePartyMemberRepository extends JpaRepository<RidePartyMember
 
     int countByPartyIdAndStatus(Long partyId, RidePartyMemberStatus status);
 
+    List<RidePartyMemberEntity> findByPartyIdAndStatusOrderByJoinedAtAscIdAsc(Long partyId, RidePartyMemberStatus status);
+
     List<RidePartyMemberEntity> findByPartyIdInAndStatus(Collection<Long> partyIds, RidePartyMemberStatus status);
 }

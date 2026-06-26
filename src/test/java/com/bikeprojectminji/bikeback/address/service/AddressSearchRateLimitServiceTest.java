@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.address.service;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.bikeprojectminji.bikeback.global.exception.TooManyRequestsException;
+import com.bikeprojectminji.bikeback.global.ratelimit.InMemoryFixedWindowRateLimiter;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -16,6 +17,7 @@ class AddressSearchRateLimitServiceTest {
     void checkAllowedRejectsRequestsOverPerMinuteLimit() {
         AddressSearchRateLimitService rateLimitService = new AddressSearchRateLimitService(
                 Clock.fixed(Instant.parse("2026-06-26T05:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-26T05:00:00Z"), ZoneOffset.UTC)),
                 2,
                 10
         );
@@ -33,6 +35,7 @@ class AddressSearchRateLimitServiceTest {
     void checkAllowedRejectsRequestsOverDailyLimit() {
         AddressSearchRateLimitService rateLimitService = new AddressSearchRateLimitService(
                 Clock.fixed(Instant.parse("2026-06-26T05:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-26T05:00:00Z"), ZoneOffset.UTC)),
                 10,
                 2
         );

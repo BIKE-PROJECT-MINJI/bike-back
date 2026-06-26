@@ -65,6 +65,13 @@ public class GlobalExceptionHandler {
                 .body(new ApiResponse<>(429, exception.getMessage(), null));
     }
 
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleServiceUnavailable(ServiceUnavailableException exception, HttpServletRequest request) {
+        log.warn("service_unavailable request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiResponse<>(503, exception.getMessage(), null));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception exception, HttpServletRequest request) {
         log.error("unexpected_error request_id={} method={} path={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception);
