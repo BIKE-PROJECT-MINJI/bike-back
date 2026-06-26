@@ -208,6 +208,8 @@ curl -i -X POST https://example.ngrok.app/api/v1/auth/register \
 
 `/health/monitor`는 DB/Redis 상세 상태를 포함하므로 `roles` claim에 `OPS`가 있는 access token이 필요합니다.
 일반 register/login 토큰에는 `OPS` role이 없으므로 운영 smoke에서는 별도로 발급한 OPS JWT를 사용합니다.
+주소검색, REST AI 추천, AI 생성 세션 quota는 기본적으로 Redis fixed-window 저장소를 사용합니다.
+로컬/운영 실행에서는 `BIKE_RATE_LIMIT_STORE=redis`를 유지하고, Spring test profile에서만 memory store를 사용합니다.
 
 ```bash
 ACCESS_TOKEN=...

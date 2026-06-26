@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.airoute.service;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.bikeprojectminji.bikeback.global.exception.TooManyRequestsException;
+import com.bikeprojectminji.bikeback.global.ratelimit.InMemoryFixedWindowRateLimiter;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -16,6 +17,7 @@ class AiRouteQuotaServiceTest {
     void checkAllowedRejectsRequestsOverPerMinuteLimit() {
         AiRouteQuotaService quotaService = new AiRouteQuotaService(
                 Clock.fixed(Instant.parse("2026-05-27T14:35:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-05-27T14:35:00Z"), ZoneOffset.UTC)),
                 2,
                 20,
                 3
@@ -34,6 +36,7 @@ class AiRouteQuotaServiceTest {
     void checkGuestAllowedRejectsRequestsOverDailyLimit() {
         AiRouteQuotaService quotaService = new AiRouteQuotaService(
                 Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC)),
                 20,
                 20,
                 3
@@ -53,6 +56,7 @@ class AiRouteQuotaServiceTest {
     void checkGuestAllowedRejectsRequestsOverPerMinuteLimit() {
         AiRouteQuotaService quotaService = new AiRouteQuotaService(
                 Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC)),
                 2,
                 20,
                 10
@@ -71,6 +75,7 @@ class AiRouteQuotaServiceTest {
     void checkGuestAllowedRejectsDeviceRotationOverPerMinuteIpLimit() {
         AiRouteQuotaService quotaService = new AiRouteQuotaService(
                 Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC)),
                 2,
                 20,
                 10
@@ -89,6 +94,7 @@ class AiRouteQuotaServiceTest {
     void checkGuestAllowedRejectsDeviceRotationOverDailyIpLimit() {
         AiRouteQuotaService quotaService = new AiRouteQuotaService(
                 Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC)),
                 20,
                 20,
                 2
@@ -107,6 +113,7 @@ class AiRouteQuotaServiceTest {
     void checkAuthenticatedAllowedRejectsRequestsOverDailyLimit() {
         AiRouteQuotaService quotaService = new AiRouteQuotaService(
                 Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC),
+                new InMemoryFixedWindowRateLimiter(Clock.fixed(Instant.parse("2026-06-15T10:00:00Z"), ZoneOffset.UTC)),
                 30,
                 2,
                 3
