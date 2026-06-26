@@ -28,6 +28,7 @@ class PrometheusMetricsIntegrationTest {
         bikeMetricsRecorder.recordCourseRouteCacheHit("ride_policy");
         bikeMetricsRecorder.recordCourseRouteSnapshotLoad("ride_policy");
         bikeMetricsRecorder.recordProviderCall("GraphHopper", "route", "success", java.time.Duration.ofMillis(35));
+        bikeMetricsRecorder.recordOperationDuration("ride.policy.evaluate", "success", java.time.Duration.ofMillis(42));
 
         String scrape = prometheusMeterRegistry.scrape();
 
@@ -45,5 +46,6 @@ class PrometheusMetricsIntegrationTest {
         assertThat(scrape).contains("bike_course_route_snapshot_load_total");
         assertThat(scrape).contains("bike_provider_call_total");
         assertThat(scrape).contains("bike_provider_latency");
+        assertThat(scrape).contains("bike_operation_duration");
     }
 }

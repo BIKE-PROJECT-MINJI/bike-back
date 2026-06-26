@@ -150,6 +150,14 @@ public class BikeMetricsRecorder {
         ).record(duration);
     }
 
+    public void recordOperationDuration(String operation, String outcome, Duration duration) {
+        meterRegistry.timer(
+                "bike_operation_duration",
+                "operation", normalize(operation),
+                "outcome", normalize(outcome)
+        ).record(duration);
+    }
+
     private String normalize(String value) {
         if (value == null || value.isBlank()) {
             return "unknown";

@@ -11,6 +11,7 @@ import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.global.validation.CoordinateValidator;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RideLocationRequest;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyCompletionResponse;
@@ -74,6 +75,7 @@ public class RidePolicyService {
         return evaluate(courseId, null, null, request);
     }
 
+    @MeasuredOperation("ride.policy.evaluate")
     public RidePolicyEvaluationResponse evaluate(Long courseId, String subject, String shareToken, RidePolicyEvaluationRequest request) {
         validateRequest(request);
 

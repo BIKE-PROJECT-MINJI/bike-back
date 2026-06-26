@@ -13,6 +13,12 @@ scrape_configs:
       - targets:
           - ${APP_PRIVATE_HOST}:9121
 
+  - job_name: bike-back-app
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - ${APP_PRIVATE_HOST}:18081
+
   - job_name: prometheus
     static_configs:
       - targets:

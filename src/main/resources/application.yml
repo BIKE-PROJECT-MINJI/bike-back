@@ -43,6 +43,7 @@ management:
       exposure:
         include: health,prometheus
   prometheus:
+    public-scrape-enabled: ${MANAGEMENT_PROMETHEUS_PUBLIC_SCRAPE_ENABLED:false}
     metrics:
       export:
         enabled: true

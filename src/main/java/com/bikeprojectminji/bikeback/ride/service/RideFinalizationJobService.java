@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.ride.service;
 
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.ride.entity.RideFinalizationJobEntity;
 import com.bikeprojectminji.bikeback.ride.entity.RideFinalizationJobStatus;
 import com.bikeprojectminji.bikeback.ride.repository.RideFinalizationJobRepository;
@@ -43,6 +44,7 @@ public class RideFinalizationJobService {
         this.retryBaseDelay = Duration.ofSeconds(retryBaseDelaySec);
     }
 
+    @MeasuredOperation("ride.finalization.job.enqueue")
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void enqueue(Long rideRecordId) {
         OffsetDateTime now = OffsetDateTime.now(clock);
@@ -52,6 +54,7 @@ public class RideFinalizationJobService {
         rideFinalizationJobRepository.save(job);
     }
 
+    @MeasuredOperation("ride.finalization.job.acquire")
     @Transactional
     public Optional<RideFinalizationJobLease> acquireNext(String workerId) {
         OffsetDateTime now = OffsetDateTime.now(clock);
@@ -74,6 +77,7 @@ public class RideFinalizationJobService {
         return Optional.of(new RideFinalizationJobLease(job.getId(), job.getRideRecordId(), job.getAttemptCount()));
     }
 
+    @MeasuredOperation("ride.finalization.job.succeed")
     @Transactional
     public boolean markSucceeded(Long jobId, String workerId, int attemptCount, Duration duration) {
         RideFinalizationJobEntity job = rideFinalizationJobRepository.findById(jobId).orElseThrow();
@@ -86,6 +90,7 @@ public class RideFinalizationJobService {
         return true;
     }
 
+    @MeasuredOperation("ride.finalization.job.fail_or_retry")
     @Transactional
     public boolean markFailedOrRetry(
             Long jobId,

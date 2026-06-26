@@ -39,12 +39,22 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, ObjectMapper objectMapper) throws Exception {
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            ObjectMapper objectMapper,
+            @Value("${management.prometheus.public-scrape-enabled:false}") boolean prometheusPublicScrapeEnabled
+    ) throws Exception {
         http
                 .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(authorize -> authorize
+                .authorizeHttpRequests(authorize -> {
+                    if (prometheusPublicScrapeEnabled) {
+                        authorize.requestMatchers(HttpMethod.GET, "/actuator/prometheus").permitAll();
+                    } else {
+                        authorize.requestMatchers(HttpMethod.GET, "/actuator/prometheus").hasAuthority("ROLE_OPS");
+                    }
+                    authorize
                         .requestMatchers("/api/v1/auth/register").permitAll()
                         .requestMatchers("/api/v1/auth/login").permitAll()
                         .requestMatchers("/api/v1/auth/kakao/login").permitAll()
@@ -90,8 +100,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses/*/share").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/courses/*").authenticated()
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/courses/*/visibility").authenticated()
-                        .anyRequest().authenticated()
-                )
+                        .anyRequest().authenticated();
+                })
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(this::accessTokenAuthentication)))
                 .exceptionHandling(exceptionHandling -> exceptionHandling
                         .authenticationEntryPoint((request, response, exception) -> {

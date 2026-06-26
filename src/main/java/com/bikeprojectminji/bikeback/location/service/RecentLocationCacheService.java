@@ -7,6 +7,7 @@ import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordPointEntity;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -42,6 +43,7 @@ public class RecentLocationCacheService {
         this.rideRecordPointRepository = rideRecordPointRepository;
     }
 
+    @MeasuredOperation("location.recent.find")
     public Optional<RecentLocationSnapshot> find(String subject) {
         // subject 기준 최근 위치는 현재 단계에서 1건만 유지하므로, 그대로 Optional로 조회한다.
         Optional<RecentLocationSnapshot> snapshot = recentLocationCacheStore.find(subject);
@@ -88,6 +90,7 @@ public class RecentLocationCacheService {
         return Optional.of(fallback);
     }
 
+    @MeasuredOperation("location.recent.save_completed")
     public void saveCompleted(
             String subject,
             Long rideRecordId,

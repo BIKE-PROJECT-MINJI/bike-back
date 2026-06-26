@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.party.service;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyLocationPointEntity;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyLocationPointRepository;
 import com.bikeprojectminji.bikeback.party.websocket.RidePartyLocationMessage;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ public class RidePartyLocationService {
         this.clock = clock;
     }
 
+    @MeasuredOperation("party.location.save")
     @Transactional
     public void saveLocation(Long partyId, Long userId, RidePartyLocationMessage location) {
         locationPointRepository.save(RidePartyLocationPointEntity.create(
@@ -34,6 +36,7 @@ public class RidePartyLocationService {
         ));
     }
 
+    @MeasuredOperation("party.location.cleanup")
     @Transactional
     public int deleteExpiredLocationPoints() {
         return locationPointRepository.deleteByCreatedAtBefore(OffsetDateTime.now(clock).minusHours(24));
