@@ -1,11 +1,16 @@
 package com.bikeprojectminji.bikeback.party.controller;
 
+import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import com.bikeprojectminji.bikeback.party.dto.CreateRidePartyRequest;
 import com.bikeprojectminji.bikeback.party.dto.RidePartyListResponse;
 import com.bikeprojectminji.bikeback.party.dto.RidePartyMemberListResponse;
+import com.bikeprojectminji.bikeback.party.dto.RidePartyReportRequest;
+import com.bikeprojectminji.bikeback.party.dto.RidePartyReportResponse;
 import com.bikeprojectminji.bikeback.party.dto.RidePartyResponse;
 import com.bikeprojectminji.bikeback.party.dto.RidePartySocketTokenResponse;
+import com.bikeprojectminji.bikeback.party.entity.RidePartyReportReason;
+import com.bikeprojectminji.bikeback.party.service.RidePartyReportService;
 import com.bikeprojectminji.bikeback.party.service.RidePartyService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -22,9 +27,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class RidePartyController {
 
     private final RidePartyService ridePartyService;
+    private final RidePartyReportService ridePartyReportService;
 
-    public RidePartyController(RidePartyService ridePartyService) {
+    public RidePartyController(RidePartyService ridePartyService, RidePartyReportService ridePartyReportService) {
         this.ridePartyService = ridePartyService;
+        this.ridePartyReportService = ridePartyReportService;
     }
 
     @PostMapping
@@ -57,8 +64,28 @@ public class RidePartyController {
         return ApiResponse.success(ridePartyService.issueSocketToken(jwt.getSubject(), partyId));
     }
 
+    @PostMapping("/{partyId}/reports")
+    public ApiResponse<RidePartyReportResponse> report(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long partyId,
+            @RequestBody RidePartyReportRequest request
+    ) {
+        return ApiResponse.success(ridePartyReportService.reportParty(jwt.getSubject(), partyId, parseReportReason(request)));
+    }
+
     @PostMapping("/{partyId}/leave")
     public ApiResponse<RidePartyResponse> leave(@AuthenticationPrincipal Jwt jwt, @PathVariable Long partyId) {
         return ApiResponse.success(ridePartyService.leave(jwt.getSubject(), partyId));
+    }
+
+    private RidePartyReportReason parseReportReason(RidePartyReportRequest request) {
+        if (request == null || request.reason() == null || request.reason().isBlank()) {
+            throw new BadRequestException("reason은 비어 있을 수 없습니다.");
+        }
+        try {
+            return RidePartyReportReason.valueOf(request.reason().toUpperCase());
+        } catch (IllegalArgumentException exception) {
+            throw new BadRequestException("reason은 지원하지 않는 신고 사유입니다.");
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.bikeprojectminji.bikeback.party.websocket;
 
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.validation.CoordinateValidator;
+import com.bikeprojectminji.bikeback.party.service.RidePartyLocationService;
 import com.bikeprojectminji.bikeback.party.service.RidePartySocketTokenPayload;
 import com.bikeprojectminji.bikeback.party.service.RidePartySocketTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,14 +28,17 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
 
     private final ObjectMapper objectMapper;
     private final RidePartySocketTokenService socketTokenService;
+    private final RidePartyLocationService locationService;
     private final Map<Long, Set<WebSocketSession>> sessionsByPartyId = new ConcurrentHashMap<>();
 
     public RidePartyLocationWebSocketHandler(
             ObjectMapper objectMapper,
-            RidePartySocketTokenService socketTokenService
+            RidePartySocketTokenService socketTokenService,
+            RidePartyLocationService locationService
     ) {
         this.objectMapper = objectMapper;
         this.socketTokenService = socketTokenService;
+        this.locationService = locationService;
     }
 
     @Override
@@ -62,6 +66,7 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
         try {
             RidePartyLocationMessage location = objectMapper.readValue(message.getPayload(), RidePartyLocationMessage.class);
             CoordinateValidator.validateLatLon("latitude", location.latitude(), "longitude", location.longitude());
+            locationService.saveLocation(partyId, userId, location);
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("partyId", partyId);
             data.put("userId", userId);

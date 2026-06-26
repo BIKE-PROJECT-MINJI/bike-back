@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.bikeprojectminji.bikeback.party.service.RidePartyLocationService;
 import com.bikeprojectminji.bikeback.party.service.RidePartySocketTokenPayload;
 import com.bikeprojectminji.bikeback.party.service.RidePartySocketTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,7 +26,12 @@ class RidePartyLocationWebSocketHandlerTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private final RidePartySocketTokenService socketTokenService = mock(RidePartySocketTokenService.class);
-    private final RidePartyLocationWebSocketHandler handler = new RidePartyLocationWebSocketHandler(objectMapper, socketTokenService);
+    private final RidePartyLocationService locationService = mock(RidePartyLocationService.class);
+    private final RidePartyLocationWebSocketHandler handler = new RidePartyLocationWebSocketHandler(
+            objectMapper,
+            socketTokenService,
+            locationService
+    );
 
     @Test
     @DisplayName("파티 위치 WebSocket은 socket token을 소비하고 같은 파티 세션에 위치를 브로드캐스트한다")
@@ -57,9 +63,10 @@ class RidePartyLocationWebSocketHandlerTest {
                     assertThat(payload).contains("\"partyId\":20");
                     assertThat(payload).contains("\"userId\":2");
                     assertThat(payload).contains("\"latitude\":37.5001");
-                });
+        });
         verify(socketTokenService).consume("token-1", 20L);
         verify(socketTokenService).consume("token-2", 20L);
+        verify(locationService).saveLocation(eq(20L), eq(2L), org.mockito.ArgumentMatchers.any());
     }
 
     private WebSocketSession session(String token) {
