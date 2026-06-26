@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.course.service;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import com.bikeprojectminji.bikeback.course.dto.CourseDetailResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseDifficultyResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseDownloadResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseListItemResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseListResponse;
@@ -66,7 +67,8 @@ public class CourseQueryService {
                         row.id(),
                         row.title(),
                         row.distanceKm(),
-                        row.estimatedDurationMin()
+                        row.estimatedDurationMin(),
+                        difficultyFor(row.id(), row.distanceKm(), row.estimatedDurationMin())
                 ))
                 .toList();
         String nextCursor = hasNext && !pageCourses.isEmpty()
@@ -84,7 +86,8 @@ public class CourseQueryService {
                 course.getDistanceKm(),
                 course.getEstimatedDurationMin(),
                 course.getSourceRideRecordId(),
-                course.isSourceDetached()
+                course.isSourceDetached(),
+                difficultyFor(course.getId(), course.getDistanceKm(), course.getEstimatedDurationMin())
         );
     }
 
@@ -104,7 +107,8 @@ public class CourseQueryService {
                         course.getId(),
                         course.getTitle(),
                         course.getDistanceKm(),
-                        course.getEstimatedDurationMin()
+                        course.getEstimatedDurationMin(),
+                        difficultyFor(course.getId(), course.getDistanceKm(), course.getEstimatedDurationMin())
                 ))
                 .toList();
         return new CourseListResponse(items, false, null);
@@ -229,6 +233,38 @@ public class CourseQueryService {
                 course.getStartLongitude().doubleValue()
         );
         return BigDecimal.valueOf(distanceMeters).setScale(0, RoundingMode.HALF_UP).intValue();
+    }
+
+    private CourseDifficultyResponse difficultyFor(Long courseId, BigDecimal distanceKm, Integer estimatedDurationMin) {
+        CourseRouteSnapshot snapshot = courseRouteSnapshotService.get(courseId, "course_difficulty");
+        int routePointCount = snapshot == null || snapshot.routePoints() == null ? 0 : snapshot.routePoints().size();
+        int score = difficultyScore(distanceKm, estimatedDurationMin, routePointCount);
+        String level;
+        String label;
+        if (score >= 75) {
+            level = "HARD";
+            label = "어려움";
+        } else if (score >= 45) {
+            level = "NORMAL";
+            label = "보통";
+        } else {
+            level = "EASY";
+            label = "쉬움";
+        }
+        return new CourseDifficultyResponse(
+                level,
+                label,
+                score,
+                "거리, 예상 소요시간, 경로점 복잡도를 기준으로 계산했습니다."
+        );
+    }
+
+    private int difficultyScore(BigDecimal distanceKm, Integer estimatedDurationMin, int routePointCount) {
+        BigDecimal safeDistanceKm = distanceKm == null ? BigDecimal.ZERO : distanceKm.max(BigDecimal.ZERO);
+        int distanceScore = safeDistanceKm.multiply(BigDecimal.valueOf(4)).min(BigDecimal.valueOf(45)).intValue();
+        int durationScore = Math.min(25, Math.max(0, estimatedDurationMin == null ? 0 : estimatedDurationMin / 4));
+        int complexityScore = Math.min(30, Math.max(0, routePointCount / 8));
+        return Math.min(100, distanceScore + durationScore + complexityScore);
     }
 
     private boolean isBlank(String value) {

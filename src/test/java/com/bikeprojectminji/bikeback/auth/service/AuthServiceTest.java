@@ -441,6 +441,34 @@ class AuthServiceTest {
                 .hasMessage("이메일 또는 비밀번호가 올바르지 않습니다.");
     }
 
+    @Test
+    @DisplayName("로그인은 삭제된 계정을 거부한다")
+    void loginThrowsWhenUserIsDeleted() {
+        AuthService authService = createAuthService();
+        UserEntity user = new UserEntity("external-1", "bikeoasis@example.com", passwordEncoder.encode("example-password"), "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        user.markDeleted(clock);
+        given(userRepository.findByEmail("bikeoasis@example.com")).willReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.login(new LoginRequest("bikeoasis@example.com", "example-password")))
+                .isInstanceOf(UnauthorizedException.class)
+                .hasMessage("이메일 또는 비밀번호가 올바르지 않습니다.");
+    }
+
+    @Test
+    @DisplayName("subject 조회는 삭제된 계정을 인증 실패로 처리한다")
+    void findUserBySubjectThrowsWhenUserIsDeleted() {
+        AuthService authService = createAuthService();
+        UserEntity user = new UserEntity("external-1", "bikeoasis@example.com", passwordEncoder.encode("example-password"), "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        user.markDeleted(clock);
+        given(userRepository.findById(1L)).willReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.findUserBySubject("1"))
+                .isInstanceOf(UnauthorizedException.class)
+                .hasMessage("로그인 정보가 필요합니다.");
+    }
+
     private AuthService createAuthService() {
         return createAuthService(refreshTokenStore);
     }

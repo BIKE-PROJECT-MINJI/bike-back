@@ -50,6 +50,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/kakao/login").permitAll()
                         .requestMatchers("/api/v1/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/beta-invitations/verify").permitAll()
+                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         // /health는 로드밸런서/스모크 테스트용 생존 확인만 공개한다.
                         // DB/Redis 상세가 포함된 /health/monitor는 아래 OPS 권한 규칙에서 보호한다.
                         .requestMatchers("/health").permitAll()
@@ -65,6 +66,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses/*/route-points").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses/*/download").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses/*/ride-policy/evaluate").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/addresses/search").permitAll()
                         .requestMatchers("/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/profile/me", "/api/v1/profile/me/activity-summary").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/profile/me/preferences").authenticated()
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/profile/me/preferences").authenticated()
@@ -73,7 +75,6 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/health/monitor").hasAuthority("ROLE_OPS")
                         .requestMatchers("/api/v1/admin/**").hasAuthority("ROLE_OPS_ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/v1/location/me/recent").authenticated()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/addresses/search").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/me/achievements").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/events", "/api/v1/events/batch").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/ride-records").authenticated()
@@ -84,6 +85,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/ride-records/*/regenerate").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/ride-records/*").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/courses/import-gpx").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses/*/reports").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/courses/*/share").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/courses/*").authenticated()

@@ -9,6 +9,7 @@ import com.bikeprojectminji.bikeback.course.dto.FeaturedCourseItemResponse;
 import com.bikeprojectminji.bikeback.course.dto.FeaturedCourseResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.course.service.CourseQueryService;
+import com.bikeprojectminji.bikeback.course.service.CoursePublicationService;
 import com.bikeprojectminji.bikeback.course.service.CourseReportService;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
 import com.bikeprojectminji.bikeback.ride.policy.service.RidePolicyService;
@@ -43,6 +44,9 @@ class FeaturedCourseControllerTest {
 
     @MockitoBean
     private CourseReportService courseReportService;
+
+    @MockitoBean
+    private CoursePublicationService coursePublicationService;
 
     @MockitoBean
     private RidePolicyService ridePolicyService;

@@ -7,6 +7,7 @@ import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointRequest;
 import com.bikeprojectminji.bikeback.course.dto.CourseShareResponse;
 import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
 import com.bikeprojectminji.bikeback.course.dto.CreateCourseFromRideRecordRequest;
+import com.bikeprojectminji.bikeback.course.dto.ImportGpxCourseRequest;
 import com.bikeprojectminji.bikeback.course.dto.UpdateCourseRequest;
 import com.bikeprojectminji.bikeback.course.dto.UpdateCourseVisibilityRequest;
 import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
@@ -50,6 +51,7 @@ public class CourseService {
     private final CourseRouteSnapshotService courseRouteSnapshotService;
     private final AchievementCompletionDispatcher achievementCompletionDispatcher;
     private final CourseAccessPolicy courseAccessPolicy = new CourseAccessPolicy();
+    private final GpxTrackParser gpxTrackParser = new GpxTrackParser();
 
     public CourseService(
             CourseRepository courseRepository,
@@ -126,6 +128,37 @@ public class CourseService {
         return toCourseWriteResponse(savedCourse);
     }
 
+    public CourseWriteResponse importGpxCourse(String subject, ImportGpxCourseRequest request) {
+        validateImportGpxRequest(request);
+        UserEntity user = authService.findUserBySubject(subject);
+        List<CourseRoutePointRequest> routePoints = normalizeRoutePoints(gpxTrackParser.parse(request.gpx()));
+        BigDecimal distanceKm = toDistanceKm(distanceMeters(routePoints));
+        Integer durationMin = estimateDurationMin(distanceKm);
+        CourseVisibility visibility = parseVisibility(request.visibility());
+
+        CourseEntity course = new CourseEntity(
+                request.title().trim(),
+                request.description(),
+                distanceKm,
+                durationMin,
+                resolveNextDisplayOrder(),
+                false,
+                null,
+                routePoints.get(0).latitude(),
+                routePoints.get(0).longitude(),
+                user.getId(),
+                visibility
+        );
+        CourseEntity savedCourse = courseRepository.save(course);
+        courseRoutePointRepository.saveAll(routePoints.stream()
+                .map(point -> new CourseRoutePointEntity(savedCourse.getId(), point.pointOrder(), point.latitude(), point.longitude()))
+                .toList());
+        courseRoutePointRepository.flush();
+        courseRouteGeometryRepository.refreshRouteLine(savedCourse.getId());
+        courseRouteSnapshotService.evict(savedCourse.getId(), "gpx_imported");
+        return toCourseWriteResponse(savedCourse);
+    }
+
     public CourseWriteResponse updateCourse(String subject, Long courseId, UpdateCourseRequest request) {
         // 코스 수정은 metadata 수정과 route point 교체를 한 트랜잭션으로 처리해
         // 제목/설명/visibility와 경로 포인트가 어긋난 상태를 남기지 않게 한다.
@@ -195,6 +228,18 @@ public class CourseService {
         }
     }
 
+    private void validateImportGpxRequest(ImportGpxCourseRequest request) {
+        if (request == null) {
+            throw new BadRequestException("GPX 코스 저장 요청 본문이 필요합니다.");
+        }
+        if (request.title() == null || request.title().isBlank()) {
+            throw new BadRequestException("title은 비어 있을 수 없습니다.");
+        }
+        if (request.visibility() == null || request.visibility().isBlank()) {
+            throw new BadRequestException("visibility는 비어 있을 수 없습니다.");
+        }
+    }
+
     private void validateUpdateRequest(UpdateCourseRequest request) {
         if (request == null) {
             throw new BadRequestException("코스 저장 요청 본문이 필요합니다.");
@@ -240,6 +285,39 @@ public class CourseService {
         return BigDecimal.valueOf(durationSec)
                 .divide(BigDecimal.valueOf(60), 0, RoundingMode.HALF_UP)
                 .intValue();
+    }
+
+    private BigDecimal toDistanceKm(long distanceM) {
+        return BigDecimal.valueOf(distanceM)
+                .divide(BigDecimal.valueOf(1000), 1, RoundingMode.HALF_UP);
+    }
+
+    private Integer estimateDurationMin(BigDecimal distanceKm) {
+        return distanceKm
+                .divide(BigDecimal.valueOf(15), 4, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(60))
+                .setScale(0, RoundingMode.HALF_UP)
+                .max(BigDecimal.ONE)
+                .intValue();
+    }
+
+    private long distanceMeters(List<CourseRoutePointRequest> routePoints) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (int index = 1; index < routePoints.size(); index++) {
+            total = total.add(BigDecimal.valueOf(haversineMeters(routePoints.get(index - 1), routePoints.get(index))));
+        }
+        return total.setScale(0, RoundingMode.HALF_UP).longValue();
+    }
+
+    private double haversineMeters(CourseRoutePointRequest left, CourseRoutePointRequest right) {
+        double earthRadiusM = 6371000.0;
+        double dLat = Math.toRadians(right.latitude().doubleValue() - left.latitude().doubleValue());
+        double dLon = Math.toRadians(right.longitude().doubleValue() - left.longitude().doubleValue());
+        double lat1 = Math.toRadians(left.latitude().doubleValue());
+        double lat2 = Math.toRadians(right.latitude().doubleValue());
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return earthRadiusM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     private List<CourseRoutePointRequest> normalizeRoutePoints(List<CourseRoutePointRequest> routePoints) {

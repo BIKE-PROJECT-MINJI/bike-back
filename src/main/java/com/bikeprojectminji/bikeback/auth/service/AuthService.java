@@ -89,6 +89,9 @@ public class AuthService {
         UserEntity user = userRepository.findByEmail(request.email())
                 .orElseThrow(() -> new UnauthorizedException("이메일 또는 비밀번호가 올바르지 않습니다."));
 
+        if (user.isDeleted()) {
+            throw new UnauthorizedException("이메일 또는 비밀번호가 올바르지 않습니다.");
+        }
         if (user.getPasswordHash() == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw new UnauthorizedException("이메일 또는 비밀번호가 올바르지 않습니다.");
         }
@@ -151,12 +154,19 @@ public class AuthService {
         // 두 경로를 모두 허용해 이전 토큰과 새 토큰의 연속성을 유지한다.
         try {
             Long userId = Long.valueOf(subject);
-            return userRepository.findById(userId)
-                    .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다."));
+            return requireActiveUser(userRepository.findById(userId)
+                    .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다.")));
         } catch (NumberFormatException exception) {
-            return userRepository.findByExternalId(subject)
-                    .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다."));
+            return requireActiveUser(userRepository.findByExternalId(subject)
+                    .orElseThrow(() -> new UnauthorizedException("로그인 정보가 필요합니다.")));
         }
+    }
+
+    private UserEntity requireActiveUser(UserEntity user) {
+        if (user.isDeleted()) {
+            throw new UnauthorizedException("로그인 정보가 필요합니다.");
+        }
+        return user;
     }
 
     private UserEntity updateLinkedKakaoUser(KakaoAccountLinkEntity link, KakaoAccountProfile profile) {

@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
@@ -23,8 +22,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 @Component
-@Order(0)
-@ConditionalOnProperty(prefix = "routing.bicycle", name = "provider", havingValue = "kakao")
+@Order(10)
 public class KakaoMobilityBicycleRoutingClient implements BicycleRoutingClient {
 
     private static final String PROVIDER = "KAKAO_MOBILITY";

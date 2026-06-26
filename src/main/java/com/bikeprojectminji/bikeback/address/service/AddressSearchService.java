@@ -12,22 +12,42 @@ public class AddressSearchService {
     private static final int DEFAULT_PAGE = 1;
     private static final int DEFAULT_SIZE = 5;
     private static final int MAX_SIZE = 10;
+    private static final int MAX_QUERY_LENGTH = 120;
 
-    private final AddressSearchClient addressSearchClient;
+    private final List<AddressSearchClient> addressSearchClients;
 
-    public AddressSearchService(AddressSearchClient addressSearchClient) {
-        this.addressSearchClient = addressSearchClient;
+    public AddressSearchService(List<AddressSearchClient> addressSearchClients) {
+        this.addressSearchClients = List.copyOf(addressSearchClients);
     }
 
     public AddressSearchResponse search(String rawQuery, Integer page, Integer size) {
         AddressSearchQuery query = normalizeQuery(rawQuery, page, size);
-        AddressSearchProviderResult providerResult = addressSearchClient.search(query);
+        AddressSearchProviderResult providerResult = searchWithFallback(query);
         return toResponse(query, providerResult);
+    }
+
+    private AddressSearchProviderResult searchWithFallback(AddressSearchQuery query) {
+        AddressSearchProviderResult lastResult = null;
+        for (AddressSearchClient client : addressSearchClients) {
+            AddressSearchProviderResult result = client.search(query);
+            if (result.status() == AddressSearchProviderStatus.SUCCESS) {
+                return result;
+            }
+            lastResult = result;
+        }
+        if (lastResult != null) {
+            return lastResult;
+        }
+        return AddressSearchProviderResult.providerFailure("NONE");
     }
 
     private AddressSearchQuery normalizeQuery(String rawQuery, Integer page, Integer size) {
         if (rawQuery == null || rawQuery.isBlank()) {
             throw new BadRequestException("query는 비어 있을 수 없습니다.");
+        }
+        String normalizedQuery = rawQuery.trim();
+        if (normalizedQuery.length() > MAX_QUERY_LENGTH) {
+            throw new BadRequestException("query는 " + MAX_QUERY_LENGTH + "자 이하여야 합니다.");
         }
         int normalizedPage = page == null ? DEFAULT_PAGE : page;
         int normalizedSize = size == null ? DEFAULT_SIZE : size;
@@ -37,7 +57,7 @@ public class AddressSearchService {
         if (normalizedSize < 1 || normalizedSize > MAX_SIZE) {
             throw new BadRequestException("size는 1 이상 " + MAX_SIZE + " 이하여야 합니다.");
         }
-        return new AddressSearchQuery(rawQuery.trim(), normalizedPage, normalizedSize);
+        return new AddressSearchQuery(normalizedQuery, normalizedPage, normalizedSize);
     }
 
     private AddressSearchResponse toResponse(AddressSearchQuery query, AddressSearchProviderResult providerResult) {

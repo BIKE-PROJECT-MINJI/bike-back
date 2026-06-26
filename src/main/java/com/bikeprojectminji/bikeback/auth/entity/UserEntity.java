@@ -101,6 +101,11 @@ public class UserEntity {
         this.accountStatus = "DELETED";
         this.deletedAt = now;
         this.externalId = "deleted:" + id + ":" + now.toInstant().toEpochMilli();
+        this.email = null;
+        this.passwordHash = null;
+        this.displayName = "deleted-user-" + id;
+        this.profileImageUrl = null;
+        this.betaAccessGranted = false;
     }
 
     public void grantBetaAccess() {

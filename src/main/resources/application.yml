@@ -55,6 +55,12 @@ management:
           server:
             requests: true
 
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
 auth:
   jwt:
     secret: ${AUTH_JWT_SECRET}
@@ -63,10 +69,13 @@ auth:
 
 address:
   search:
-    provider: ${ADDRESS_SEARCH_PROVIDER:fake}
+    provider: ${ADDRESS_SEARCH_PROVIDER:kakao}
     kakao:
       base-url: ${KAKAO_LOCAL_BASE_URL:https://dapi.kakao.com}
       rest-api-key: ${KAKAO_LOCAL_REST_API_KEY:}
+    nominatim:
+      base-url: ${NOMINATIM_BASE_URL:https://nominatim.openstreetmap.org}
+      user-agent: ${NOMINATIM_USER_AGENT:BIKE-GAJA-local-prototype/1.0}
 
 app:
   cors:

@@ -61,8 +61,20 @@ public class AiRouteQuotaService {
         if (guestDeviceId == null || guestDeviceId.isBlank()) {
             throw new BadRequestException("게스트 device id가 필요합니다.");
         }
-        String subject = "GUEST:" + guestDeviceId.trim();
-        checkDailyAllowed(subject, guestDailyLimit);
+        String normalizedIp = normalizeIp(ipAddress);
+        String ipSubject = "GUEST_IP:" + normalizedIp;
+        String deviceSubject = "GUEST_DEVICE:" + normalizedIp + ":" + guestDeviceId.trim();
+        checkAllowed(ipSubject);
+        checkAllowed(deviceSubject);
+        checkDailyAllowed(ipSubject, guestDailyLimit);
+        checkDailyAllowed(deviceSubject, guestDailyLimit);
+    }
+
+    private String normalizeIp(String ipAddress) {
+        if (ipAddress == null || ipAddress.isBlank()) {
+            return "UNKNOWN";
+        }
+        return ipAddress.trim();
     }
 
     private void checkDailyAllowed(String subject, int limit) {

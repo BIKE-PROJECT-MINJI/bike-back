@@ -28,8 +28,8 @@ CREATE TABLE user_consents (
     privacy_policy_version VARCHAR(80) NOT NULL,
     terms_version VARCHAR(80) NOT NULL,
     location_terms_version VARCHAR(80) NOT NULL,
-    age_verified BOOLEAN NOT NULL DEFAULT TRUE,
-    age_band VARCHAR(20) NOT NULL DEFAULT 'ADULT',
+    age_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    age_band VARCHAR(20) NOT NULL DEFAULT 'UNKNOWN',
     age_verified_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     consented_at TIMESTAMP WITH TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
@@ -245,3 +245,47 @@ CREATE TABLE achievement_grants (
     granted_at TIMESTAMP WITH TIME ZONE NOT NULL,
     CONSTRAINT uq_achievement_grants_user_type_source UNIQUE (user_id, achievement_type, source_key)
 );
+
+CREATE TABLE course_publications (
+    id BIGSERIAL PRIMARY KEY,
+    course_id BIGINT NOT NULL,
+    owner_user_id BIGINT NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    published_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    unpublished_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT uq_course_publications_course UNIQUE (course_id)
+);
+
+CREATE INDEX idx_course_publications_owner_status
+    ON course_publications (owner_user_id ASC, status ASC);
+
+CREATE TABLE ride_parties (
+    id BIGSERIAL PRIMARY KEY,
+    course_id BIGINT NOT NULL,
+    host_user_id BIGINT NOT NULL,
+    title VARCHAR(120) NOT NULL,
+    scheduled_start_at TIMESTAMP WITH TIME ZONE,
+    capacity INTEGER NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+CREATE TABLE ride_party_members (
+    id BIGSERIAL PRIMARY KEY,
+    party_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    role VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    joined_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    left_at TIMESTAMP WITH TIME ZONE,
+    CONSTRAINT uq_ride_party_members_party_user UNIQUE (party_id, user_id)
+);
+
+CREATE INDEX idx_ride_parties_course_status_created
+    ON ride_parties (course_id, status, created_at DESC, id DESC);
+
+CREATE INDEX idx_ride_party_members_party_status
+    ON ride_party_members (party_id, status);

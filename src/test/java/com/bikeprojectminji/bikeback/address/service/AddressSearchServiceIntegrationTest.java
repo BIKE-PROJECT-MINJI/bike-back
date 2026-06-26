@@ -74,6 +74,41 @@ class AddressSearchServiceIntegrationTest {
     }
 
     @Test
+    @DisplayName("주소 검색은 1차 provider 실패 시 다음 provider 후보로 fallback한다")
+    void searchFallsBackToNextProviderWhenPrimaryFails() {
+        AddressSearchService service = new AddressSearchService(List.of(
+                query -> AddressSearchProviderResult.providerFailure("KAKAO_LOCAL"),
+                query -> AddressSearchProviderResult.success(
+                        "NOMINATIM",
+                        List.of(new AddressCandidate(
+                                "n1",
+                                "여의나루역",
+                                "서울 영등포구 여의도동",
+                                BigDecimal.valueOf(37.5271),
+                                BigDecimal.valueOf(126.9328),
+                                "NOMINATIM",
+                                "STATION",
+                                "MEDIUM"
+                        ))
+                )
+        ));
+
+        AddressSearchResponse response = service.search("여의나루역", 1, 5);
+
+        assertThat(response.status()).isEqualTo("SUCCESS");
+        assertThat(response.provider()).isEqualTo("NOMINATIM");
+        assertThat(response.candidates()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("주소 검색은 너무 긴 query를 provider 호출 전에 거부한다")
+    void searchRejectsTooLongQuery() {
+        assertThatThrownBy(() -> addressSearchService.search("가".repeat(121), 1, 5))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("120자");
+    }
+
+    @Test
     @DisplayName("주소 검색은 provider rate limit을 RATE_LIMITED 상태로 변환한다")
     void searchReturnsRateLimitedWhenProviderRateLimited() {
         addressSearchClient.nextResult(AddressSearchProviderResult.rateLimited("FAKE"));
@@ -100,10 +135,6 @@ class AddressSearchServiceIntegrationTest {
             return new ScenarioAddressSearchClient();
         }
 
-        @Bean
-        AddressSearchClient addressSearchClient(ScenarioAddressSearchClient client) {
-            return client;
-        }
     }
 
     static class ScenarioAddressSearchClient implements AddressSearchClient {
