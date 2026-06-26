@@ -289,3 +289,15 @@ CREATE INDEX idx_ride_parties_course_status_created
 
 CREATE INDEX idx_ride_party_members_party_status
     ON ride_party_members (party_id, status);
+
+CREATE TABLE ride_party_reports (
+    id BIGSERIAL PRIMARY KEY,
+    party_id BIGINT NOT NULL,
+    reporter_user_id BIGINT NOT NULL,
+    reason VARCHAR(60) NOT NULL,
+    reported_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT uq_ride_party_reports_party_reporter UNIQUE (party_id, reporter_user_id)
+);
+
+CREATE INDEX idx_ride_party_reports_party
+    ON ride_party_reports (party_id);
