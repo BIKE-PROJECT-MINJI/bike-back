@@ -4,6 +4,7 @@ import com.bikeprojectminji.bikeback.address.dto.AddressCandidateResponse;
 import com.bikeprojectminji.bikeback.address.dto.AddressSearchResponse;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import io.micrometer.core.instrument.Metrics;
 import java.time.Duration;
 import java.util.List;
@@ -31,6 +32,7 @@ public class AddressSearchService {
         this.bikeMetricsRecorder = bikeMetricsRecorder;
     }
 
+    @MeasuredOperation("address.search")
     public AddressSearchResponse search(String rawQuery, Integer page, Integer size) {
         AddressSearchQuery query = normalizeQuery(rawQuery, page, size);
         AddressSearchProviderResult providerResult = searchWithFallback(query);

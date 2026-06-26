@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.routing.service;
 
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import java.math.BigDecimal;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,7 @@ public class BicycleRoutingService {
         this.qualityValidator = qualityValidator;
     }
 
+    @MeasuredOperation("routing.bicycle.route")
     public BicycleRoutePlan route(BicycleRouteRequest request) {
         validate(request);
         for (int index = 0; index < routingClients.size(); index++) {

@@ -39,6 +39,7 @@ class BikeMetricsRecorderTest {
         recorder.recordCourseRouteCacheEviction("route_points_updated");
         recorder.recordRoutingProviderFailure("GraphHopper", "http_429");
         recorder.recordProviderCall("GraphHopper", "route", "success", java.time.Duration.ofMillis(35));
+        recorder.recordOperationDuration("ride.policy.evaluate", "success", java.time.Duration.ofMillis(42));
 
         assertThat(meterRegistry.get("bike_weather_fallback_total").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_weather_stale_served_total").counter().count()).isEqualTo(1.0);
@@ -93,6 +94,11 @@ class BikeMetricsRecorderTest {
         assertThat(meterRegistry.get("bike_provider_latency")
                 .tag("provider", "graphhopper")
                 .tag("operation", "route")
+                .tag("outcome", "success")
+                .timer()
+                .count()).isEqualTo(1);
+        assertThat(meterRegistry.get("bike_operation_duration")
+                .tag("operation", "ride.policy.evaluate")
                 .tag("outcome", "success")
                 .timer()
                 .count()).isEqualTo(1);

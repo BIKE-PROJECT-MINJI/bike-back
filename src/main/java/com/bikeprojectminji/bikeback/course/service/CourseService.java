@@ -21,6 +21,7 @@ import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.global.validation.CoordinateValidator;
 import java.math.RoundingMode;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
@@ -73,6 +74,7 @@ public class CourseService {
         this.achievementCompletionDispatcher = achievementCompletionDispatcher;
     }
 
+    @MeasuredOperation("course.write.from_ride_record")
     public CourseWriteResponse createCourseFromRideRecord(String subject, CreateCourseFromRideRecordRequest request) {
         // 코스 생성은 사용자가 소유한 ride record를 읽어 route point를 course route point로 복제하는 방식이다.
         // 즉 ride 기록과 course는 source of truth를 공유하지 않고, 생성 시점에 복사본을 만든다.
@@ -128,6 +130,7 @@ public class CourseService {
         return toCourseWriteResponse(savedCourse);
     }
 
+    @MeasuredOperation("course.write.import_gpx")
     public CourseWriteResponse importGpxCourse(String subject, ImportGpxCourseRequest request) {
         validateImportGpxRequest(request);
         UserEntity user = authService.findUserBySubject(subject);
@@ -159,6 +162,7 @@ public class CourseService {
         return toCourseWriteResponse(savedCourse);
     }
 
+    @MeasuredOperation("course.write.update")
     public CourseWriteResponse updateCourse(String subject, Long courseId, UpdateCourseRequest request) {
         // 코스 수정은 metadata 수정과 route point 교체를 한 트랜잭션으로 처리해
         // 제목/설명/visibility와 경로 포인트가 어긋난 상태를 남기지 않게 한다.
@@ -183,6 +187,7 @@ public class CourseService {
         return toCourseWriteResponse(courseRepository.save(course));
     }
 
+    @MeasuredOperation("course.write.visibility")
     public CourseWriteResponse updateCourseVisibility(String subject, Long courseId, UpdateCourseVisibilityRequest request) {
         if (request == null || request.visibility() == null || request.visibility().isBlank()) {
             throw new BadRequestException("visibility는 비어 있을 수 없습니다.");
@@ -193,6 +198,7 @@ public class CourseService {
         return toCourseWriteResponse(courseRepository.save(course));
     }
 
+    @MeasuredOperation("course.share.info")
     public CourseShareResponse getCourseShareInfo(String subject, Long courseId) {
         // 공유 정보 조회는 PRIVATE 코스를 먼저 차단하고,
         // 공개 가능한 코스에 대해서만 shareToken을 생성 또는 재사용한다.

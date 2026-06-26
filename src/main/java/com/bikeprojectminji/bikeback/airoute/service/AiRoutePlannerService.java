@@ -4,6 +4,7 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteTextPlanRequest;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePlan;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteRequest;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutingService;
@@ -45,6 +46,7 @@ public class AiRoutePlannerService {
         return plan(null, request);
     }
 
+    @MeasuredOperation("ai_route.plan")
     public AiRoutePlanResponse plan(String subject, AiRoutePlanRequest request) {
         validate(request);
         AiRoutePlanRequest resolvedRequest = applyDefaultDestination(applyDefaultRideStyle(subject, request));
@@ -59,6 +61,7 @@ public class AiRoutePlannerService {
                 .orElse(basePlan);
     }
 
+    @MeasuredOperation("ai_route.plan_from_text")
     public AiRoutePlanResponse planFromText(String subject, AiRouteTextPlanRequest request) {
         validateTextRequest(request);
         AiRoutePlanRequest resolvedRequest = textIntentResolver.resolve(request);

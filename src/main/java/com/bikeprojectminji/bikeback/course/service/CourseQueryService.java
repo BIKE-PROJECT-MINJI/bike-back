@@ -20,6 +20,7 @@ import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.global.logging.RequestLogContext;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Comparator;
@@ -56,6 +57,7 @@ public class CourseQueryService {
         this.courseRouteSnapshotService = courseRouteSnapshotService;
     }
 
+    @MeasuredOperation("course.read.list")
     public CourseListResponse getCourses(Long cursor, Integer limit) {
         int pageSize = resolveLimit(limit);
         List<CourseListRow> queriedCourses = courseRepository.findPublicListPageAfter(cursor, pageSize + 1);
@@ -78,6 +80,7 @@ public class CourseQueryService {
         return new CourseListResponse(items, hasNext, nextCursor);
     }
 
+    @MeasuredOperation("course.read.detail")
     public CourseDetailResponse getCourseDetail(Long courseId, String subject, String shareToken) {
         CourseEntity course = findReadableCourse(courseId, subject, shareToken);
         return new CourseDetailResponse(
@@ -91,12 +94,14 @@ public class CourseQueryService {
         );
     }
 
+    @MeasuredOperation("course.read.route_points")
     public CourseRoutePointsResponse getCourseRoutePoints(Long courseId, String subject, String shareToken) {
         CourseEntity course = findReadableCourse(courseId, subject, shareToken);
         List<CourseRoutePointResponse> points = courseRouteSnapshotService.get(course.getId(), "route_points").responsePoints();
         return new CourseRoutePointsResponse(course.getId(), points);
     }
 
+    @MeasuredOperation("course.search.public")
     public CourseListResponse searchPublicCourses(String query, String sort) {
         validateSearchSort(sort);
         List<CourseEntity> courses = isBlank(query)
@@ -114,6 +119,7 @@ public class CourseQueryService {
         return new CourseListResponse(items, false, null);
     }
 
+    @MeasuredOperation("course.read.featured")
     public FeaturedCourseResponse getFeaturedCourses(BigDecimal lat, BigDecimal lon) {
         boolean distanceMode = lat != null && lon != null;
         if (distanceMode) {
@@ -152,6 +158,7 @@ public class CourseQueryService {
         return new FeaturedCourseResponse(distanceMode ? "distance" : "fallback", items);
     }
 
+    @MeasuredOperation("course.download")
     public CourseDownloadResponse downloadCourse(Long courseId, String subject, String shareToken) {
         CourseEntity course = findReadableCourse(courseId, subject, shareToken);
         List<CourseRoutePointResponse> routePoints = courseRouteSnapshotService.get(course.getId(), "course_download").responsePoints();

@@ -6,6 +6,7 @@ import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.ConflictException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.location.service.RecentLocationCacheService;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordSummaryRequest;
@@ -59,6 +60,7 @@ public class RideRecordService {
         this.rideRecordFinalizationService = rideRecordFinalizationService;
     }
 
+    @MeasuredOperation("ride.record.save_full")
     @Transactional
     public RideRecordResponse saveRideRecord(String subject, CreateRideRecordRequest request) {
         // 자유 주행 저장은 입력 검증 -> 현재 사용자 식별 -> ride record 저장 -> route point 저장 순서로 진행한다.
@@ -104,6 +106,7 @@ public class RideRecordService {
         return new RideRecordResponse(rideRecordId, user.getId(), routePoints.size(), rideRecord.getFinalizationStatus().name());
     }
 
+    @MeasuredOperation("ride.record.save_summary")
     @Transactional
     public RideRecordResponse saveRideRecordSummary(String subject, CreateRideRecordSummaryRequest request) {
         // 웹 HUD 기본 저장은 요약만 남긴다. trace가 없으면 후처리 대상 raw point가 없어 finalization을 시작하지 않는다.
@@ -136,6 +139,7 @@ public class RideRecordService {
         return new RideRecordResponse(rideRecord.getId(), user.getId(), 0, rideRecord.getFinalizationStatus().name());
     }
 
+    @MeasuredOperation("ride.record.trace_save")
     @Transactional
     public RideRecordResponse saveRideRecordTrace(String subject, Long rideRecordId, RideRecordTraceRequest request) {
         if (request == null) {
@@ -159,6 +163,7 @@ public class RideRecordService {
         return new RideRecordResponse(rideRecordId, user.getId(), routePoints.size(), rideRecord.getFinalizationStatus().name());
     }
 
+    @MeasuredOperation("ride.record.list")
     @Transactional(readOnly = true)
     public RideRecordListResponse listRideRecords(String subject) {
         UserEntity user = authService.findUserBySubject(subject);
@@ -178,6 +183,7 @@ public class RideRecordService {
                 .toList());
     }
 
+    @MeasuredOperation("ride.record.status")
     @Transactional(readOnly = true)
     public RideRecordFinalizationStatusResponse getRideRecordStatus(String subject, Long rideRecordId) {
         UserEntity user = authService.findUserBySubject(subject);
@@ -200,6 +206,7 @@ public class RideRecordService {
         );
     }
 
+    @MeasuredOperation("ride.record.regenerate")
     @Transactional
     public RideRecordFinalizationStatusResponse regenerateRideRecord(String subject, Long rideRecordId) {
         UserEntity user = authService.findUserBySubject(subject);

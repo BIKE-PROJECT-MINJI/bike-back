@@ -4,6 +4,7 @@ import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointResponse;
 import com.bikeprojectminji.bikeback.course.entity.CourseRoutePointEntity;
 import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepository;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.ride.policy.service.RouteProjectionIndex;
 import java.time.Clock;
 import java.time.Duration;
@@ -37,6 +38,7 @@ public class CourseRouteSnapshotService {
         this.ttl = Duration.ofSeconds(ttlSec);
     }
 
+    @MeasuredOperation("course.route.snapshot")
     public CourseRouteSnapshot get(Long courseId, String consumer) {
         if (!enabled) {
             bikeMetricsRecorder.recordCourseRouteCacheBypass(consumer);
