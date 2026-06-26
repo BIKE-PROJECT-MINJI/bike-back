@@ -107,6 +107,7 @@ ai-route:
     allowed-origins: ${AI_ROUTE_WEBSOCKET_ALLOWED_ORIGINS:}
 
 bike:
+  app-role: ${BIKE_APP_ROLE:all}
   rate-limit:
     store: ${BIKE_RATE_LIMIT_STORE:redis}
   async:

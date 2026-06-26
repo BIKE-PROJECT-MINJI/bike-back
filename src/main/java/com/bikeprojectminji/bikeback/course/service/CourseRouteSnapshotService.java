@@ -70,21 +70,29 @@ public class CourseRouteSnapshotService {
     }
 
     private CourseRouteSnapshot loadSnapshot(Long courseId, String consumer) {
+        long startedAtNanos = System.nanoTime();
         bikeMetricsRecorder.recordCourseRouteSnapshotLoad(consumer);
-        List<CourseRoutePointEntity> routePoints = List.copyOf(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId));
-        List<CourseRoutePointResponse> responsePoints = routePoints.stream()
-                .map(routePoint -> new CourseRoutePointResponse(
-                        routePoint.getPointOrder(),
-                        routePoint.getLatitude(),
-                        routePoint.getLongitude()
-                ))
-                .toList();
-        return new CourseRouteSnapshot(
-                courseId,
-                routePoints,
-                responsePoints,
-                new RouteProjectionIndex(routePoints)
-        );
+        try {
+            List<CourseRoutePointEntity> routePoints = List.copyOf(courseRoutePointRepository.findByCourseIdOrderByPointOrderAsc(courseId));
+            List<CourseRoutePointResponse> responsePoints = routePoints.stream()
+                    .map(routePoint -> new CourseRoutePointResponse(
+                            routePoint.getPointOrder(),
+                            routePoint.getLatitude(),
+                            routePoint.getLongitude()
+                    ))
+                    .toList();
+            return new CourseRouteSnapshot(
+                    courseId,
+                    routePoints,
+                    responsePoints,
+                    new RouteProjectionIndex(routePoints)
+            );
+        } finally {
+            bikeMetricsRecorder.recordCourseRouteSnapshotLoadDuration(
+                    consumer,
+                    Duration.ofNanos(System.nanoTime() - startedAtNanos)
+            );
+        }
     }
 
     private record CachedCourseRouteSnapshot(CourseRouteSnapshot snapshot, Instant expiresAt) {

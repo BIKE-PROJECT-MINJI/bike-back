@@ -225,6 +225,9 @@ public class RidePolicyService {
         if (request == null || request.phase() == null || request.location() == null) {
             throw new BadRequestException("phase와 location은 필수입니다.");
         }
+        if (!"PRE_START".equals(request.phase()) && !"ACTIVE".equals(request.phase())) {
+            throw new BadRequestException("phase는 PRE_START 또는 ACTIVE여야 합니다.");
+        }
         validateLocation(request.location());
         if (request.trace() != null) {
             for (RideLocationRequest tracePoint : request.trace()) {

@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.bikeprojectminji.bikeback.address.dto.AddressSearchResponse;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -133,6 +135,11 @@ class AddressSearchServiceIntegrationTest {
         @Bean
         ScenarioAddressSearchClient scenarioAddressSearchClient() {
             return new ScenarioAddressSearchClient();
+        }
+
+        @Bean
+        BikeMetricsRecorder bikeMetricsRecorder() {
+            return new BikeMetricsRecorder(new SimpleMeterRegistry());
         }
 
     }

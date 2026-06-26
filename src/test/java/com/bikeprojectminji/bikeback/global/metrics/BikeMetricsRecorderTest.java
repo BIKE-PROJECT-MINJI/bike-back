@@ -27,12 +27,18 @@ class BikeMetricsRecorderTest {
         recorder.recordFeaturedCoursesFallback("missing_location_parameters");
         recorder.recordRidePolicyUndetermined("ACTIVE", "stale_location");
         recorder.recordRideRecordFinalizationFailure();
+        recorder.recordRideFinalizationJobAcquired();
+        recorder.recordRideFinalizationJobRetry("IllegalStateException");
+        recorder.recordRideFinalizationJobTerminalFailure("IllegalStateException");
+        recorder.recordRideFinalizationJobDuration("succeeded", java.time.Duration.ofMillis(125));
         recorder.recordCourseRouteCacheHit("ride_policy");
         recorder.recordCourseRouteCacheMiss("ride_policy");
         recorder.recordCourseRouteCacheBypass("course_download");
         recorder.recordCourseRouteSnapshotLoad("route_points");
+        recorder.recordCourseRouteSnapshotLoadDuration("route_points", java.time.Duration.ofMillis(10));
         recorder.recordCourseRouteCacheEviction("route_points_updated");
         recorder.recordRoutingProviderFailure("GraphHopper", "http_429");
+        recorder.recordProviderCall("GraphHopper", "route", "success", java.time.Duration.ofMillis(35));
 
         assertThat(meterRegistry.get("bike_weather_fallback_total").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_weather_stale_served_total").counter().count()).isEqualTo(1.0);
@@ -54,15 +60,41 @@ class BikeMetricsRecorderTest {
                 .counter()
                 .count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_ride_record_finalization_failed_total").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_ride_finalization_job_acquired_total").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_ride_finalization_job_retry_total")
+                .tag("error_code", "illegalstateexception")
+                .counter()
+                .count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_ride_finalization_job_terminal_failure_total")
+                .tag("error_code", "illegalstateexception")
+                .counter()
+                .count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_ride_finalization_job_duration")
+                .tag("outcome", "succeeded")
+                .timer()
+                .count()).isEqualTo(1);
         assertThat(meterRegistry.get("bike_course_route_cache_hit_total").tag("consumer", "ride_policy").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_course_route_cache_miss_total").tag("consumer", "ride_policy").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_course_route_cache_bypass_total").tag("consumer", "course_download").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_course_route_snapshot_load_total").tag("consumer", "route_points").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_course_route_snapshot_load_duration").tag("consumer", "route_points").timer().count()).isEqualTo(1);
         assertThat(meterRegistry.get("bike_course_route_cache_eviction_total").tag("reason", "route_points_updated").counter().count()).isEqualTo(1.0);
         assertThat(meterRegistry.get("bike_routing_provider_failure_total")
                 .tag("provider", "graphhopper")
                 .tag("reason", "http_429")
                 .counter()
                 .count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_provider_call_total")
+                .tag("provider", "graphhopper")
+                .tag("operation", "route")
+                .tag("outcome", "success")
+                .counter()
+                .count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get("bike_provider_latency")
+                .tag("provider", "graphhopper")
+                .tag("operation", "route")
+                .tag("outcome", "success")
+                .timer()
+                .count()).isEqualTo(1);
     }
 }

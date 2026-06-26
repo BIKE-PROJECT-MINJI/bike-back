@@ -21,9 +21,12 @@ public class HttpRequestLoggingFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         long startedAt = System.currentTimeMillis();
         String requestId = RequestLogContext.resolveRequestId(request.getHeader(RequestLogContext.REQUEST_ID_HEADER));
+        String traceId = RequestLogContext.resolveTraceId(request.getHeader(RequestLogContext.TRACE_ID_HEADER));
         request.setAttribute(RequestLogContext.REQUEST_ID_ATTRIBUTE, requestId);
+        request.setAttribute(RequestLogContext.TRACE_ID_ATTRIBUTE, traceId);
         response.setHeader(RequestLogContext.REQUEST_ID_HEADER, requestId);
-        RequestLogContext.bind(requestId);
+        response.setHeader(RequestLogContext.TRACE_ID_HEADER, traceId);
+        RequestLogContext.bind(requestId, traceId);
         ContentCachingResponseWrapper responseWrapper = new ContentCachingResponseWrapper(response);
 
         try {
@@ -32,11 +35,11 @@ public class HttpRequestLoggingFilter extends OncePerRequestFilter {
             long durationMs = System.currentTimeMillis() - startedAt;
             int status = responseWrapper.getStatus();
             if (status >= 500) {
-                log.error("http_request outcome=failure request_id={} method={} path={} status={} duration_ms={} remote_addr={}",
-                        requestId, request.getMethod(), request.getRequestURI(), status, durationMs, request.getRemoteAddr());
+                log.error("http_request outcome=failure request_id={} trace_id={} method={} path={} status={} duration_ms={} remote_addr={}",
+                        requestId, traceId, request.getMethod(), request.getRequestURI(), status, durationMs, request.getRemoteAddr());
             } else {
-                log.info("http_request outcome=success request_id={} method={} path={} status={} duration_ms={} remote_addr={}",
-                        requestId, request.getMethod(), request.getRequestURI(), status, durationMs, request.getRemoteAddr());
+                log.info("http_request outcome=success request_id={} trace_id={} method={} path={} status={} duration_ms={} remote_addr={}",
+                        requestId, traceId, request.getMethod(), request.getRequestURI(), status, durationMs, request.getRemoteAddr());
             }
             responseWrapper.copyBodyToResponse();
             RequestLogContext.clear();

@@ -3,7 +3,11 @@ package com.bikeprojectminji.bikeback.address.service;
 import com.bikeprojectminji.bikeback.address.dto.AddressCandidateResponse;
 import com.bikeprojectminji.bikeback.address.dto.AddressSearchResponse;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
+import io.micrometer.core.instrument.Metrics;
+import java.time.Duration;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -15,9 +19,16 @@ public class AddressSearchService {
     private static final int MAX_QUERY_LENGTH = 120;
 
     private final List<AddressSearchClient> addressSearchClients;
+    private final BikeMetricsRecorder bikeMetricsRecorder;
 
     public AddressSearchService(List<AddressSearchClient> addressSearchClients) {
+        this(addressSearchClients, new BikeMetricsRecorder(Metrics.globalRegistry));
+    }
+
+    @Autowired
+    public AddressSearchService(List<AddressSearchClient> addressSearchClients, BikeMetricsRecorder bikeMetricsRecorder) {
         this.addressSearchClients = List.copyOf(addressSearchClients);
+        this.bikeMetricsRecorder = bikeMetricsRecorder;
     }
 
     public AddressSearchResponse search(String rawQuery, Integer page, Integer size) {
@@ -29,7 +40,14 @@ public class AddressSearchService {
     private AddressSearchProviderResult searchWithFallback(AddressSearchQuery query) {
         AddressSearchProviderResult lastResult = null;
         for (AddressSearchClient client : addressSearchClients) {
+            long startedAtNanos = System.nanoTime();
             AddressSearchProviderResult result = client.search(query);
+            bikeMetricsRecorder.recordProviderCall(
+                    result.provider(),
+                    "address_search",
+                    result.status().name(),
+                    Duration.ofNanos(System.nanoTime() - startedAtNanos)
+            );
             if (result.status() == AddressSearchProviderStatus.SUCCESS) {
                 return result;
             }

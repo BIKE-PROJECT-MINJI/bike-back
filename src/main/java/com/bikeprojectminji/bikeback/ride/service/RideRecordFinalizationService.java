@@ -7,7 +7,6 @@ import com.bikeprojectminji.bikeback.ride.repository.RideRecordPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordProcessedPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
 import java.time.OffsetDateTime;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,23 +16,22 @@ public class RideRecordFinalizationService {
     private final RideRecordRepository rideRecordRepository;
     private final RideRecordPointRepository rideRecordPointRepository;
     private final RideRecordProcessedPointRepository rideRecordProcessedPointRepository;
-    private final RideRecordFinalizationProcessor rideRecordFinalizationProcessor;
+    private final RideFinalizationJobService rideFinalizationJobService;
 
     public RideRecordFinalizationService(
             RideRecordRepository rideRecordRepository,
             RideRecordPointRepository rideRecordPointRepository,
             RideRecordProcessedPointRepository rideRecordProcessedPointRepository,
-            RideRecordFinalizationProcessor rideRecordFinalizationProcessor
+            RideFinalizationJobService rideFinalizationJobService
     ) {
         this.rideRecordRepository = rideRecordRepository;
         this.rideRecordPointRepository = rideRecordPointRepository;
         this.rideRecordProcessedPointRepository = rideRecordProcessedPointRepository;
-        this.rideRecordFinalizationProcessor = rideRecordFinalizationProcessor;
+        this.rideFinalizationJobService = rideFinalizationJobService;
     }
 
-    @Async
     public void requestFinalization(Long rideRecordId) {
-        rideRecordFinalizationProcessor.finalizeRideRecord(rideRecordId);
+        rideFinalizationJobService.enqueue(rideRecordId);
     }
 
     @Transactional

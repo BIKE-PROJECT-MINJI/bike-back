@@ -22,8 +22,12 @@ class PrometheusMetricsIntegrationTest {
         bikeMetricsRecorder.recordWeatherRefreshSkipped("already_in_progress");
         bikeMetricsRecorder.recordRidePolicyUndetermined("PRE_START", "low_accuracy");
         bikeMetricsRecorder.recordRideRecordFinalizationFailure();
+        bikeMetricsRecorder.recordRideFinalizationJobAcquired();
+        bikeMetricsRecorder.recordRideFinalizationJobRetry("IllegalStateException");
+        bikeMetricsRecorder.recordRideFinalizationJobDuration("succeeded", java.time.Duration.ofMillis(125));
         bikeMetricsRecorder.recordCourseRouteCacheHit("ride_policy");
         bikeMetricsRecorder.recordCourseRouteSnapshotLoad("ride_policy");
+        bikeMetricsRecorder.recordProviderCall("GraphHopper", "route", "success", java.time.Duration.ofMillis(35));
 
         String scrape = prometheusMeterRegistry.scrape();
 
@@ -34,7 +38,12 @@ class PrometheusMetricsIntegrationTest {
         assertThat(scrape).contains("bike_weather_refresh_skipped_total");
         assertThat(scrape).contains("bike_ride_policy_undetermined_total");
         assertThat(scrape).contains("bike_ride_record_finalization_failed_total");
+        assertThat(scrape).contains("bike_ride_finalization_job_acquired_total");
+        assertThat(scrape).contains("bike_ride_finalization_job_retry_total");
+        assertThat(scrape).contains("bike_ride_finalization_job_duration");
         assertThat(scrape).contains("bike_course_route_cache_hit_total");
         assertThat(scrape).contains("bike_course_route_snapshot_load_total");
+        assertThat(scrape).contains("bike_provider_call_total");
+        assertThat(scrape).contains("bike_provider_latency");
     }
 }

@@ -7,6 +7,7 @@ var ACTIVE_PERSONAS = parsePersonaFilter(__ENV.PERSONAS || 'home,profile,preRide
 var TEST_ID = __ENV.TEST_ID || 'bike-' + SCENARIO;
 var SUMMARY_DIR = (__ENV.SUMMARY_DIR || 'ops/loadtest/results').replace(/\/$/, '');
 var ENABLE_WEATHER_READ = ((__ENV.ENABLE_WEATHER_READ || 'true') + '').toLowerCase() !== 'false';
+var SLOW_REQUEST_SAMPLE_MS = intEnv('SLOW_REQUEST_SAMPLE_MS', 1000);
 
 if (!BASE_URL) {
   throw new Error('BASE_URL 환경변수는 필수입니다. 예: BASE_URL=http://localhost:8080');
@@ -48,6 +49,62 @@ function baseRequestTags(extra) {
     result[key] = extra[key];
   });
   return result;
+}
+
+function generateCorrelationId() {
+  return [
+    TEST_ID.replace(/[^a-zA-Z0-9._:-]/g, '-'),
+    'vu' + (__VU || 0),
+    'iter' + (__ITER || 0),
+    Math.random().toString(16).slice(2, 10),
+  ].join('-');
+}
+
+function responseHeader(response, name) {
+  if (!response || !response.headers) {
+    return '';
+  }
+  var expected = name.toLowerCase();
+  var keys = Object.keys(response.headers);
+  for (var i = 0; i < keys.length; i += 1) {
+    if (keys[i].toLowerCase() === expected) {
+      return response.headers[keys[i]];
+    }
+  }
+  return '';
+}
+
+function withCorrelationHeaders(headers, requestId, traceId) {
+  var merged = {};
+  Object.keys(headers || {}).forEach(function(key) {
+    merged[key] = headers[key];
+  });
+  merged['X-Request-Id'] = requestId;
+  merged['X-Trace-Id'] = traceId;
+  return merged;
+}
+
+function logSlowRequest(response, method, path, endpoint, requestId, traceId) {
+  var durationMs = response && response.timings ? response.timings.duration : 0;
+  if (durationMs < SLOW_REQUEST_SAMPLE_MS) {
+    return;
+  }
+  console.warn(JSON.stringify({
+    type: 'slow_request_sample',
+    test_id: TEST_ID,
+    scenario: SCENARIO,
+    vu: __VU || 0,
+    iter: __ITER || 0,
+    method: method,
+    path: path,
+    endpoint: endpoint || 'unknown',
+    status: response ? response.status : 0,
+    duration_ms: durationMs,
+    request_id: requestId,
+    response_request_id: responseHeader(response, 'X-Request-Id'),
+    trace_id: traceId,
+    response_trace_id: responseHeader(response, 'X-Trace-Id'),
+  }));
 }
 
 function weightedVus(total, weightPercent) {
@@ -196,25 +253,33 @@ function getJson(path, tags, params) {
   params = params || {};
   var auth = authHeaders(params.authToken);
   var paramHeaders = params.headers || {};
+  var requestId = generateCorrelationId();
+  var traceId = generateCorrelationId();
   var mergedHeaders = { Accept: 'application/json' };
   Object.keys(auth).forEach(function(key) { mergedHeaders[key] = auth[key]; });
   Object.keys(paramHeaders).forEach(function(key) { mergedHeaders[key] = paramHeaders[key]; });
   var merged = {
     tags: baseRequestTags(tags),
-    headers: mergedHeaders,
+    headers: withCorrelationHeaders(mergedHeaders, requestId, traceId),
   };
-  return http.get(BASE_URL + path, merged);
+  var response = http.get(BASE_URL + path, merged);
+  logSlowRequest(response, 'GET', path, tags.endpoint, requestId, traceId);
+  return response;
 }
 
 function postJson(path, body, tags, authToken) {
   tags = tags || {};
   var auth = authHeaders(authToken);
+  var requestId = generateCorrelationId();
+  var traceId = generateCorrelationId();
   var mergedHeaders = { 'Content-Type': 'application/json', Accept: 'application/json' };
   Object.keys(auth).forEach(function(key) { mergedHeaders[key] = auth[key]; });
-  return http.post(BASE_URL + path, JSON.stringify(body), {
+  var response = http.post(BASE_URL + path, JSON.stringify(body), {
     tags: baseRequestTags(tags),
-    headers: mergedHeaders,
+    headers: withCorrelationHeaders(mergedHeaders, requestId, traceId),
   });
+  logSlowRequest(response, 'POST', path, tags.endpoint, requestId, traceId);
+  return response;
 }
 
 function commonChecks(response, expectedStatus) {
@@ -269,9 +334,11 @@ function extractAccessToken(response) {
 }
 
 function postSetupJson(path, body, endpoint) {
+  var requestId = generateCorrelationId();
+  var traceId = generateCorrelationId();
   return http.post(BASE_URL + path, JSON.stringify(body), {
     tags: baseRequestTags({ flow: 'setup', endpoint: endpoint }),
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: withCorrelationHeaders({ 'Content-Type': 'application/json', Accept: 'application/json' }, requestId, traceId),
     responseCallback: http.expectedStatuses(200, 400, 401, 409),
   });
 }
@@ -575,6 +642,8 @@ function textSummary(data, options) {
   }
   lines.push(indent + 'scenario_profile: ' + SCENARIO);
   lines.push(indent + 'testid: ' + TEST_ID);
+  lines.push(indent + 'slow_request_sample_ms: ' + SLOW_REQUEST_SAMPLE_MS);
+  lines.push(indent + 'slow_request_samples: stdout JSON lines type=slow_request_sample');
   lines.push(indent + 'iterations: ' + iterations);
   lines.push(indent + 'http_req_failed(rate): ' + failedRate);
   lines.push(indent + 'http_req_duration(p95): ' + p95 + ' ms');
