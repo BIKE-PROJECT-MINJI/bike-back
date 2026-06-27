@@ -16,10 +16,18 @@ import os
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
+
+from deployment_finalization_smoke import finalization_job_snapshot
+from deployment_finalization_smoke import poll_finalization_ready
+from deployment_smoke_support import SmokeFailure
+from deployment_smoke_support import api_data
+from deployment_smoke_support import request
+from deployment_smoke_support import require_status
+from deployment_smoke_support import sanitize_headers
+from deployment_smoke_support import slim
+from deployment_smoke_support import verify_api_response
 
 
 BASE_URL = os.environ.get("BIKE_SMOKE_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
@@ -34,61 +42,6 @@ CORS_ORIGINS = [
     for origin in os.environ.get("BIKE_SMOKE_CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",")
     if origin.strip()
 ]
-
-
-class SmokeFailure(Exception):
-    pass
-
-
-def request(method: str, url: str, payload: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> dict[str, Any]:
-    request_headers = dict(headers or {})
-    data = None
-    if payload is not None:
-        data = json.dumps(payload, ensure_ascii=False).encode()
-        request_headers.setdefault("Content-Type", "application/json")
-    http_request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
-    try:
-        with urllib.request.urlopen(http_request, timeout=25) as response:
-            raw = response.read()
-            return {
-                "method": method,
-                "url": url,
-                "status": response.status,
-                "bodyBytes": len(raw),
-                "headers": dict(response.headers),
-                "body": parse_json(raw.decode(errors="replace")),
-            }
-    except urllib.error.HTTPError as error:
-        raw = error.read()
-        return {
-            "method": method,
-            "url": url,
-            "status": error.code,
-            "bodyBytes": len(raw),
-            "headers": dict(error.headers),
-            "body": parse_json(raw.decode(errors="replace")),
-        }
-
-
-def parse_json(value: str) -> Any:
-    if not value:
-        return None
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return value
-
-
-def api_data(result: dict[str, Any]) -> dict[str, Any]:
-    body = result.get("body")
-    if not isinstance(body, dict) or not isinstance(body.get("data"), dict):
-        raise SmokeFailure(f"{result['method']} {result['url']} 응답에 data object가 없습니다.")
-    return body["data"]
-
-
-def require_status(result: dict[str, Any], expected: int, label: str) -> None:
-    if result["status"] != expected:
-        raise SmokeFailure(f"{label} status={result['status']}, expected={expected}")
 
 
 def b64url(data: bytes) -> str:
@@ -118,18 +71,6 @@ def ops_token() -> str | None:
     return signing_input + "." + b64url(signature)
 
 
-def sanitize_headers(headers: dict[str, str]) -> dict[str, str]:
-    allowed = {
-        "Access-Control-Allow-Origin",
-        "Access-Control-Allow-Methods",
-        "Access-Control-Allow-Headers",
-        "Access-Control-Allow-Credentials",
-        "Content-Type",
-        "X-Request-Id",
-    }
-    return {key: value for key, value in headers.items() if key in allowed}
-
-
 def sql_scalar(query: str) -> str:
     return subprocess.check_output(
         ["docker", "exec", DB_CONTAINER, "psql", "-U", "bike", "-d", "bike", "-tAc", query],
@@ -155,17 +96,21 @@ def graphhopper_hits() -> dict[str, Any] | None:
 
 def main() -> int:
     evidence: dict[str, Any] = {}
-    evidence["health"] = slim(request("GET", f"{BASE_URL}/health"))
+    health = request("GET", f"{BASE_URL}/health")
+    verify_api_response(health, 200, "health")
+    evidence["health"] = slim(health)
 
     actuator_health = request("GET", f"{MANAGEMENT_BASE_URL}/actuator/health")
     evidence["actuatorHealthNoAuth"] = slim(actuator_health)
 
     monitor_no_auth = request("GET", f"{BASE_URL}/health/monitor")
+    verify_api_response(monitor_no_auth, 401, "monitor no auth", data_object_required=False)
     evidence["monitorNoAuth"] = slim(monitor_no_auth)
 
     token = ops_token()
     if token:
         monitor_ops = request("GET", f"{BASE_URL}/health/monitor", headers={"Authorization": f"Bearer {token}"})
+        verify_api_response(monitor_ops, 200, "monitor ops")
         evidence["monitorOps"] = slim(monitor_ops)
         prometheus = request("GET", f"{MANAGEMENT_BASE_URL}/actuator/prometheus", headers={"Authorization": f"Bearer {token}"})
         evidence["prometheusOps"] = {
@@ -176,12 +121,14 @@ def main() -> int:
     else:
         evidence["monitorOps"] = {"skipped": "AUTH_JWT_SECRET is not set for smoke-generated OPS token"}
 
+    email = f"deploy-smoke-{int(time.time())}@example.com"
+    password = "Password123!"
     register = request("POST", f"{BASE_URL}/api/v1/auth/register", {
-        "email": f"deploy-smoke-{int(time.time())}@example.com",
-        "password": "Password123!",
+        "email": email,
+        "password": password,
         "displayName": "DeploySmoke",
     })
-    require_status(register, 200, "auth register")
+    verify_api_response(register, 200, "auth register")
     register_data = api_data(register)
     access_token = register_data.get("accessToken")
     if not isinstance(access_token, str) or not access_token:
@@ -195,17 +142,34 @@ def main() -> int:
         "displayName": register_data.get("displayName"),
     }
 
+    login = request("POST", f"{BASE_URL}/api/v1/auth/login", {
+        "email": email,
+        "password": password,
+    })
+    verify_api_response(login, 200, "auth login")
+    evidence["authLogin"] = {
+        "status": login["status"],
+        "bodyBytes": login["bodyBytes"],
+        "headers": sanitize_headers(login["headers"]),
+        "hasAccessToken": isinstance(api_data(login).get("accessToken"), str),
+    }
+
+    courses = request("GET", f"{BASE_URL}/api/v1/courses?limit=5")
+    verify_api_response(courses, 200, "course list")
+    evidence["courseList"] = slim(courses)
+
     set_graphhopper_mode("success")
     ai_success = request("POST", f"{BASE_URL}/api/v1/ai-routes/plan/from-text", {
         "lat": 37.4812,
         "lon": 126.9527,
         "text": "평지 위주로 강이 보이는 코스 추천",
     }, headers={"X-Guest-Device-Id": "deploy-smoke-ai-success"})
-    require_status(ai_success, 200, "AI route fallback success")
+    verify_api_response(ai_success, 200, "AI route fallback success")
     ai_data = api_data(ai_success)
     evidence["aiRouteFallbackSuccess"] = {
         "status": ai_success["status"],
         "bodyBytes": ai_success["bodyBytes"],
+        "headers": sanitize_headers(ai_success["headers"]),
         "statusField": ai_data.get("status"),
         "routePointCount": len(ai_data.get("routePoints") or []),
         "aiGenerated": ai_data.get("aiGenerated"),
@@ -243,7 +207,7 @@ def main() -> int:
         "endedAt": ended_at,
         "summary": {"distanceM": 3200, "durationSec": 720},
     }, headers=auth_header)
-    require_status(summary, 200, "ride summary")
+    verify_api_response(summary, 200, "ride summary")
     summary_data = api_data(summary)
     ride_record_id = summary_data.get("rideRecordId")
     if not isinstance(ride_record_id, int):
@@ -256,8 +220,10 @@ def main() -> int:
             {"pointOrder": 2, "latitude": 37.4824, "longitude": 126.9553, "capturedAt": ended_at, "accuracyM": 6, "speedMps": 3.4},
         ]
     }, headers=auth_header)
-    require_status(trace, 200, "ride trace")
+    verify_api_response(trace, 200, "ride trace")
     evidence["rideTrace"] = {"status": trace["status"], "bodyBytes": trace["bodyBytes"], "data": api_data(trace)}
+    evidence["rideFinalizationPolling"] = poll_finalization_ready(BASE_URL, ride_record_id, auth_header)
+    evidence["rideFinalizationJobsBeforeDelete"] = finalization_job_snapshot(sql_scalar, ride_record_id)
 
     delete = request("DELETE", f"{BASE_URL}/api/v1/ride-records/{ride_record_id}", headers=auth_header)
     require_status(delete, 204, "ride delete")
@@ -293,23 +259,19 @@ def main() -> int:
     return 0
 
 
-def slim(result: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "status": result["status"],
-        "bodyBytes": result["bodyBytes"],
-        "body": result.get("body"),
-    }
-
-
 def summary_output(evidence: dict[str, Any]) -> dict[str, Any]:
     return {
         "health": evidence["health"]["status"],
         "monitorOps": evidence.get("monitorOps", {}).get("status", "skipped"),
         "register": evidence["authRegister"]["status"],
+        "login": evidence["authLogin"]["status"],
+        "courseList": evidence["courseList"]["status"],
         "aiSuccess": evidence["aiRouteFallbackSuccess"]["status"],
         "aiFail": evidence.get("aiRouteFallbackFailure", {}).get("status", "skipped"),
         "summary": evidence["rideSummary"]["status"],
         "trace": evidence["rideTrace"]["status"],
+        "finalization": evidence["rideFinalizationPolling"]["status"],
+        "finalizationJob": evidence["rideFinalizationJobsBeforeDelete"],
         "delete": evidence["rideDelete"],
         "dbCounts": evidence["databaseCountsAfterDelete"],
         "cors": evidence["corsPreflight"],
