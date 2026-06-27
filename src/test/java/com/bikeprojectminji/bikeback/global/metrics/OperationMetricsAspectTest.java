@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
+import com.bikeprojectminji.bikeback.global.logging.ObservabilityLoggingProperties;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.lang.reflect.Method;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -17,7 +18,10 @@ class OperationMetricsAspectTest {
     @DisplayName("성공한 내부 operation은 success outcome timer로 기록된다")
     void recordOperationRecordsSuccessDuration() throws Throwable {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-        OperationMetricsAspect aspect = new OperationMetricsAspect(new BikeMetricsRecorder(meterRegistry));
+        OperationMetricsAspect aspect = new OperationMetricsAspect(
+                new BikeMetricsRecorder(meterRegistry),
+                new ObservabilityLoggingProperties()
+        );
         ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
         given(joinPoint.proceed()).willReturn("ok");
 
@@ -35,7 +39,10 @@ class OperationMetricsAspectTest {
     @DisplayName("실패한 내부 operation은 예외를 보존하고 failure outcome timer로 기록된다")
     void recordOperationRecordsFailureDuration() throws Throwable {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-        OperationMetricsAspect aspect = new OperationMetricsAspect(new BikeMetricsRecorder(meterRegistry));
+        OperationMetricsAspect aspect = new OperationMetricsAspect(
+                new BikeMetricsRecorder(meterRegistry),
+                new ObservabilityLoggingProperties()
+        );
         ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
         IllegalStateException failure = new IllegalStateException("boom");
         given(joinPoint.proceed()).willThrow(failure);

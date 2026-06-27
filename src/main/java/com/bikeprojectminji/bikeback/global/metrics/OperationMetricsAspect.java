@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.global.metrics;
 
 import com.bikeprojectminji.bikeback.global.logging.RequestLogContext;
+import com.bikeprojectminji.bikeback.global.logging.ObservabilityLoggingProperties;
 import java.time.Duration;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -16,9 +17,14 @@ public class OperationMetricsAspect {
     private static final Logger log = LoggerFactory.getLogger(OperationMetricsAspect.class);
 
     private final BikeMetricsRecorder bikeMetricsRecorder;
+    private final ObservabilityLoggingProperties loggingProperties;
 
-    public OperationMetricsAspect(BikeMetricsRecorder bikeMetricsRecorder) {
+    public OperationMetricsAspect(
+            BikeMetricsRecorder bikeMetricsRecorder,
+            ObservabilityLoggingProperties loggingProperties
+    ) {
         this.bikeMetricsRecorder = bikeMetricsRecorder;
+        this.loggingProperties = loggingProperties;
     }
 
     @Around("@annotation(measuredOperation)")
@@ -33,15 +39,18 @@ public class OperationMetricsAspect {
         } finally {
             Duration duration = Duration.ofNanos(System.nanoTime() - startedAtNanos);
             String operation = measuredOperation.value();
+            long durationMs = duration.toMillis();
             bikeMetricsRecorder.recordOperationDuration(operation, outcome, duration);
-            log.info(
-                    "operation_duration request_id={} trace_id={} operation={} outcome={} duration_ms={}",
-                    RequestLogContext.currentRequestId(),
-                    RequestLogContext.currentTraceId(),
-                    operation,
-                    outcome,
-                    duration.toMillis()
-            );
+            if (loggingProperties.shouldLogOperation(outcome, durationMs)) {
+                log.info(
+                        "operation_duration request_id={} trace_id={} operation={} outcome={} duration_ms={}",
+                        RequestLogContext.currentRequestId(),
+                        RequestLogContext.currentTraceId(),
+                        operation,
+                        outcome,
+                        durationMs
+                );
+            }
         }
     }
 }
