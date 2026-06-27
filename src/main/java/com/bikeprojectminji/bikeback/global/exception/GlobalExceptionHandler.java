@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -72,6 +73,29 @@ public class GlobalExceptionHandler {
         log.warn("service_unavailable request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(new ApiResponse<>(503, exception.getMessage(), null));
+    }
+
+    @ExceptionHandler(RetryableServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<RetryableErrorResponse>> handleRetryableServiceUnavailable(
+            RetryableServiceUnavailableException exception,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "retryable_service_unavailable request_id={} method={} path={} error_code={} retry_after_seconds={} message={}",
+                RequestLogContext.currentRequestId(),
+                request.getMethod(),
+                request.getRequestURI(),
+                exception.getErrorCode(),
+                exception.getRetryAfterSeconds(),
+                exception.getMessage()
+        );
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(exception.getRetryAfterSeconds()))
+                .body(new ApiResponse<>(
+                        503,
+                        exception.getMessage(),
+                        new RetryableErrorResponse(exception.getErrorCode(), exception.getRetryAfterSeconds())
+                ));
     }
 
     @ExceptionHandler({CannotCreateTransactionException.class, DataAccessResourceFailureException.class})

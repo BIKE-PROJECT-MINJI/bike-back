@@ -22,6 +22,7 @@ import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @SpringBootTest(properties = {
         "ai-route.generation.quota.per-minute=100",
@@ -89,6 +91,21 @@ class AiRouteGenerationSessionServiceIntegrationTest {
         assertThat(response.candidates().get(0).routePointCount()).isEqualTo(2);
         assertThat(sessionRepository.findAll()).hasSize(1);
         assertThat(candidateRepository.findAll()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("AI provider 호출은 DB 트랜잭션 밖에서 수행해 connection 점유 시간을 늘리지 않는다")
+    void createSessionCallsPlannerOutsideTransaction() {
+        AtomicBoolean plannerCalledInTransaction = new AtomicBoolean(true);
+        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class)))
+                .willAnswer(invocation -> {
+                    plannerCalledInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
+                    return plan(true);
+                });
+
+        sessionService.createSession("1", createRequest());
+
+        assertThat(plannerCalledInTransaction).isFalse();
     }
 
     @Test

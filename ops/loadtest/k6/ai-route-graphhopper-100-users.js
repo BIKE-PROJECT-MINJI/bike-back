@@ -2,6 +2,8 @@ import http from 'k6/http';
 import { check, group, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 
+http.setResponseCallback(http.expectedStatuses({ min: 200, max: 399 }, 429));
+
 const BASE_URL = (__ENV.BASE_URL || '').replace(/\/$/, '');
 const TEST_ID = __ENV.TEST_ID || `bike-ai-route-${Date.now()}`;
 const SUMMARY_PATH = __ENV.SUMMARY_PATH || `ops/loadtest/results/${TEST_ID}-summary.json`;
@@ -10,9 +12,12 @@ const AI_ROUTE_VUS = numberEnv('AI_ROUTE_VUS', 25);
 const COURSE_MAP_READ_VUS = numberEnv('COURSE_MAP_READ_VUS', 35);
 const COURSE_FOLLOW_VUS = numberEnv('COURSE_FOLLOW_VUS', 30);
 const FREE_RIDE_VUS = numberEnv('FREE_RIDE_VUS', 10);
-const COURSE_READY_MAX_ATTEMPTS = numberEnv('COURSE_READY_MAX_ATTEMPTS', 20);
+const RIDE_FINALIZATION_VUS = numberEnv('RIDE_FINALIZATION_VUS', 0);
+const COURSE_READY_MAX_ATTEMPTS = numberEnv('COURSE_READY_MAX_ATTEMPTS', 80);
 const COURSE_READY_POLL_SECONDS = floatEnv('COURSE_READY_POLL_SECONDS', 0.1);
 const PROMOTE_AI_COURSE_RATE = floatEnv('PROMOTE_AI_COURSE_RATE', 0.2);
+const SETUP_AUTH_POOL_ENABLED = boolEnv('SETUP_AUTH_POOL_ENABLED', true);
+const SETUP_AUTH_EXTRA_TOKENS = numberEnv('SETUP_AUTH_EXTRA_TOKENS', 2);
 
 const endpointDuration = new Trend('bike_endpoint_duration', true);
 const endpointFailureRate = new Rate('bike_endpoint_failure_rate');
@@ -33,6 +38,11 @@ const endpointDurationByName = {
 const courseFollowReadyWaitDuration = new Trend('course_follow_ready_wait_duration', true);
 const courseFollowReadyPollAttempts = new Trend('course_follow_ready_poll_attempts');
 const courseFollowReadyFailureRate = new Rate('course_follow_ready_failure_rate');
+const rideFinalizationReadyWaitDuration = new Trend('ride_finalization_ready_wait_duration', true);
+const rideFinalizationReadyPollAttempts = new Trend('ride_finalization_ready_poll_attempts');
+const rideFinalizationReadyFailureRate = new Rate('ride_finalization_ready_failure_rate');
+const rideSaveBusyRate = new Rate('ride_save_busy_rate');
+const rideSaveBusyRetryAfterSeconds = new Trend('ride_save_busy_retry_after_seconds');
 
 if (!BASE_URL) {
   throw new Error('BASE_URL is required. Example: BASE_URL=http://127.0.0.1:8080');
@@ -71,8 +81,16 @@ if (COURSE_FOLLOW_VUS > 0) {
     duration: RUN_DURATION,
   };
 }
+if (RIDE_FINALIZATION_VUS > 0) {
+  scenarios.ride_finalization_to_course = {
+    executor: 'constant-vus',
+    exec: 'rideFinalizationToCourse',
+    vus: RIDE_FINALIZATION_VUS,
+    duration: RUN_DURATION,
+  };
+}
 if (Object.keys(scenarios).length === 0) {
-  throw new Error('At least one of AI_ROUTE_VUS, COURSE_MAP_READ_VUS, FREE_RIDE_VUS, COURSE_FOLLOW_VUS must be greater than 0.');
+  throw new Error('At least one scenario VU env must be greater than 0.');
 }
 
 export const options = {
@@ -86,14 +104,29 @@ export const options = {
     'http_req_duration{flow:course-map-read}': ['p(95)<5000', 'p(99)<10000'],
     'http_req_duration{flow:free-ride}': ['p(95)<5000', 'p(99)<10000'],
     'http_req_duration{flow:course-follow}': ['p(95)<5000', 'p(99)<10000'],
+    'http_req_duration{flow:ride-finalization}': ['p(95)<15000', 'p(99)<30000'],
   },
   tags: {
     testid: TEST_ID,
   },
 };
 
-export function aiRouteGeneration() {
-  const token = registerUser('ai');
+export function setup() {
+  if (!SETUP_AUTH_POOL_ENABLED) {
+    return { tokens: {} };
+  }
+  return {
+    tokens: {
+      ai: createTokenPool('ai', AI_ROUTE_VUS),
+      ride: createTokenPool('ride', FREE_RIDE_VUS),
+      course: createTokenPool('course', COURSE_FOLLOW_VUS),
+      finalize: createTokenPool('finalize', RIDE_FINALIZATION_VUS),
+    },
+  };
+}
+
+export function aiRouteGeneration(data) {
+  const token = tokenFor(data, 'ai') || registerUser('ai');
   group('ai route generation', () => {
     const response = postJson('/api/v1/ai-route-sessions', {
       lat: 37.4812,
@@ -165,8 +198,8 @@ export function courseMapReading() {
   sleep(numberEnv('SLEEP_SECONDS', 1));
 }
 
-export function freeRideRecording() {
-  const token = registerUser('ride');
+export function freeRideRecording(data) {
+  const token = tokenFor(data, 'ride') || registerUser('ride');
   group('free ride save and regenerate', () => {
     const save = saveRideRecord(token, 'free');
     const rideRecordId = jsonValue(save, ['data', 'rideRecordId']);
@@ -188,12 +221,51 @@ export function freeRideRecording() {
   sleep(numberEnv('SLEEP_SECONDS', 1));
 }
 
-export function courseFollowReading() {
-  const token = registerUser('course');
+export function courseFollowReading(data) {
+  group('course follow read and hud', () => {
+    const courseId = readFirstCourseId('course-follow');
+
+    check({ courseId }, {
+      'course id exists for follow': (value) => !!value.courseId,
+    });
+
+    if (courseId) {
+      readCourseDetailRouteAndHud(courseId, 'course-follow');
+    }
+  });
+  sleep(numberEnv('SLEEP_SECONDS', 1));
+}
+
+export function rideFinalizationToCourse(data) {
+  const token = tokenFor(data, 'finalize') || registerUser('finalize');
+  group('ride finalization to course', () => {
+    const save = saveRideRecord(token, 'finalize', 'ride-finalization');
+    const rideRecordId = jsonValue(save, ['data', 'rideRecordId']);
+    const rideRecordReady = rideRecordId ? waitForRideRecordReady(rideRecordId, token, 'ride-finalization') : false;
+    const create = rideRecordId && rideRecordReady
+      ? postJson('/api/v1/courses', {
+        sourceRideRecordId: rideRecordId,
+        name: `k6 finalized course ${__VU}-${__ITER}`,
+        description: 'k6 generated course from finalized ride record',
+        visibility: 'PUBLIC',
+      }, token, { flow: 'ride-finalization', endpoint: 'course-create' })
+      : null;
+    const courseId = create ? jsonValue(create, ['data', 'courseId']) : null;
+
+    check({ rideRecordReady, courseId }, {
+      'ride record finalized READY': (value) => value.rideRecordReady,
+      'course id exists from finalized ride': (value) => !!value.courseId,
+    });
+  });
+  sleep(numberEnv('SLEEP_SECONDS', 1));
+}
+
+export function legacyCourseFollowWriting(data) {
+  const token = tokenFor(data, 'course') || registerUser('course');
   group('course follow read path', () => {
     const save = saveRideRecord(token, 'course', 'course-follow');
     const rideRecordId = jsonValue(save, ['data', 'rideRecordId']);
-    const rideRecordReady = rideRecordId ? waitForRideRecordReady(rideRecordId, token) : false;
+    const rideRecordReady = rideRecordId ? waitForRideRecordReady(rideRecordId, token, 'course-follow') : false;
     const create = rideRecordId && rideRecordReady
       ? postJson('/api/v1/courses', {
         sourceRideRecordId: rideRecordId,
@@ -210,24 +282,81 @@ export function courseFollowReading() {
     });
 
     if (courseId) {
-      check(getJson(`/api/v1/courses/${courseId}`, null, { flow: 'course-follow', endpoint: 'course-detail' }), {
-        'course detail status is 200': (r) => r.status === 200,
-      });
-      check(getJson(`/api/v1/courses/${courseId}/route-points`, null, {
-        flow: 'course-follow',
-        endpoint: 'course-route-points',
-      }), {
-        'route points status is 200': (r) => r.status === 200,
-      });
-      check(postJson(`/api/v1/courses/${courseId}/ride-policy/evaluate`, ridePolicyPayload(), null, {
-        flow: 'course-follow',
-        endpoint: 'ride-policy-evaluate',
-      }), {
-        'ride policy status is 200': (r) => r.status === 200,
-      });
+      readCourseDetailRouteAndHud(courseId, 'course-follow');
     }
   });
   sleep(numberEnv('SLEEP_SECONDS', 1));
+}
+
+function readFirstCourseId(flow) {
+  const list = getJson('/api/v1/courses?limit=10', null, {
+    flow,
+    endpoint: 'course-list',
+  });
+  const courseId = extractCourseId(list);
+  check(list, {
+    [`${flow} course list status is 200`]: (r) => r.status === 200,
+  });
+  return courseId;
+}
+
+function readCourseDetailRouteAndHud(courseId, flow) {
+  check(getJson(`/api/v1/courses/${courseId}`, null, { flow, endpoint: 'course-detail' }), {
+    [`${flow} course detail status is 200`]: (r) => r.status === 200,
+  });
+  check(getJson(`/api/v1/courses/${courseId}/route-points`, null, {
+    flow,
+    endpoint: 'course-route-points',
+  }), {
+    [`${flow} route points status is 200`]: (r) => r.status === 200,
+  });
+  check(postJson(`/api/v1/courses/${courseId}/ride-policy/evaluate`, ridePolicyPayload(), null, {
+    flow,
+    endpoint: 'ride-policy-evaluate',
+  }), {
+    [`${flow} ride policy status is 200`]: (r) => r.status === 200,
+  });
+}
+
+function createTokenPool(prefix, vus) {
+  const size = Math.max(0, vus + SETUP_AUTH_EXTRA_TOKENS);
+  const tokens = [];
+  for (let index = 0; index < size; index += 1) {
+    const token = registerSetupUser(prefix, index);
+    if (token) {
+      tokens.push(token);
+    }
+  }
+  if (tokens.length < vus) {
+    throw new Error(`failed to prepare enough ${prefix} auth tokens: expected=${vus}, actual=${tokens.length}`);
+  }
+  return tokens;
+}
+
+function tokenFor(data, prefix) {
+  const tokens = data && data.tokens && data.tokens[prefix];
+  if (!Array.isArray(tokens) || tokens.length === 0) {
+    return '';
+  }
+  return tokens[(__VU - 1) % tokens.length];
+}
+
+function registerSetupUser(prefix, index) {
+  const email = `${TEST_ID}-setup-${prefix}-${index}@load.local`;
+  const response = http.post(`${BASE_URL}/api/v1/auth/register`, JSON.stringify({
+    email,
+    password: 'load-test-password',
+    displayName: `${prefix}-setup-${index}`,
+    profileImageUrl: null,
+    legacyExternalId: null,
+  }), {
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    tags: requestTags({ flow: 'setup-auth', endpoint: 'auth-register-setup' }),
+  });
+  if (response.status !== 200) {
+    throw new Error(`setup auth register failed prefix=${prefix} index=${index} status=${response.status} body=${response.body}`);
+  }
+  return jsonValue(response, ['data', 'accessToken']) || '';
 }
 
 function registerUser(prefix) {
@@ -263,7 +392,7 @@ function saveRideRecord(token, prefix, flow) {
   }, token, { flow: flow || 'free-ride', endpoint: 'ride-record-save' });
 }
 
-function waitForRideRecordReady(rideRecordId, token) {
+function waitForRideRecordReady(rideRecordId, token, flow) {
   const startedAt = Date.now();
   let attempts = 0;
   let lastStatus = 'UNKNOWN';
@@ -272,7 +401,7 @@ function waitForRideRecordReady(rideRecordId, token) {
   for (let attempt = 1; attempt <= COURSE_READY_MAX_ATTEMPTS; attempt += 1) {
     attempts = attempt;
     const response = getJson(`/api/v1/ride-records/${rideRecordId}`, token, {
-      flow: 'course-follow',
+      flow,
       endpoint: 'ride-record-status',
     });
     lastStatus = jsonValue(response, ['data', 'status']) || 'UNKNOWN';
@@ -296,13 +425,19 @@ function waitForRideRecordReady(rideRecordId, token) {
   }
 
   const tags = {
-    flow: 'course-follow',
+    flow,
     endpoint: 'ride-record-status',
     finalization_status: lastStatus,
   };
-  courseFollowReadyWaitDuration.add(Date.now() - startedAt, tags);
-  courseFollowReadyPollAttempts.add(attempts, tags);
-  courseFollowReadyFailureRate.add(!ready, tags);
+  if (flow === 'course-follow') {
+    courseFollowReadyWaitDuration.add(Date.now() - startedAt, tags);
+    courseFollowReadyPollAttempts.add(attempts, tags);
+    courseFollowReadyFailureRate.add(!ready, tags);
+  } else {
+    rideFinalizationReadyWaitDuration.add(Date.now() - startedAt, tags);
+    rideFinalizationReadyPollAttempts.add(attempts, tags);
+    rideFinalizationReadyFailureRate.add(!ready, tags);
+  }
 
   return ready;
 }
@@ -361,11 +496,39 @@ function requestTags(tags) {
 function recordEndpointMetrics(response, method, tags) {
   const metricTags = Object.assign({ method }, requestTags(tags));
   endpointDuration.add(response.timings.duration, metricTags);
-  endpointFailureRate.add(response.status === 0 || response.status >= 400, metricTags);
+  endpointFailureRate.add(isEndpointFailure(response, tags), metricTags);
+  recordRideSaveBusy(response, tags, metricTags);
   const namedTrend = endpointDurationByName[tags && tags.endpoint];
   if (namedTrend) {
     namedTrend.add(response.timings.duration, metricTags);
   }
+}
+
+function recordRideSaveBusy(response, tags, metricTags) {
+  if (!tags || tags.endpoint !== 'ride-record-save') {
+    return;
+  }
+  const busy = isRideSaveBusy(response);
+  rideSaveBusyRate.add(busy, metricTags);
+  if (busy) {
+    rideSaveBusyRetryAfterSeconds.add(numberHeader(response, 'Retry-After'), metricTags);
+  }
+}
+
+function isEndpointFailure(response, tags) {
+  if (tags && tags.endpoint === 'ai-route-session-create' && response.status === 429) {
+    return false;
+  }
+  return response.status === 0 || response.status >= 400;
+}
+
+function isRideSaveBusy(response) {
+  return response.status === 503 && jsonValue(response, ['data', 'errorCode']) === 'RIDE_SAVE_BUSY';
+}
+
+function numberHeader(response, name) {
+  const value = Number.parseInt(response.headers[name] || response.headers[name.toLowerCase()] || '', 10);
+  return Number.isNaN(value) ? 0 : value;
 }
 
 function routePromptFor(seed) {
@@ -423,6 +586,17 @@ function floatEnv(name, fallback) {
   return Number.isNaN(value) ? fallback : value;
 }
 
+function boolEnv(name, fallback) {
+  const value = (__ENV[name] || '').trim().toLowerCase();
+  if (value === 'true' || value === '1' || value === 'yes') {
+    return true;
+  }
+  if (value === 'false' || value === '0' || value === 'no') {
+    return false;
+  }
+  return fallback;
+}
+
 export function handleSummary(data) {
   return {
     stdout: summaryText(data),
@@ -435,7 +609,7 @@ function summaryText(data) {
   const failed = data.metrics.http_req_failed && data.metrics.http_req_failed.values;
   return [
     `testid: ${TEST_ID}`,
-    `vus: ${AI_ROUTE_VUS + COURSE_MAP_READ_VUS + COURSE_FOLLOW_VUS + FREE_RIDE_VUS}`,
+    `vus: ${AI_ROUTE_VUS + COURSE_MAP_READ_VUS + COURSE_FOLLOW_VUS + FREE_RIDE_VUS + RIDE_FINALIZATION_VUS}`,
     `http_req_failed(rate): ${failed ? failed.rate : 'n/a'}`,
     `http_req_duration(p95): ${duration ? duration['p(95)'] : 'n/a'} ms`,
     `http_req_duration(p99): ${duration ? duration['p(99)'] : 'n/a'} ms`,
