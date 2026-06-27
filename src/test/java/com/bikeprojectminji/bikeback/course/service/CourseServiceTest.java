@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -22,6 +24,7 @@ import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordProcessedPointEntity;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
+import com.bikeprojectminji.bikeback.global.idempotency.IdempotencyLockService;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.course.repository.CourseRouteGeometryRepository;
@@ -33,6 +36,8 @@ import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,7 +45,11 @@ import org.mockito.InjectMocks;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionOperations;
 
 @ExtendWith(MockitoExtension.class)
 class CourseServiceTest {
@@ -69,8 +78,31 @@ class CourseServiceTest {
     @Mock
     private AchievementCompletionDispatcher achievementCompletionDispatcher;
 
+    @Mock
+    private TransactionOperations transactionOperations;
+
+    @Mock
+    private IdempotencyLockService idempotencyLockService;
+
     @InjectMocks
     private CourseService courseService;
+
+    @BeforeEach
+    void executeTransactionsInline() {
+        lenient().when(transactionOperations.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(new SimpleTransactionStatus());
+        });
+        lenient().when(idempotencyLockService.executeOrWaitAfterContention(any(), any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+            Supplier<Optional<?>> existingLookup = invocation.getArgument(5);
+            Optional<?> existing = existingLookup.get();
+            if (existing.isPresent()) {
+                return existing.get();
+            }
+            Supplier<?> creator = invocation.getArgument(6);
+            return creator.get();
+        });
+    }
 
     private List<CourseEntity> createCourses(int count) {
         return java.util.stream.IntStream.rangeClosed(1, count)
@@ -115,10 +147,69 @@ class CourseServiceTest {
         assertThat(response.visibility()).isEqualTo("PRIVATE");
         assertThat(response.sourceRideRecordId()).isEqualTo(1001L);
         assertThat(response.sourceDetached()).isFalse();
+        verify(idempotencyLockService).executeOrWaitAfterContention(
+                eq("course_from_ride"),
+                eq("course-from-ride:1:1001"),
+                eq(java.time.Duration.ofSeconds(8)),
+                eq(java.time.Duration.ofMillis(300)),
+                eq(java.time.Duration.ofMillis(500)),
+                any(),
+                any()
+        );
         InOrder inOrder = inOrder(courseRoutePointRepository, courseRouteGeometryRepository);
         inOrder.verify(courseRoutePointRepository).saveAll(any());
         inOrder.verify(courseRoutePointRepository).flush();
         inOrder.verify(courseRouteGeometryRepository).refreshRouteLine(2001L);
+    }
+
+    @Test
+    @DisplayName("기록 기반 코스 생성은 이미 저장된 sourceRideRecordId면 기존 코스를 200 응답으로 반환한다")
+    void createCourseFromRideRecordReturnsExistingCourseForDuplicateSourceRideRecord() {
+        CourseEntity existingCourse = new CourseEntity("기존 한강 코스", "설명", BigDecimal.valueOf(18.3), 60, 11, false, null, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780), 1L, 1001L, CourseVisibility.PRIVATE);
+        ReflectionTestUtils.setField(existingCourse, "id", 2001L);
+
+        given(courseRepository.findTopByOwnerUserIdAndSourceRideRecordIdOrderByIdDesc(1L, 1001L))
+                .willReturn(Optional.of(existingCourse));
+
+        CourseWriteResponse response = courseService.createCourseFromRideRecord("1", new CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE"));
+
+        assertThat(response.courseId()).isEqualTo(2001L);
+        assertThat(response.sourceRideRecordId()).isEqualTo(1001L);
+        assertThat(response.visibility()).isEqualTo("PRIVATE");
+        verify(courseRoutePointRepository, never()).saveAll(any());
+        verify(courseRouteGeometryRepository, never()).refreshRouteLine(any());
+    }
+
+    @Test
+    @DisplayName("기록 기반 코스 생성은 같은 sourceRideRecordId 동시 생성 경쟁에서 기존 코스를 200 응답으로 복구한다")
+    void createCourseFromRideRecordReturnsExistingCourseAfterConcurrentSourceRideRecordRace() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity rideRecord = new RideRecordEntity(1L, java.time.OffsetDateTime.parse("2026-03-29T10:00:00+09:00"), java.time.OffsetDateTime.parse("2026-03-29T11:00:00+09:00"), 18250, 3600);
+        ReflectionTestUtils.setField(rideRecord, "id", 1001L);
+        rideRecord.markReady(java.time.OffsetDateTime.parse("2026-03-29T11:01:00+09:00"));
+        CourseEntity existingCourse = new CourseEntity("기존 한강 코스", "설명", BigDecimal.valueOf(18.3), 60, 11, false, null, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780), 1L, 1001L, CourseVisibility.PRIVATE);
+        ReflectionTestUtils.setField(existingCourse, "id", 2001L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(1001L, 1L)).willReturn(Optional.of(rideRecord));
+        given(courseRepository.findTopByOwnerUserIdAndSourceRideRecordIdOrderByIdDesc(1L, 1001L))
+                .willReturn(Optional.empty(), Optional.empty(), Optional.of(existingCourse));
+        given(rideRecordProcessedPointRepository.findByRideRecordIdOrderByPointOrderAsc(1001L)).willReturn(List.of(
+                new RideRecordProcessedPointEntity(1001L, 1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                new RideRecordProcessedPointEntity(1001L, 2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
+        ));
+        given(courseRepository.findTopByOrderByDisplayOrderDescIdDesc()).willReturn(Optional.of(createCourses(10).get(9)));
+        given(courseRepository.save(any(CourseEntity.class)))
+                .willThrow(new DataIntegrityViolationException("uq_courses_owner_source_ride_record"));
+
+        CourseWriteResponse response = courseService.createCourseFromRideRecord("1", new CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE"));
+
+        assertThat(response.courseId()).isEqualTo(2001L);
+        assertThat(response.sourceRideRecordId()).isEqualTo(1001L);
+        assertThat(response.visibility()).isEqualTo("PRIVATE");
+        verify(courseRoutePointRepository, never()).saveAll(any());
+        verify(courseRouteGeometryRepository, never()).refreshRouteLine(any());
     }
 
     @Test

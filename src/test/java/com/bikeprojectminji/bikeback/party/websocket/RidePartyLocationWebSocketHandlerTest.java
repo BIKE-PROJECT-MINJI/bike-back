@@ -18,7 +18,6 @@ import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.http.HttpHeaders;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -71,10 +70,7 @@ class RidePartyLocationWebSocketHandlerTest {
 
     private WebSocketSession session(String token) {
         WebSocketSession session = mock(WebSocketSession.class);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(token);
-        when(session.getUri()).thenReturn(URI.create("ws://localhost/ws/v1/parties/20/locations"));
-        when(session.getHandshakeHeaders()).thenReturn(headers);
+        when(session.getUri()).thenReturn(URI.create("ws://localhost/ws/v1/parties/20/locations?socketToken=" + token));
         when(session.getAttributes()).thenReturn(new HashMap<>());
         when(session.isOpen()).thenReturn(true);
         return session;

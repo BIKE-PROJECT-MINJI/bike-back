@@ -7,13 +7,14 @@ import com.bikeprojectminji.bikeback.party.service.RidePartySocketTokenPayload;
 import com.bikeprojectminji.bikeback.party.service.RidePartySocketTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -44,7 +45,7 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         Long partyId = extractPartyId(session.getUri());
-        Optional<RidePartySocketTokenPayload> token = socketTokenService.consume(bearerToken(session.getHandshakeHeaders()), partyId);
+        Optional<RidePartySocketTokenPayload> token = socketTokenService.consume(socketToken(session.getUri()), partyId);
         if (token.isEmpty()) {
             session.close(CloseStatus.POLICY_VIOLATION.withReason("invalid party socket token"));
             return;
@@ -116,12 +117,24 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
         return new TextMessage(objectMapper.writeValueAsString(payload));
     }
 
-    private String bearerToken(HttpHeaders headers) {
-        String authorization = headers.getFirst(HttpHeaders.AUTHORIZATION);
-        if (authorization == null || !authorization.startsWith("Bearer ")) {
+    private String socketToken(URI uri) {
+        if (uri == null || uri.getRawQuery() == null || uri.getRawQuery().isBlank()) {
             return "";
         }
-        return authorization.substring("Bearer ".length()).trim();
+        for (String pair : uri.getRawQuery().split("&")) {
+            int separator = pair.indexOf('=');
+            String name = separator >= 0 ? pair.substring(0, separator) : pair;
+            if (!"socketToken".equals(urlDecode(name))) {
+                continue;
+            }
+            String value = separator >= 0 ? pair.substring(separator + 1) : "";
+            return urlDecode(value).trim();
+        }
+        return "";
+    }
+
+    private String urlDecode(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 
     private Long extractPartyId(URI uri) {

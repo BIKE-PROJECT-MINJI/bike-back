@@ -69,6 +69,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/ai-routes/plan/from-text").permitAll()
                         .requestMatchers("/api/v1/ai-route-sessions/**").authenticated()
                         .requestMatchers("/ws/v1/ai-routes/**").authenticated()
+                        .requestMatchers("/ws/v1/parties/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses/featured").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/courses/search").permitAll()

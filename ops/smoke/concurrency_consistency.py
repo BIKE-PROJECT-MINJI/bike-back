@@ -258,6 +258,10 @@ def has_unexpected_5xx(results: list[dict[str, Any]]) -> bool:
     )
 
 
+def all_status(results: list[dict[str, Any]], expected: int) -> bool:
+    return all(result.get("status") == expected for result in results)
+
+
 def scenario_duplicate_client_ride(
         evidence: dict[str, Any],
         user: User,
@@ -293,14 +297,14 @@ def scenario_duplicate_client_ride(
               and r.client_ride_id = {sql_literal(client_ride_id)}
         ) s;
     """)
-    ok = len(ride_ids) <= 1 and db["rideRecordCount"] == 1 and db["jobCount"] == 1 and not has_unexpected_5xx(results)
+    ok = all_status(results, 200) and len(ride_ids) == 1 and db["rideRecordCount"] == 1 and db["jobCount"] == 1
     evidence[evidence_key] = {
         "ok": ok,
         "clientRideId": client_ride_id,
         "http": summarize_http(results),
         "distinctRideRecordIdsFromResponses": ride_ids,
         "db": db,
-        "expected": "HTTP 5xx 없이 같은 owner/clientRideId는 DB ride_records 1건, finalization job 1건만 남아야 함",
+        "expected": "같은 owner/clientRideId 동시 저장은 모든 응답이 200이고 같은 rideRecordId를 반환해야 하며 DB ride_records 1건, finalization job 1건만 남아야 함",
     }
     return ride_ids[0] if ride_ids else None
 
@@ -407,14 +411,14 @@ def scenario_duplicate_course_create(evidence: dict[str, Any], user: User, ride_
               and c.source_ride_record_id = {ride_record_id}
         ) s;
     """)
-    ok = len(course_ids) <= 1 and db["courseCount"] == 1 and not has_unexpected_5xx(results)
+    ok = all_status(results, 200) and len(course_ids) == 1 and db["courseCount"] == 1
     evidence["duplicateCourseCreate"] = {
         "ok": ok,
         "rideRecordId": ride_record_id,
         "http": summarize_http(results),
         "distinctCourseIdsFromResponses": course_ids,
         "db": db,
-        "expected": "같은 sourceRideRecordId는 코스 1건만 생성되고 나머지는 계약된 4xx로 끝나야 함",
+        "expected": "같은 sourceRideRecordId 동시 코스 생성은 모든 응답이 200이고 같은 courseId를 반환해야 하며 DB courses 1건만 남아야 함",
     }
     return course_ids[0] if course_ids else None
 
@@ -531,7 +535,8 @@ def websocket_handshake(base_url: str, party_id: int, token: str) -> dict[str, A
     host = parsed.hostname or "127.0.0.1"
     port = parsed.port or (443 if secure else 80)
     key = base64.b64encode(os.urandom(16)).decode()
-    path = f"/ws/v1/parties/{party_id}/locations"
+    encoded_token = urllib.parse.quote(token, safe="")
+    path = f"/ws/v1/parties/{party_id}/locations?socketToken={encoded_token}"
     request_text = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}:{port}\r\n"
@@ -539,7 +544,6 @@ def websocket_handshake(base_url: str, party_id: int, token: str) -> dict[str, A
         "Connection: Upgrade\r\n"
         f"Sec-WebSocket-Key: {key}\r\n"
         "Sec-WebSocket-Version: 13\r\n"
-        f"Authorization: Bearer {token}\r\n"
         "\r\n"
     )
     started = time.perf_counter()

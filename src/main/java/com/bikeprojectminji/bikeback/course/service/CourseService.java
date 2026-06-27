@@ -21,6 +21,7 @@ import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.idempotency.IdempotencyLockService;
 import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.global.validation.CoordinateValidator;
 import java.math.RoundingMode;
@@ -34,14 +35,24 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.time.Duration;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 @Service
 @Transactional
 public class CourseService {
+
+    private static final Duration COURSE_FROM_RIDE_IDEMPOTENCY_WAIT_TIMEOUT = Duration.ofSeconds(8);
+    private static final Duration COURSE_FROM_RIDE_IDEMPOTENCY_MIN_WAIT_INTERVAL = Duration.ofMillis(300);
+    private static final Duration COURSE_FROM_RIDE_IDEMPOTENCY_MAX_WAIT_INTERVAL = Duration.ofMillis(500);
 
     private final CourseRepository courseRepository;
     private final CourseRouteGeometryRepository courseRouteGeometryRepository;
@@ -51,6 +62,8 @@ public class CourseService {
     private final AuthService authService;
     private final CourseRouteSnapshotService courseRouteSnapshotService;
     private final AchievementCompletionDispatcher achievementCompletionDispatcher;
+    private final TransactionOperations transactionOperations;
+    private final IdempotencyLockService idempotencyLockService;
     private final CourseAccessPolicy courseAccessPolicy = new CourseAccessPolicy();
     private final GpxTrackParser gpxTrackParser = new GpxTrackParser();
 
@@ -62,7 +75,9 @@ public class CourseService {
             RideRecordProcessedPointRepository rideRecordProcessedPointRepository,
             AuthService authService,
             CourseRouteSnapshotService courseRouteSnapshotService,
-            AchievementCompletionDispatcher achievementCompletionDispatcher
+            AchievementCompletionDispatcher achievementCompletionDispatcher,
+            TransactionOperations transactionOperations,
+            IdempotencyLockService idempotencyLockService
     ) {
         this.courseRepository = courseRepository;
         this.courseRouteGeometryRepository = courseRouteGeometryRepository;
@@ -72,23 +87,59 @@ public class CourseService {
         this.authService = authService;
         this.courseRouteSnapshotService = courseRouteSnapshotService;
         this.achievementCompletionDispatcher = achievementCompletionDispatcher;
+        this.transactionOperations = transactionOperations;
+        this.idempotencyLockService = idempotencyLockService;
     }
 
     @MeasuredOperation("course.write.from_ride_record")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public CourseWriteResponse createCourseFromRideRecord(String subject, CreateCourseFromRideRecordRequest request) {
         // 코스 생성은 사용자가 소유한 ride record를 읽어 route point를 course route point로 복제하는 방식이다.
         // 즉 ride 기록과 course는 source of truth를 공유하지 않고, 생성 시점에 복사본을 만든다.
         validateCreateRequest(request);
+        Long ownerUserId = resolveOwnerUserIdForIdempotency(subject);
+        return idempotencyLockService.executeOrWaitAfterContention(
+                "course_from_ride",
+                courseFromRideIdempotencyKey(ownerUserId, request.sourceRideRecordId()),
+                COURSE_FROM_RIDE_IDEMPOTENCY_WAIT_TIMEOUT,
+                COURSE_FROM_RIDE_IDEMPOTENCY_MIN_WAIT_INTERVAL,
+                COURSE_FROM_RIDE_IDEMPOTENCY_MAX_WAIT_INTERVAL,
+                () -> findExistingSourceCourseResponse(ownerUserId, request.sourceRideRecordId()),
+                () -> createCourseFromRideRecordWithDuplicateRecovery(subject, ownerUserId, request)
+        );
+    }
+
+    private CourseWriteResponse createCourseFromRideRecordWithDuplicateRecovery(String subject, Long ownerUserId, CreateCourseFromRideRecordRequest request) {
         UserEntity user = authService.findUserBySubject(subject);
+        if (!Objects.equals(user.getId(), ownerUserId)) {
+            throw new NotFoundException("자유 주행 기록을 찾을 수 없습니다.");
+        }
         RideRecordEntity rideRecord = rideRecordRepository.findByIdAndOwnerUserId(request.sourceRideRecordId(), user.getId())
                 .orElseThrow(() -> new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
         if (rideRecord.getFinalizationStatus() != RideRecordFinalizationStatus.READY) {
             throw new BadRequestException("경로 보정이 아직 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
         }
-        courseRepository.findTopByOwnerUserIdAndSourceRideRecordIdOrderByIdDesc(user.getId(), rideRecord.getId())
-                .ifPresent(course -> {
-                    throw new BadRequestException("이미 코스로 저장된 자유 주행 기록입니다.");
-                });
+        try {
+            return requireTransactionResponse(transactionOperations.execute(status -> createCourseFromRideRecord(user, rideRecord, request)));
+        } catch (DataIntegrityViolationException exception) {
+            return findExistingSourceCourseResponse(user.getId(), rideRecord.getId())
+                    .orElseThrow(() -> exception);
+        }
+    }
+
+    private Long resolveOwnerUserIdForIdempotency(String subject) {
+        try {
+            return Long.valueOf(subject);
+        } catch (NumberFormatException exception) {
+            return authService.findUserBySubject(subject).getId();
+        }
+    }
+
+    private CourseWriteResponse createCourseFromRideRecord(UserEntity user, RideRecordEntity rideRecord, CreateCourseFromRideRecordRequest request) {
+        Optional<CourseWriteResponse> existingResponse = findExistingSourceCourseResponse(user.getId(), rideRecord.getId());
+        if (existingResponse.isPresent()) {
+            return existingResponse.get();
+        }
         List<RideRecordProcessedPointEntity> rideRecordPoints = rideRecordProcessedPointRepository.findByRideRecordIdOrderByPointOrderAsc(rideRecord.getId());
         if (rideRecordPoints.isEmpty()) {
             throw new BadRequestException("최종 경로가 비어 있어 코스를 생성할 수 없습니다.");
@@ -110,6 +161,7 @@ public class CourseService {
                 visibility
         );
         CourseEntity savedCourse = courseRepository.save(course);
+        courseRepository.flush();
 
         List<CourseRoutePointEntity> courseRoutePoints = rideRecordPoints.stream()
                 .map(point -> new CourseRoutePointEntity(savedCourse.getId(), point.getPointOrder(), point.getLatitude(), point.getLongitude()))
@@ -274,6 +326,22 @@ public class CourseService {
         } catch (IllegalArgumentException exception) {
             throw new BadRequestException("visibility는 PRIVATE, UNLISTED, PUBLIC 중 하나여야 합니다.");
         }
+    }
+
+    private Optional<CourseWriteResponse> findExistingSourceCourseResponse(Long ownerUserId, Long sourceRideRecordId) {
+        return courseRepository.findTopByOwnerUserIdAndSourceRideRecordIdOrderByIdDesc(ownerUserId, sourceRideRecordId)
+                .map(this::toCourseWriteResponse);
+    }
+
+    private String courseFromRideIdempotencyKey(Long ownerUserId, Long sourceRideRecordId) {
+        if (ownerUserId == null || sourceRideRecordId == null) {
+            return null;
+        }
+        return "course-from-ride:" + ownerUserId + ":" + sourceRideRecordId;
+    }
+
+    private CourseWriteResponse requireTransactionResponse(CourseWriteResponse response) {
+        return Objects.requireNonNull(response, "course transaction response must not be null");
     }
 
     private int resolveNextDisplayOrder() {
