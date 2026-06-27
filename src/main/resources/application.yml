@@ -9,7 +9,7 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
-      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT_MS:30000}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT_MS:5000}
 
   jpa:
     open-in-view: false
@@ -109,8 +109,24 @@ ai-route:
 
 bike:
   app-role: ${BIKE_APP_ROLE:all}
+  observability:
+    logging:
+      http:
+        mode: ${BIKE_OBSERVABILITY_HTTP_LOG_MODE:SLOW_OR_ERROR}
+        slow-threshold-ms: ${BIKE_OBSERVABILITY_HTTP_SLOW_THRESHOLD_MS:500}
+        sample-rate: ${BIKE_OBSERVABILITY_HTTP_SAMPLE_RATE:0.0}
+      operation:
+        mode: ${BIKE_OBSERVABILITY_OPERATION_LOG_MODE:SLOW_OR_ERROR}
+        slow-threshold-ms: ${BIKE_OBSERVABILITY_OPERATION_SLOW_THRESHOLD_MS:200}
+        sample-rate: ${BIKE_OBSERVABILITY_OPERATION_SAMPLE_RATE:0.0}
   rate-limit:
     store: ${BIKE_RATE_LIMIT_STORE:redis}
+  database:
+    backpressure:
+      enabled: ${BIKE_DATABASE_BACKPRESSURE_ENABLED:true}
+      active-threshold-ratio: ${BIKE_DATABASE_BACKPRESSURE_ACTIVE_THRESHOLD_RATIO:1.0}
+      pending-threshold: ${BIKE_DATABASE_BACKPRESSURE_PENDING_THRESHOLD:1}
+      message: ${BIKE_DATABASE_BACKPRESSURE_MESSAGE:데이터베이스 처리량이 일시적으로 부족합니다. 잠시 후 다시 시도해 주세요.}
   async:
     core-pool-size: ${BIKE_ASYNC_CORE_POOL_SIZE:4}
     max-pool-size: ${BIKE_ASYNC_MAX_POOL_SIZE:8}
