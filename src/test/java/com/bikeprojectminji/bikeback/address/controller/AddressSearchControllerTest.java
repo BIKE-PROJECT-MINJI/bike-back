@@ -50,6 +50,9 @@ class AddressSearchControllerTest {
                         3,
                         2,
                         "FAKE",
+                        "FAKE",
+                        false,
+                        null,
                         "주소 후보가 여러 개입니다.",
                         List.of(
                                 new AddressCandidateResponse(
@@ -76,6 +79,9 @@ class AddressSearchControllerTest {
                 .andExpect(jsonPath("$.data.size").value(3))
                 .andExpect(jsonPath("$.data.totalCount").value(2))
                 .andExpect(jsonPath("$.data.provider").value("FAKE"))
+                .andExpect(jsonPath("$.data.primaryProvider").value("FAKE"))
+                .andExpect(jsonPath("$.data.fallbackUsed").value(false))
+                .andExpect(jsonPath("$.data.fallbackReason").doesNotExist())
                 .andExpect(jsonPath("$.data.candidates[0].label").value("북악스카이웨이 팔각정"))
                 .andExpect(jsonPath("$.data.candidates[0].lat").value(37.6026))
                 .andExpect(jsonPath("$.data.candidates[0].lon").value(126.9803))

@@ -9,10 +9,14 @@ import io.micrometer.core.instrument.Metrics;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AddressSearchService {
+
+    private static final Logger log = LoggerFactory.getLogger(AddressSearchService.class);
 
     private static final int DEFAULT_PAGE = 1;
     private static final int DEFAULT_SIZE = 5;
@@ -35,15 +39,19 @@ public class AddressSearchService {
     @MeasuredOperation("address.search")
     public AddressSearchResponse search(String rawQuery, Integer page, Integer size) {
         AddressSearchQuery query = normalizeQuery(rawQuery, page, size);
-        AddressSearchProviderResult providerResult = searchWithFallback(query);
-        return toResponse(query, providerResult);
+        AddressSearchOutcome outcome = searchWithFallback(query);
+        return toResponse(query, outcome);
     }
 
-    private AddressSearchProviderResult searchWithFallback(AddressSearchQuery query) {
+    private AddressSearchOutcome searchWithFallback(AddressSearchQuery query) {
+        AddressSearchProviderResult firstResult = null;
         AddressSearchProviderResult lastResult = null;
         for (AddressSearchClient client : addressSearchClients) {
             long startedAtNanos = System.nanoTime();
             AddressSearchProviderResult result = client.search(query);
+            if (firstResult == null) {
+                firstResult = result;
+            }
             bikeMetricsRecorder.recordProviderCall(
                     result.provider(),
                     "address_search",
@@ -51,14 +59,18 @@ public class AddressSearchService {
                     Duration.ofNanos(System.nanoTime() - startedAtNanos)
             );
             if (result.status() == AddressSearchProviderStatus.SUCCESS) {
-                return result;
+                AddressSearchOutcome outcome = AddressSearchOutcome.from(firstResult, result);
+                logFallbackIfNeeded(outcome);
+                return outcome;
             }
             lastResult = result;
         }
         if (lastResult != null) {
-            return lastResult;
+            AddressSearchOutcome outcome = AddressSearchOutcome.from(firstResult, lastResult);
+            logFallbackIfNeeded(outcome);
+            return outcome;
         }
-        return AddressSearchProviderResult.providerFailure("NONE");
+        return AddressSearchOutcome.from(null, AddressSearchProviderResult.providerFailure("NONE"));
     }
 
     private AddressSearchQuery normalizeQuery(String rawQuery, Integer page, Integer size) {
@@ -80,7 +92,8 @@ public class AddressSearchService {
         return new AddressSearchQuery(normalizedQuery, normalizedPage, normalizedSize);
     }
 
-    private AddressSearchResponse toResponse(AddressSearchQuery query, AddressSearchProviderResult providerResult) {
+    private AddressSearchResponse toResponse(AddressSearchQuery query, AddressSearchOutcome outcome) {
+        AddressSearchProviderResult providerResult = outcome.result();
         List<AddressCandidateResponse> candidates = providerResult.candidates().stream()
                 .limit(query.size())
                 .map(AddressCandidate::toResponse)
@@ -92,6 +105,9 @@ public class AddressSearchService {
                 query.size(),
                 candidates.size(),
                 providerResult.provider(),
+                outcome.primaryProvider(),
+                outcome.fallbackUsed(),
+                outcome.fallbackReason(),
                 messageFor(status),
                 candidates
         );
@@ -122,5 +138,38 @@ public class AddressSearchService {
             case "PROVIDER_FAILURE" -> "주소 검색 provider를 사용할 수 없습니다.";
             default -> "주소 검색 상태를 확인하세요.";
         };
+    }
+
+    private void logFallbackIfNeeded(AddressSearchOutcome outcome) {
+        if (!outcome.fallbackUsed()) {
+            return;
+        }
+        log.warn(
+                "address_search_provider_fallback primary_provider={} fallback_provider={} fallback_reason={}",
+                outcome.primaryProvider(),
+                outcome.result().provider(),
+                outcome.fallbackReason()
+        );
+    }
+
+    private record AddressSearchOutcome(
+            AddressSearchProviderResult result,
+            String primaryProvider,
+            boolean fallbackUsed,
+            String fallbackReason
+    ) {
+
+        private static AddressSearchOutcome from(
+                AddressSearchProviderResult firstResult,
+                AddressSearchProviderResult result
+        ) {
+            String primaryProvider = firstResult == null ? result.provider() : firstResult.provider();
+            boolean fallbackUsed = firstResult != null
+                    && !firstResult.provider().equals(result.provider());
+            String fallbackReason = fallbackUsed
+                    ? firstResult.provider() + "_" + firstResult.status().name()
+                    : null;
+            return new AddressSearchOutcome(result, primaryProvider, fallbackUsed, fallbackReason);
+        }
     }
 }

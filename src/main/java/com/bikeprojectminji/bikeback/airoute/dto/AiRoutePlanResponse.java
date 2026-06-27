@@ -20,7 +20,8 @@ public record AiRoutePlanResponse(
         List<ProviderEvidenceBadgeResponse> evidenceBadges,
         boolean aiGenerated,
         AiRouteElevationSummaryResponse elevationSummary,
-        AiRouteRoutingMetadataResponse routingMetadata
+        AiRouteRoutingMetadataResponse routingMetadata,
+        AiRouteWorkerMetadataResponse aiWorkerMetadata
 ) {
 
     public AiRoutePlanResponse(
@@ -54,6 +55,7 @@ public record AiRoutePlanResponse(
                 explanation,
                 evidenceBadges,
                 aiGenerated,
+                null,
                 null,
                 null
         );
@@ -92,7 +94,69 @@ public record AiRoutePlanResponse(
                 evidenceBadges,
                 aiGenerated,
                 elevationSummary,
+                null,
                 null
+        );
+    }
+
+    public AiRoutePlanResponse(
+            String planId,
+            String status,
+            String summary,
+            String confidence,
+            WeatherData weather,
+            WindData wind,
+            List<AiRoutePointResponse> routePoints,
+            List<AiRouteRiskResponse> risks,
+            List<String> actions,
+            int recommendationScore,
+            RecommendationScoreResponse scoreBreakdown,
+            RecommendationExplanationResponse explanation,
+            List<ProviderEvidenceBadgeResponse> evidenceBadges,
+            boolean aiGenerated,
+            AiRouteElevationSummaryResponse elevationSummary,
+            AiRouteRoutingMetadataResponse routingMetadata
+    ) {
+        this(
+                planId,
+                status,
+                summary,
+                confidence,
+                weather,
+                wind,
+                routePoints,
+                risks,
+                actions,
+                recommendationScore,
+                scoreBreakdown,
+                explanation,
+                evidenceBadges,
+                aiGenerated,
+                elevationSummary,
+                routingMetadata,
+                null
+        );
+    }
+
+    public AiRoutePlanResponse withAiWorkerMetadata(AiRouteWorkerMetadataResponse metadata) {
+        return new AiRoutePlanResponse(
+                planId,
+                status,
+                summary,
+                confidence,
+                weather,
+                wind,
+                routePoints,
+                risks,
+                actions,
+                recommendationScore,
+                scoreBreakdown,
+                explanation,
+                evidenceBadges,
+                aiGenerated,
+                elevationSummary,
+                routingMetadata,
+                metadata
         );
     }
 }

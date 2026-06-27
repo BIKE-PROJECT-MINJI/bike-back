@@ -77,6 +77,8 @@ class AiRoutePlannerServiceIntegrationTest {
         assertThat(routingClient.lastRequest().destinationLon()).isEqualByComparingTo("126.9667");
         assertThat(response.routePoints()).hasSize(2);
         assertThat(response.summary()).contains("현재 위치 기반 추천 코스");
+        assertThat(response.aiWorkerMetadata().fallbackUsed()).isTrue();
+        assertThat(response.aiWorkerMetadata().fallbackReason()).isEqualTo("AI_WORKER_UNAVAILABLE");
     }
 
     @Test

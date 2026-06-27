@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.airoute.service;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteTextPlanRequest;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRouteWorkerMetadataResponse;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePlan;
@@ -58,7 +59,8 @@ public class AiRoutePlannerService {
         AiRoutePlanResponse basePlan = composeRouteCandidatePlan(resolvedRequest, context)
                 .orElseGet(() -> aiRoutePlanComposer.composeFallback(resolvedRequest, context));
         return aiRouteWorkerClient.plan(resolvedRequest, context, basePlan)
-                .orElse(basePlan);
+                .map(this::withWorkerSuccessMetadata)
+                .orElseGet(() -> withWorkerFallbackMetadata(basePlan));
     }
 
     @MeasuredOperation("ai_route.plan_from_text")
@@ -132,6 +134,22 @@ public class AiRoutePlannerService {
                 context,
                 routePlan.candidates().get(0),
                 routePlan
+        ));
+    }
+
+    private AiRoutePlanResponse withWorkerSuccessMetadata(AiRoutePlanResponse plan) {
+        return plan.withAiWorkerMetadata(new AiRouteWorkerMetadataResponse(
+                aiRouteWorkerClient.provider(),
+                false,
+                null
+        ));
+    }
+
+    private AiRoutePlanResponse withWorkerFallbackMetadata(AiRoutePlanResponse plan) {
+        return plan.withAiWorkerMetadata(new AiRouteWorkerMetadataResponse(
+                aiRouteWorkerClient.provider(),
+                true,
+                aiRouteWorkerClient.fallbackReasonWhenEmpty()
         ));
     }
 

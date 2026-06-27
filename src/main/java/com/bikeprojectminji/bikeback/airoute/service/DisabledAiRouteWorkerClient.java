@@ -9,6 +9,11 @@ import org.springframework.stereotype.Component;
 public class DisabledAiRouteWorkerClient implements AiRouteWorkerClient {
 
     @Override
+    public String provider() {
+        return "DISABLED_AI_ROUTE_WORKER";
+    }
+
+    @Override
     public Optional<AiRoutePlanResponse> plan(
             AiRoutePlanRequest request,
             AiRouteConditionContext context,
