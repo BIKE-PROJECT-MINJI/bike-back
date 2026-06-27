@@ -34,6 +34,7 @@ BASE_URL = os.environ.get("BIKE_SMOKE_BASE_URL", "http://127.0.0.1:8080").rstrip
 MANAGEMENT_BASE_URL = os.environ.get("BIKE_SMOKE_MANAGEMENT_BASE_URL", "http://127.0.0.1:18081").rstrip("/")
 GRAPHHOPPER_CONTROL_URL = os.environ.get("BIKE_SMOKE_GRAPHHOPPER_CONTROL_URL", "").rstrip("/")
 DB_CONTAINER = os.environ.get("BIKE_SMOKE_DB_CONTAINER", "bike-deploy-smoke-postgres")
+DB_NAME = os.environ.get("BIKE_SMOKE_DB_NAME", "bike")
 REDIS_CONTAINER = os.environ.get("BIKE_SMOKE_REDIS_CONTAINER", "bike-deploy-smoke-redis")
 OUTPUT_PATH = Path(os.environ.get("BIKE_SMOKE_OUTPUT", "/tmp/bike-deploy-smoke/evidence.json"))
 DEFAULT_CORS_ORIGINS = "http://127.0.0.1:8081,http://localhost:8081"
@@ -73,7 +74,7 @@ def ops_token() -> str | None:
 
 def sql_scalar(query: str) -> str:
     return subprocess.check_output(
-        ["docker", "exec", DB_CONTAINER, "psql", "-U", "bike", "-d", "bike", "-tAc", query],
+        ["docker", "exec", DB_CONTAINER, "psql", "-U", "bike", "-d", DB_NAME, "-tAc", query],
         text=True,
     ).strip()
 
