@@ -112,11 +112,48 @@ function logSlowRequest(response, method, path, endpoint, requestId, traceId) {
   }));
 }
 
-function weightedVus(total, weightPercent) {
-  if (weightPercent <= 0 || total <= 0) {
-    return 0;
+function allocateWeightedVus(total, weights) {
+  var result = {};
+  var active = [];
+  Object.keys(weights).forEach(function(name) {
+    result[name] = 0;
+    if (isPersonaEnabled(name) && weights[name] > 0) {
+      active.push({ name: name, weight: weights[name] });
+    }
+  });
+  if (total <= 0 || active.length === 0) {
+    return result;
   }
-  return Math.max(1, Math.round((total * weightPercent) / 100));
+
+  var weightTotal = active.reduce(function(sum, item) {
+    return sum + item.weight;
+  }, 0);
+  var assigned = 0;
+  var fractions = active.map(function(item) {
+    var raw = (total * item.weight) / weightTotal;
+    var base = Math.floor(raw);
+    result[item.name] = base;
+    assigned += base;
+    return {
+      name: item.name,
+      fraction: raw - base,
+      weight: item.weight,
+    };
+  });
+
+  fractions.sort(function(left, right) {
+    if (right.fraction !== left.fraction) {
+      return right.fraction - left.fraction;
+    }
+    return right.weight - left.weight;
+  });
+
+  var remaining = total - assigned;
+  for (var index = 0; remaining > 0; index = (index + 1) % fractions.length) {
+    result[fractions[index].name] += 1;
+    remaining -= 1;
+  }
+  return result;
 }
 
 function addSmokeScenario(scenarios, personaName, execName, iterations) {
@@ -220,40 +257,48 @@ function buildOptions() {
       SCENARIO === 'baseline' ? 'BASELINE_TOTAL_VUS' : 'STRESS_TOTAL_VUS',
       SCENARIO === 'baseline' ? 10 : 25,
     );
+    var allocatedVus = allocateWeightedVus(totalVus, {
+      home: homeWeight,
+      profile: profileWeight,
+      preRide: preRideWeight,
+      inRide: inRideWeight,
+      write: writeWeight,
+      health: healthWeight,
+    });
 
     var scenarios = {};
     addRampingScenario(scenarios, 'home', 'personaHomeDiscovery', {
-      target: weightedVus(totalVus, homeWeight),
+      target: allocatedVus.home,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
     });
     addRampingScenario(scenarios, 'profile', 'personaProfileSummary', {
-      target: weightedVus(totalVus, profileWeight),
+      target: allocatedVus.profile,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
     });
     addRampingScenario(scenarios, 'preRide', 'personaPreRide', {
-      target: weightedVus(totalVus, preRideWeight),
+      target: allocatedVus.preRide,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
     });
     addRampingScenario(scenarios, 'inRide', 'personaInRide', {
-      target: weightedVus(totalVus, inRideWeight),
+      target: allocatedVus.inRide,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
     });
     addRampingScenario(scenarios, 'write', 'personaRideRecord', {
-      target: weightedVus(totalVus, writeWeight),
+      target: allocatedVus.write,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
     });
     addRampingScenario(scenarios, 'health', 'personaHealth', {
-      target: weightedVus(totalVus, healthWeight),
+      target: allocatedVus.health,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
