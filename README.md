@@ -132,6 +132,14 @@ BIKE_SMOKE_BASE_URL=http://127.0.0.1:8080 ./ops/smoke/run-hybrid-device-smoke.sh
 BIKE_SMOKE_BASE_URL=https://replace-with-device-tunnel-host ./ops/smoke/run-hybrid-device-smoke.sh
 ```
 
+AI route/GraphHopper evidence smoke:
+
+```bash
+BIKE_SMOKE_BASE_URL=http://127.0.0.1:8080 \
+BIKE_SMOKE_GRAPHHOPPER_URL=http://127.0.0.1:8989 \
+./ops/smoke/run-ai-route-evidence-smoke.sh
+```
+
 AWS short evidence gate:
 
 ```bash
@@ -140,6 +148,12 @@ AWS_ROUTING_MODE=fake ./ops/loadtest/run-aws-compose-k6.sh
 
 GraphHopper 실 provider drill은 fake smoke와 분리해서 실행한다.
 GraphHopper cache restore를 쓰는 경우 `GRAPHHOPPER_CACHE_ARCHIVE_FILE` 또는 `GRAPHHOPPER_CACHE_ARCHIVE_URL`을 명시한다.
+
+DB/Flyway 기준:
+
+- 이미 적용된 migration 파일은 수정하지 않는다.
+- 개발/검증 DB에서 Flyway checksum mismatch가 나면 기본 판단은 새 DB recreate 또는 smoke 전용 DB 생성이다.
+- 보존해야 하는 DB의 `flyway repair`는 사용자 결정과 변경 전 evidence 없이는 수행하지 않는다.
 
 ## 최근 AWS 검증 요약
 
