@@ -34,4 +34,22 @@ class WeatherLocationKeyTest {
 
         assertThat(first).isEqualTo(second);
     }
+
+    @Test
+    @DisplayName("인접 권역은 현재 권역을 제외한 3x3 주변 8개 key다")
+    void adjacentKeysReturnsEightNeighborKeys() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(key.adjacentKeys())
+                .containsExactlyInAnyOrder(
+                        new WeatherLocationKey(new BigDecimal("37.56"), new BigDecimal("126.97")),
+                        new WeatherLocationKey(new BigDecimal("37.56"), new BigDecimal("126.98")),
+                        new WeatherLocationKey(new BigDecimal("37.56"), new BigDecimal("126.99")),
+                        new WeatherLocationKey(new BigDecimal("37.57"), new BigDecimal("126.97")),
+                        new WeatherLocationKey(new BigDecimal("37.57"), new BigDecimal("126.99")),
+                        new WeatherLocationKey(new BigDecimal("37.58"), new BigDecimal("126.97")),
+                        new WeatherLocationKey(new BigDecimal("37.58"), new BigDecimal("126.98")),
+                        new WeatherLocationKey(new BigDecimal("37.58"), new BigDecimal("126.99"))
+                );
+    }
 }

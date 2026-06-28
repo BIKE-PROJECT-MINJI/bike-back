@@ -30,6 +30,7 @@ public class WeatherService {
     private static final Logger log = LoggerFactory.getLogger(WeatherService.class);
     private static final Duration FRESH_CACHE_TTL = Duration.ofMinutes(5);
     private static final Duration LAST_SUCCESS_TTL = Duration.ofMinutes(60);
+    private static final Duration PREWARM_ATTEMPT_TTL = Duration.ofMinutes(5);
     private static final long DEFAULT_TOTAL_TIMEOUT_MS = 900;
     private static final long PROVIDER_TIMEOUT_GRACE_MS = 300;
 
@@ -40,6 +41,7 @@ public class WeatherService {
     private final long weatherProviderTotalTimeoutMs;
     private final Clock clock;
     private final ConcurrentMap<WeatherLocationKey, CompletableFuture<WeatherProviderResult>> inFlightProviderRequests;
+    private final ConcurrentMap<WeatherLocationKey, OffsetDateTime> prewarmAttemptedAt;
     private final Set<WeatherLocationKey> refreshingLocations;
 
     public WeatherService(
@@ -57,6 +59,7 @@ public class WeatherService {
         this.weatherProviderTotalTimeoutMs = weatherProviderTotalTimeoutMs;
         this.clock = clock;
         this.inFlightProviderRequests = new ConcurrentHashMap<>();
+        this.prewarmAttemptedAt = new ConcurrentHashMap<>();
         this.refreshingLocations = ConcurrentHashMap.newKeySet();
     }
 
@@ -77,6 +80,7 @@ public class WeatherService {
                     toDurationMs(startedAtNanos),
                     cacheAgeMs(cached.get())
             );
+            prewarmAdjacentLocations(locationKey, RequestLogContext.currentRequestId());
             return toResponse(cached.get(), false, "FRESH_CACHE", null);
         }
 
@@ -94,6 +98,7 @@ public class WeatherService {
                     cacheAgeMs(cached.get()),
                     cached.get().forecastFallbackUsed()
             );
+            prewarmAdjacentLocations(locationKey, RequestLogContext.currentRequestId());
             return toResponse(cached.get(), true, "STALE_LAST_SUCCESS", "LAST_SUCCESS_CACHE");
         }
 
@@ -121,6 +126,7 @@ public class WeatherService {
                     toDurationMs(startedAtNanos),
                     providerResult.snapshot().forecastFallbackUsed()
             );
+            prewarmAdjacentLocations(locationKey, RequestLogContext.currentRequestId());
             return toResponse(providerResult.snapshot(), false, "FRESH_PROVIDER", null);
         }
 
@@ -397,5 +403,51 @@ public class WeatherService {
                     refreshed.snapshot().forecastFallbackUsed()
             );
         });
+    }
+
+    private void prewarmAdjacentLocations(WeatherLocationKey locationKey, String requestId) {
+        try {
+            CompletableFuture.runAsync(
+                    () -> locationKey.adjacentKeys().forEach(adjacentKey -> prewarmLocation(adjacentKey, requestId)),
+                    weatherProviderExecutor
+            );
+        } catch (RejectedExecutionException rejectedExecutionException) {
+            bikeMetricsRecorder.recordWeatherRefreshSkipped("prewarm_bulkhead_rejected");
+            log.info(
+                    "weather_prewarm_skipped request_id={} location_key={} reason=bulkhead_rejected",
+                    requestId,
+                    locationKey,
+                    rejectedExecutionException
+            );
+        }
+    }
+
+    private void prewarmLocation(WeatherLocationKey locationKey, String requestId) {
+        if (wasRecentlyPrewarmed(locationKey)) {
+            bikeMetricsRecorder.recordWeatherRefreshSkipped("prewarm_recent_attempt");
+            return;
+        }
+        prewarmAttemptedAt.put(locationKey, OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
+
+        Optional<WeatherSnapshot> cached = findCachedSnapshot(locationKey);
+        if (cached.isPresent() && isWithinFreshCacheTtl(cached.get())) {
+            bikeMetricsRecorder.recordWeatherRefreshSkipped("prewarm_fresh_cache");
+            return;
+        }
+
+        refreshWeatherAsync(locationKey, requestId);
+    }
+
+    private boolean wasRecentlyPrewarmed(WeatherLocationKey locationKey) {
+        OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        OffsetDateTime attemptedAt = prewarmAttemptedAt.get(locationKey);
+        if (attemptedAt == null) {
+            return false;
+        }
+        if (Duration.between(attemptedAt, now).compareTo(PREWARM_ATTEMPT_TTL) <= 0) {
+            return true;
+        }
+        prewarmAttemptedAt.remove(locationKey, attemptedAt);
+        return false;
     }
 }

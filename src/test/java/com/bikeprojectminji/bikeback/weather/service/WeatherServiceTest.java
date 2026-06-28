@@ -414,6 +414,60 @@ class WeatherServiceTest {
         verify(bikeMetricsRecorder, timeout(1000)).recordWeatherProviderResult("current", "late_success");
     }
 
+    @Test
+    @DisplayName("현재 권역 조회 성공 후 인접 권역을 사용자 응답과 분리해 prewarm한다")
+    void getCurrentPrewarmsAdjacentLocationsAfterProviderSuccess() {
+        weatherProviderExecutor = Executors.newFixedThreadPool(4);
+        weatherService = new WeatherService(
+                weatherProviderPort,
+                lastSuccessWeatherStore,
+                bikeMetricsRecorder,
+                weatherProviderExecutor,
+                900,
+                Clock.fixed(Instant.parse("2026-03-29T01:20:00Z"), ZoneOffset.UTC)
+        );
+        WeatherLocationKey currentKey = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        WeatherSnapshot snapshot = snapshot(false, "2026-03-29T10:19:00+09:00");
+        given(lastSuccessWeatherStore.find(currentKey)).willReturn(Optional.empty());
+        given(weatherProviderPort.getCurrent(org.mockito.ArgumentMatchers.any(WeatherLocationKey.class)))
+                .willReturn(WeatherProviderResult.success(snapshot));
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.freshnessStatus()).isEqualTo("FRESH_PROVIDER");
+        for (WeatherLocationKey adjacentKey : currentKey.adjacentKeys()) {
+            verify(lastSuccessWeatherStore, timeout(1500)).find(adjacentKey);
+            verify(lastSuccessWeatherStore, timeout(1500)).save(adjacentKey, snapshot);
+        }
+    }
+
+    @Test
+    @DisplayName("fresh cache가 있는 인접 권역은 prewarm provider 호출을 건너뛴다")
+    void getCurrentSkipsAdjacentPrewarmWhenFreshCacheExists() {
+        weatherProviderExecutor = Executors.newFixedThreadPool(4);
+        weatherService = new WeatherService(
+                weatherProviderPort,
+                lastSuccessWeatherStore,
+                bikeMetricsRecorder,
+                weatherProviderExecutor,
+                900,
+                Clock.fixed(Instant.parse("2026-03-29T01:20:00Z"), ZoneOffset.UTC)
+        );
+        WeatherLocationKey currentKey = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        WeatherLocationKey freshAdjacentKey = currentKey.adjacentKeys().get(0);
+        WeatherSnapshot snapshot = snapshot(false, "2026-03-29T10:19:00+09:00");
+        given(lastSuccessWeatherStore.find(currentKey)).willReturn(Optional.empty());
+        given(lastSuccessWeatherStore.find(freshAdjacentKey)).willReturn(Optional.of(snapshot(false, "2026-03-29T10:18:00+09:00")));
+        given(weatherProviderPort.getCurrent(org.mockito.ArgumentMatchers.any(WeatherLocationKey.class)))
+                .willReturn(WeatherProviderResult.success(snapshot));
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.freshnessStatus()).isEqualTo("FRESH_PROVIDER");
+        verify(bikeMetricsRecorder, timeout(1500)).recordWeatherRefreshSkipped("prewarm_fresh_cache");
+        verify(weatherProviderPort, timeout(1500).atLeastOnce()).getCurrent(org.mockito.ArgumentMatchers.argThat(key -> !freshAdjacentKey.equals(key)));
+    }
+
     private WeatherSnapshot snapshot(boolean forecastFallbackUsed, String lastSucceededAt) {
         return new WeatherSnapshot(
                 new WeatherData(12, "clear", "none"),
