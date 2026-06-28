@@ -116,6 +116,9 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
             RecommendationScoreResponse scoreBreakdown,
             AiRouteElevationSummaryResponse elevationSummary,
             List<ProviderEvidenceBadgeResponse> evidenceBadges,
+            String preferenceSummary,
+            String elevationStatus,
+            String sceneryEvidenceStatus,
             AiRoutePlanResponse fallbackPlan
     ) {
 
@@ -140,6 +143,9 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
                     fallbackPlan.scoreBreakdown(),
                     fallbackPlan.elevationSummary(),
                     fallbackPlan.evidenceBadges(),
+                    fallbackPlan.preferenceSummary(),
+                    fallbackPlan.elevationStatus(),
+                    fallbackPlan.sceneryEvidenceStatus(),
                     fallbackPlan
             );
         }

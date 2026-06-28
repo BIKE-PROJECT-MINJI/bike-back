@@ -8,7 +8,8 @@ public record BicycleRouteRequest(
         BigDecimal destinationLat,
         BigDecimal destinationLon,
         String preference,
-        String elevationPreference
+        String elevationPreference,
+        String textIntent
 ) {
 
     public BicycleRouteRequest(
@@ -18,6 +19,21 @@ public record BicycleRouteRequest(
             BigDecimal destinationLon,
             String preference
     ) {
-        this(originLat, originLon, destinationLat, destinationLon, preference, null);
+        this(originLat, originLon, destinationLat, destinationLon, preference, null, null);
+    }
+
+    public BicycleRouteRequest(
+            BigDecimal originLat,
+            BigDecimal originLon,
+            BigDecimal destinationLat,
+            BigDecimal destinationLon,
+            String preference,
+            String elevationPreference
+    ) {
+        this(originLat, originLon, destinationLat, destinationLon, preference, elevationPreference, null);
+    }
+
+    public BicycleRoutePreference routePreference() {
+        return BicycleRoutePreference.from(preference, elevationPreference, textIntent);
     }
 }

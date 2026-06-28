@@ -41,8 +41,8 @@ class GraphHopperReadinessScriptTest {
         String script = Files.readString(Path.of("ops/loadtest/run-aws-compose-k6.sh"));
 
         assertThat(script).contains("RESET_GRAPHHOPPER_CACHE=\"${RESET_GRAPHHOPPER_CACHE:-false}\"");
-        assertThat(script).contains("docker compose --env-file .env.test -f docker-compose.test.yml down");
-        assertThat(script).contains("docker compose --env-file .env.test -f docker-compose.test.yml down -v");
+        assertThat(script).contains("docker compose --env-file .env.test $COMPOSE_FILES down");
+        assertThat(script).contains("docker compose --env-file .env.test $COMPOSE_FILES down -v");
     }
 
     @Test

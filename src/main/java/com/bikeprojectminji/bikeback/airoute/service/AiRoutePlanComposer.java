@@ -9,6 +9,7 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRouteRoutingMetadataResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.ProviderEvidenceBadgeResponse;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteCandidate;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePlan;
+import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePreference;
 import com.bikeprojectminji.bikeback.routing.service.ElevationSummary;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
 import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
@@ -63,7 +64,11 @@ public class AiRoutePlanComposer {
                 detailsFactory.buildExplanation(request, score, evidenceBadges),
                 evidenceBadges,
                 false,
-                null
+                null,
+                null,
+                preferenceSummary(request),
+                "UNAVAILABLE",
+                sceneryEvidenceStatus(request, evidenceBadges)
         );
     }
 
@@ -117,7 +122,10 @@ public class AiRoutePlanComposer {
                 evidenceBadges,
                 false,
                 toElevationSummaryResponse(candidate.elevationSummary()),
-                AiRouteRoutingMetadataResponse.from(routePlan)
+                AiRouteRoutingMetadataResponse.from(routePlan),
+                preferenceSummary(request),
+                elevationStatus(candidate.elevationSummary()),
+                sceneryEvidenceStatus(request, evidenceBadges)
         );
     }
 
@@ -184,6 +192,36 @@ public class AiRoutePlanComposer {
             return request.elevationPreference();
         }
         return request.rideStyle();
+    }
+
+    private String preferenceSummary(AiRoutePlanRequest request) {
+        return BicycleRoutePreference.from(request.rideStyle(), request.elevationPreference(), request.textIntent())
+                .preferenceSummary();
+    }
+
+    private String elevationStatus(ElevationSummary elevationSummary) {
+        if (elevationSummary == null || !elevationSummary.hasElevation()) {
+            return "UNAVAILABLE";
+        }
+        return "VERIFIED";
+    }
+
+    private String sceneryEvidenceStatus(AiRoutePlanRequest request, List<ProviderEvidenceBadgeResponse> evidenceBadges) {
+        if (!isSceneryRequested(request)) {
+            return "NOT_REQUESTED";
+        }
+        boolean hasRouteEvidence = evidenceBadges.stream()
+                .anyMatch(badge -> badge.source().startsWith("graphhopper.") || "canonical-route".equals(badge.source()));
+        if (hasRouteEvidence) {
+            return "PARTIAL";
+        }
+        return "UNKNOWN";
+    }
+
+    private boolean isSceneryRequested(AiRoutePlanRequest request) {
+        return "SCENERY_FIRST".equals(request.rideStyle())
+                || "TEXT_RIVER_VIEW".equals(request.textIntent())
+                || "TEXT_FLAT_RIVERSIDE".equals(request.textIntent());
     }
 
     private String normalizeText(String value, String fallback) {

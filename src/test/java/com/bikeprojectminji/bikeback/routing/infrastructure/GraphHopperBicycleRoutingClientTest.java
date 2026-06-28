@@ -10,10 +10,12 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -222,14 +224,69 @@ class GraphHopperBicycleRoutingClientTest {
         assertThat(result.candidates().get(0).polyline()).hasSize(2);
     }
 
+    @Test
+    @DisplayName("GraphHopper provider는 선호도에 맞춘 custom_model 힌트를 요청에 포함한다")
+    void routeIncludesPreferenceCustomModel() throws IOException {
+        AtomicReference<String> capturedQuery = new AtomicReference<>();
+        startServer(200, """
+                {
+                  "paths": [
+                    {
+                      "distance": 2100.0,
+                      "time": 600000,
+                      "points": {
+                        "type": "LineString",
+                        "coordinates": [
+                          [126.9500000, 37.4800000],
+                          [126.9600000, 37.4900000]
+                        ]
+                      },
+                      "details": {
+                        "road_class": [[0, 1, "cycleway"]],
+                        "surface": [[0, 1, "asphalt"]]
+                      }
+                    }
+                  ]
+                }
+                """, new AtomicInteger(), capturedQuery);
+
+        GraphHopperBicycleRoutingClient client = new GraphHopperBicycleRoutingClient(baseUrl(), "");
+
+        BicycleRoutingProviderResult result = client.route(new BicycleRouteRequest(
+                BigDecimal.valueOf(37.4800),
+                BigDecimal.valueOf(126.9500),
+                BigDecimal.valueOf(37.4900),
+                BigDecimal.valueOf(126.9600),
+                "SCENERY_FIRST",
+                "FLAT_FIRST",
+                "TEXT_FLAT_RIVERSIDE"
+        ));
+
+        String decodedQuery = URLDecoder.decode(capturedQuery.get(), StandardCharsets.UTF_8);
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(decodedQuery).contains("custom_model");
+        assertThat(decodedQuery).contains("bike_network == LOCAL");
+        assertThat(decodedQuery).contains("max_slope > 8");
+    }
+
     private HttpServer startServer(int statusCode, String body) throws IOException {
         return startServer(statusCode, body, new AtomicInteger());
     }
 
     private HttpServer startServer(int statusCode, String body, AtomicInteger hitCounter) throws IOException {
+        return startServer(statusCode, body, hitCounter, new AtomicReference<>());
+    }
+
+    private HttpServer startServer(
+            int statusCode,
+            String body,
+            AtomicInteger hitCounter,
+            AtomicReference<String> queryCapture
+    ) throws IOException {
         HttpServer httpServer = HttpServer.create(new InetSocketAddress(0), 0);
         httpServer.createContext("/route", exchange -> {
             hitCounter.incrementAndGet();
+            queryCapture.set(exchange.getRequestURI().getRawQuery());
             byte[] response = body.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(statusCode, response.length);

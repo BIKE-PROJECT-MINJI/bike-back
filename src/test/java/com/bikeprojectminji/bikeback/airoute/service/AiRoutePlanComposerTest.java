@@ -164,6 +164,9 @@ class AiRoutePlanComposerTest {
         assertThat(response.scoreBreakdown().unknownPenalty()).isGreaterThan(0);
         assertThat(response.evidenceBadges()).extracting("source")
                 .contains("graphhopper.road_class", "graphhopper.surface", "graphhopper.elevation");
+        assertThat(response.preferenceSummary()).isEqualTo("자전거도로 우선");
+        assertThat(response.elevationStatus()).isEqualTo("VERIFIED");
+        assertThat(response.sceneryEvidenceStatus()).isEqualTo("NOT_REQUESTED");
     }
 
     @Test
@@ -223,6 +226,9 @@ class AiRoutePlanComposerTest {
 
         assertThat(response.scoreBreakdown().elevation()).isGreaterThan(80);
         assertThat(response.evidenceBadges()).extracting("source").contains("canonical-route");
+        assertThat(response.preferenceSummary()).isEqualTo("경치 우선 + 업힐 선호 + 남산 정석 접근");
+        assertThat(response.elevationStatus()).isEqualTo("VERIFIED");
+        assertThat(response.sceneryEvidenceStatus()).isEqualTo("PARTIAL");
     }
 
     private BicycleRouteCandidate climbCandidate() {
