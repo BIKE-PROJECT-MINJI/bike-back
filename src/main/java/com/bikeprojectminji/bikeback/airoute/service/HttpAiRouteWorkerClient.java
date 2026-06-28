@@ -15,7 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -26,7 +26,7 @@ import org.springframework.web.client.RestClientException;
 
 @Component
 @Primary
-@ConditionalOnProperty(name = "ai-route.worker.base-url")
+@Conditional(NonBlankAiRouteWorkerBaseUrlCondition.class)
 public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
 
     private static final Logger log = LoggerFactory.getLogger(HttpAiRouteWorkerClient.class);
