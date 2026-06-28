@@ -64,6 +64,14 @@ curl -i http://127.0.0.1:8080/health/monitor
 ./gradlew --no-daemon clean check
 ```
 
+AWS를 켜기 전 Hybrid 개발 레인 preflight는 아래 명령으로 확인한다.
+
+```bash
+./ops/smoke/run-hybrid-preflight.sh
+```
+
+이 명령은 compose config, AWS wrapper 문법, targeted backend test, AI route worker pytest를 비용 없이 확인하고 `ops/smoke/results/`에 evidence를 남긴다.
+
 운영 smoke, k6, AWS 검증 순서와 중단 기준은 루트 `DOCS/개발용/06_개발_운영_검증.md`와 `07_운영_장애_테스트_대응록.md`를 따른다.
 
 ## Git 기준
