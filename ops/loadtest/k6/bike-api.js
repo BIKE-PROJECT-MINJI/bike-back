@@ -8,6 +8,10 @@ var TEST_ID = __ENV.TEST_ID || 'bike-' + SCENARIO;
 var SUMMARY_DIR = (__ENV.SUMMARY_DIR || 'ops/loadtest/results').replace(/\/$/, '');
 var ENABLE_WEATHER_READ = ((__ENV.ENABLE_WEATHER_READ || 'true') + '').toLowerCase() !== 'false';
 var SLOW_REQUEST_SAMPLE_MS = intEnv('SLOW_REQUEST_SAMPLE_MS', 1000);
+var WRITE_ROUTE_POINT_COUNT = Math.max(2, intEnv('WRITE_ROUTE_POINT_COUNT', 2));
+var WRITE_POLL_FINALIZATION = ((__ENV.WRITE_POLL_FINALIZATION || 'false') + '').toLowerCase() === 'true';
+var WRITE_FINALIZATION_POLL_ATTEMPTS = Math.max(1, intEnv('WRITE_FINALIZATION_POLL_ATTEMPTS', 5));
+var WRITE_FINALIZATION_POLL_INTERVAL_SECONDS = Number.parseFloat(__ENV.WRITE_FINALIZATION_POLL_INTERVAL_SECONDS || '1');
 
 if (!BASE_URL) {
   throw new Error('BASE_URL 환경변수는 필수입니다. 예: BASE_URL=http://localhost:8080');
@@ -52,10 +56,11 @@ function baseRequestTags(extra) {
 }
 
 function generateCorrelationId() {
+  var iteration = typeof __ITER === 'undefined' ? 0 : __ITER;
   return [
     TEST_ID.replace(/[^a-zA-Z0-9._:-]/g, '-'),
     'vu' + (__VU || 0),
-    'iter' + (__ITER || 0),
+    'iter' + iteration,
     Math.random().toString(16).slice(2, 10),
   ].join('-');
 }
@@ -107,11 +112,48 @@ function logSlowRequest(response, method, path, endpoint, requestId, traceId) {
   }));
 }
 
-function weightedVus(total, weightPercent) {
-  if (weightPercent <= 0 || total <= 0) {
-    return 0;
+function allocateWeightedVus(total, weights) {
+  var result = {};
+  var active = [];
+  Object.keys(weights).forEach(function(name) {
+    result[name] = 0;
+    if (isPersonaEnabled(name) && weights[name] > 0) {
+      active.push({ name: name, weight: weights[name] });
+    }
+  });
+  if (total <= 0 || active.length === 0) {
+    return result;
   }
-  return Math.max(1, Math.round((total * weightPercent) / 100));
+
+  var weightTotal = active.reduce(function(sum, item) {
+    return sum + item.weight;
+  }, 0);
+  var assigned = 0;
+  var fractions = active.map(function(item) {
+    var raw = (total * item.weight) / weightTotal;
+    var base = Math.floor(raw);
+    result[item.name] = base;
+    assigned += base;
+    return {
+      name: item.name,
+      fraction: raw - base,
+      weight: item.weight,
+    };
+  });
+
+  fractions.sort(function(left, right) {
+    if (right.fraction !== left.fraction) {
+      return right.fraction - left.fraction;
+    }
+    return right.weight - left.weight;
+  });
+
+  var remaining = total - assigned;
+  for (var index = 0; remaining > 0; index = (index + 1) % fractions.length) {
+    result[fractions[index].name] += 1;
+    remaining -= 1;
+  }
+  return result;
 }
 
 function addSmokeScenario(scenarios, personaName, execName, iterations) {
@@ -144,6 +186,19 @@ function addRampingScenario(scenarios, personaName, execName, options) {
   };
 }
 
+function addBurstScenario(scenarios, personaName, execName, options) {
+  if (!isPersonaEnabled(personaName) || options.vus <= 0 || options.iterations <= 0) {
+    return;
+  }
+  scenarios[SCENARIO + '_' + personaName] = {
+    executor: 'shared-iterations',
+    exec: execName,
+    vus: options.vus,
+    iterations: options.iterations,
+    maxDuration: options.maxDuration,
+  };
+}
+
 function buildOptions() {
   var p95Ms = intEnv('P95_MS', 800);
   var errorRateMax = Number.parseFloat(__ENV.ERROR_RATE_MAX || '0.01');
@@ -170,45 +225,80 @@ function buildOptions() {
     thresholds['http_req_duration{flow:write-core}'] = ['p(95)<' + intEnv('WRITE_P95_MS', 1500)];
   }
 
+  if (SCENARIO === 'burst') {
+    var burstScenarios = {};
+    addBurstScenario(burstScenarios, 'write', 'personaRideRecord', {
+      vus: intEnv('BURST_WRITE_VUS', 20),
+      iterations: intEnv('BURST_WRITE_ITERATIONS', 40),
+      maxDuration: stringEnv('BURST_MAX_DURATION', '5m'),
+    });
+    addBurstScenario(burstScenarios, 'inRide', 'personaInRide', {
+      vus: intEnv('BURST_INRIDE_VUS', 20),
+      iterations: intEnv('BURST_INRIDE_ITERATIONS', 80),
+      maxDuration: stringEnv('BURST_MAX_DURATION', '5m'),
+    });
+    addBurstScenario(burstScenarios, 'preRide', 'personaPreRide', {
+      vus: intEnv('BURST_PRERIDE_VUS', 10),
+      iterations: intEnv('BURST_PRERIDE_ITERATIONS', 20),
+      maxDuration: stringEnv('BURST_MAX_DURATION', '5m'),
+    });
+    return {
+      scenarios: burstScenarios,
+      tags: {
+        testid: TEST_ID,
+        scenario_profile: SCENARIO,
+      },
+      thresholds: thresholds,
+    };
+  }
+
   if (SCENARIO === 'baseline' || SCENARIO === 'stress') {
     var totalVus = intEnv(
       SCENARIO === 'baseline' ? 'BASELINE_TOTAL_VUS' : 'STRESS_TOTAL_VUS',
       SCENARIO === 'baseline' ? 10 : 25,
     );
+    var allocatedVus = allocateWeightedVus(totalVus, {
+      home: homeWeight,
+      profile: profileWeight,
+      preRide: preRideWeight,
+      inRide: inRideWeight,
+      write: writeWeight,
+      health: healthWeight,
+    });
 
     var scenarios = {};
     addRampingScenario(scenarios, 'home', 'personaHomeDiscovery', {
-      target: weightedVus(totalVus, homeWeight),
+      target: allocatedVus.home,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
     });
     addRampingScenario(scenarios, 'profile', 'personaProfileSummary', {
-      target: weightedVus(totalVus, profileWeight),
+      target: allocatedVus.profile,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
     });
     addRampingScenario(scenarios, 'preRide', 'personaPreRide', {
-      target: weightedVus(totalVus, preRideWeight),
+      target: allocatedVus.preRide,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
     });
     addRampingScenario(scenarios, 'inRide', 'personaInRide', {
-      target: weightedVus(totalVus, inRideWeight),
+      target: allocatedVus.inRide,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
     });
     addRampingScenario(scenarios, 'write', 'personaRideRecord', {
-      target: weightedVus(totalVus, writeWeight),
+      target: allocatedVus.write,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
     });
     addRampingScenario(scenarios, 'health', 'personaHealth', {
-      target: weightedVus(totalVus, healthWeight),
+      target: allocatedVus.health,
       rampUp: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_UP' : 'STRESS_RAMP_UP', SCENARIO === 'baseline' ? '2m' : '1m'),
       hold: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_HOLD' : 'STRESS_HOLD', SCENARIO === 'baseline' ? '5m' : '3m'),
       rampDown: stringEnv(SCENARIO === 'baseline' ? 'BASELINE_RAMP_DOWN' : 'STRESS_RAMP_DOWN', SCENARIO === 'baseline' ? '2m' : '1m'),
@@ -262,6 +352,9 @@ function getJson(path, tags, params) {
     tags: baseRequestTags(tags),
     headers: withCorrelationHeaders(mergedHeaders, requestId, traceId),
   };
+  if (params.expectedStatuses) {
+    merged.responseCallback = http.expectedStatuses.apply(null, params.expectedStatuses);
+  }
   var response = http.get(BASE_URL + path, merged);
   logSlowRequest(response, 'GET', path, tags.endpoint, requestId, traceId);
   return response;
@@ -328,6 +421,19 @@ function extractAccessToken(response) {
   try {
     var payload = JSON.parse(response.body);
     return payload && payload.data && payload.data.accessToken ? payload.data.accessToken : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function extractRideRecordId(response) {
+  if (!response || (response.status !== 200 && response.status !== 201)) {
+    return null;
+  }
+  try {
+    var payload = JSON.parse(response.body);
+    var data = payload && payload.data;
+    return data && (data.rideRecordId || data.id) ? String(data.rideRecordId || data.id) : null;
   } catch (_) {
     return null;
   }
@@ -505,7 +611,7 @@ function runRecentLocation(setupData) {
     var response = getJson('/api/v1/location/me/recent', {
       flow: 'location-read',
       endpoint: 'location-me-recent',
-    }, { authToken: authToken });
+    }, { authToken: authToken, expectedStatuses: [200, 404] });
 
     check(response, {
       'status is 200 or 404': function(r) { return r.status === 200 || r.status === 404; },
@@ -534,22 +640,18 @@ function runRideRecordWrite(setupData) {
     return;
   }
 
+  var endedAtMillis = Date.now();
+  var startedAtMillis = endedAtMillis - 5 * 60 * 1000;
   var payload = {
-    startedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-    endedAt: new Date().toISOString(),
+    clientRideId: buildClientRideId(),
+    startedAt: new Date(startedAtMillis).toISOString(),
+    endedAt: new Date(endedAtMillis).toISOString(),
     visibility: 'PRIVATE',
-    routePoints: [
-      {
-        latitude: Number.parseFloat(stringEnv('WRITE_START_LAT', '37.5665')),
-        longitude: Number.parseFloat(stringEnv('WRITE_START_LON', '126.9780')),
-        recordedAt: new Date(Date.now() - 60 * 1000).toISOString(),
-      },
-      {
-        latitude: Number.parseFloat(stringEnv('WRITE_END_LAT', '37.5670')),
-        longitude: Number.parseFloat(stringEnv('WRITE_END_LON', '126.9785')),
-        recordedAt: new Date().toISOString(),
-      },
-    ],
+    summary: {
+      distanceM: intEnv('WRITE_DISTANCE_M', 1200),
+      durationSec: Math.max(10, Math.round((endedAtMillis - startedAtMillis) / 1000)),
+    },
+    routePoints: buildRideRecordPoints(startedAtMillis, endedAtMillis),
   };
 
   group('ride record save', function() {
@@ -562,6 +664,67 @@ function runRideRecordWrite(setupData) {
       'status is 200 or 201': function(r) { return r.status === 200 || r.status === 201; },
       'body is not empty': function(r) { return !!r.body; },
     });
+
+    var rideRecordId = extractRideRecordId(response);
+    if (rideRecordId && WRITE_POLL_FINALIZATION) {
+      pollRideRecordFinalization(rideRecordId, authToken);
+    }
+  });
+}
+
+function buildClientRideId() {
+  var iteration = typeof __ITER === 'undefined' ? 0 : __ITER;
+  return [
+    TEST_ID.replace(/[^a-zA-Z0-9._:-]/g, '-'),
+    'ride',
+    'vu' + (__VU || 0),
+    'iter' + iteration,
+    Math.random().toString(16).slice(2, 10),
+  ].join('-').slice(0, 80);
+}
+
+function buildRideRecordPoints(startedAtMillis, endedAtMillis) {
+  var startLat = Number.parseFloat(stringEnv('WRITE_START_LAT', '37.5665'));
+  var startLon = Number.parseFloat(stringEnv('WRITE_START_LON', '126.9780'));
+  var endLat = Number.parseFloat(stringEnv('WRITE_END_LAT', '37.5670'));
+  var endLon = Number.parseFloat(stringEnv('WRITE_END_LON', '126.9785'));
+  var points = [];
+  for (var i = 0; i < WRITE_ROUTE_POINT_COUNT; i += 1) {
+    var ratio = WRITE_ROUTE_POINT_COUNT === 1 ? 0 : i / (WRITE_ROUTE_POINT_COUNT - 1);
+    points.push({
+      pointOrder: i + 1,
+      latitude: startLat + ((endLat - startLat) * ratio),
+      longitude: startLon + ((endLon - startLon) * ratio),
+      capturedAt: new Date(startedAtMillis + ((endedAtMillis - startedAtMillis) * ratio)).toISOString(),
+    });
+  }
+  return points;
+}
+
+function pollRideRecordFinalization(rideRecordId, authToken) {
+  group('ride record finalization poll', function() {
+    for (var attempt = 0; attempt < WRITE_FINALIZATION_POLL_ATTEMPTS; attempt += 1) {
+      var response = getJson('/api/v1/ride-records/' + rideRecordId, {
+        flow: 'write-finalization',
+        endpoint: 'ride-record-finalization-status',
+      }, { authToken: authToken });
+
+      check(response, {
+        'status is 200': function(r) { return r.status === 200; },
+        'finalization status exists': function(r) {
+          try {
+            var payload = JSON.parse(r.body);
+            return !!(payload && payload.data && payload.data.status);
+          } catch (_) {
+            return false;
+          }
+        },
+      });
+      if (response.body && response.body.indexOf('"READY"') >= 0) {
+        return;
+      }
+      sleep(WRITE_FINALIZATION_POLL_INTERVAL_SECONDS);
+    }
   });
 }
 
@@ -613,6 +776,14 @@ export function personaHealth() {
 
 export function handleSummary(data) {
   var result = {};
+  data.bike_metadata = {
+    test_id: TEST_ID,
+    scenario: SCENARIO,
+    personas: ACTIVE_PERSONAS,
+    weather_enabled: ENABLE_WEATHER_READ,
+    write_route_point_count: WRITE_ROUTE_POINT_COUNT,
+    write_poll_finalization: WRITE_POLL_FINALIZATION,
+  };
   result.stdout = textSummary(data, { indent: ' ', enableColors: true });
   result[SUMMARY_DIR + '/' + TEST_ID + '-summary.json'] = JSON.stringify(data, null, 2);
   return result;

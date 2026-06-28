@@ -54,6 +54,11 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
     }
 
     @Override
+    public String provider() {
+        return "HTTP_AI_ROUTE_WORKER";
+    }
+
+    @Override
     public Optional<AiRoutePlanResponse> plan(
             AiRoutePlanRequest request,
             AiRouteConditionContext context,

@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.global.metrics;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
 import org.springframework.stereotype.Component;
 
@@ -150,12 +151,43 @@ public class BikeMetricsRecorder {
         ).record(duration);
     }
 
-    public void recordOperationDuration(String operation, String outcome, Duration duration) {
+    public void recordDatabaseBackpressureRejected(String reason) {
+        meterRegistry.counter(
+                "bike_database_backpressure_rejected_total",
+                "reason", normalize(reason)
+        ).increment();
+    }
+
+    public void recordRideSaveConcurrencyGate(String outcome) {
+        meterRegistry.counter(
+                "bike_ride_save_concurrency_gate_total",
+                "outcome", normalize(outcome)
+        ).increment();
+    }
+
+    public void recordIdempotencyLock(String operation, String outcome) {
+        meterRegistry.counter(
+                "bike_idempotency_lock_total",
+                "operation", normalize(operation),
+                "outcome", normalize(outcome)
+        ).increment();
+    }
+
+    public void recordIdempotencyLockWaitDuration(String operation, String outcome, Duration duration) {
         meterRegistry.timer(
-                "bike_operation_duration",
+                "bike_idempotency_lock_wait_duration",
                 "operation", normalize(operation),
                 "outcome", normalize(outcome)
         ).record(duration);
+    }
+
+    public void recordOperationDuration(String operation, String outcome, Duration duration) {
+        Timer.builder("bike_operation_duration")
+                .tag("operation", normalize(operation))
+                .tag("outcome", normalize(outcome))
+                .publishPercentileHistogram()
+                .register(meterRegistry)
+                .record(duration);
     }
 
     private String normalize(String value) {

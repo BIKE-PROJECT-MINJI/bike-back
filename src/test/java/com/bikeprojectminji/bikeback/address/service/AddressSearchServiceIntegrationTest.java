@@ -99,6 +99,9 @@ class AddressSearchServiceIntegrationTest {
 
         assertThat(response.status()).isEqualTo("SUCCESS");
         assertThat(response.provider()).isEqualTo("NOMINATIM");
+        assertThat(response.primaryProvider()).isEqualTo("KAKAO_LOCAL");
+        assertThat(response.fallbackUsed()).isTrue();
+        assertThat(response.fallbackReason()).isEqualTo("KAKAO_LOCAL_PROVIDER_FAILURE");
         assertThat(response.candidates()).hasSize(1);
     }
 

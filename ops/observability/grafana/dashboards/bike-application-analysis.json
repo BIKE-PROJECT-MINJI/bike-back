@@ -149,9 +149,34 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 40 },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "id": 13,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (operation,le) (rate(bike_operation_duration_seconds_bucket{outcome=\"success\"}[5m])))", "legendFormat": "{{operation}} p95", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "histogram_quantile(0.99, sum by (operation,le) (rate(bike_operation_duration_seconds_bucket{outcome=\"success\"}[5m])))", "legendFormat": "{{operation}} p99", "range": true, "refId": "B" }
+      ],
+      "title": "내부 operation latency p95/p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "table", "placement": "right" }, "tooltip": { "mode": "single" } },
+      "targets": [
+        { "editorMode": "code", "expr": "topk(15, sum by (operation) (rate(bike_operation_duration_seconds_count{outcome=\"success\"}[5m])))", "legendFormat": "{{operation}}", "range": true, "refId": "A" }
+      ],
+      "title": "내부 operation 호출량 top 15",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 48 },
       "id": 12,
-      "options": { "content": "# route cache 관측 해석\n- `bike_course_route_cache_hit_total`: warm 요청 재사용이 실제로 발생했는지 본다.\n- `bike_course_route_cache_miss_total`: cold load, TTL 만료, 또는 evict 직후 재조회 빈도를 본다.\n- `bike_course_route_snapshot_load_total`: 실제 DB ordered list load와 projection artifact 재생성 시점을 대체하는 신호로 본다.\n- 현재 대시보드는 cache 동작과 endpoint latency는 보이지만, `ride-policy/evaluate` 1회당 DB query count는 직접 보여주지 않는다. 정밀 before/after 증명은 cold/warm benchmark와 별도 DB telemetry가 더 필요하다.", "mode": "markdown" },
+      "options": { "content": "# route cache / 내부 operation 관측 해석\n- `bike_course_route_cache_hit_total`: warm 요청 재사용이 실제로 발생했는지 본다.\n- `bike_course_route_cache_miss_total`: cold load, TTL 만료, 또는 evict 직후 재조회 빈도를 본다.\n- `bike_operation_duration`: API 안쪽 서비스 로직별 p95/p99를 본다.\n- API p95가 높고 내부 operation p95도 같이 높으면 해당 서비스 로직이 1차 병목 후보다.\n- API p95는 높은데 내부 operation이 낮으면 인증 필터, JSON 직렬화, 네트워크, DB 커넥션 대기, 외부 시스템을 본다.", "mode": "markdown" },
       "title": "route cache 해석 가이드",
       "type": "text"
     }
@@ -164,5 +189,5 @@
   "time": { "from": "now-1h", "to": "now" },
   "timezone": "browser",
   "title": "BIKE 애플리케이션 대시보드",
-  "version": 2
+  "version": 3
 }

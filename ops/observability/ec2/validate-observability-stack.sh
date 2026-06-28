@@ -16,6 +16,11 @@ if [ "$ACTUATOR_STATUS" != "200" ]; then
   exit 1
 fi
 grep -q 'http_server_requests_seconds' /tmp/bike-app-prometheus.txt
+if grep -q 'bike_operation_duration_seconds_bucket' /tmp/bike-app-prometheus.txt; then
+  printf '[INFO] internal operation histogram found\n'
+else
+  printf '[WARN] internal operation histogram not found yet; send API traffic and scrape again\n'
+fi
 
 printf '[INFO] checking prometheus readiness\n'
 curl -fsS http://127.0.0.1:9090/-/ready >/tmp/bike-prometheus-ready.txt

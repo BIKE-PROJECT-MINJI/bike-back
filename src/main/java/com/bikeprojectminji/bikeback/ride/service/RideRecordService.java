@@ -6,6 +6,7 @@ import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.ConflictException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.idempotency.IdempotencyLockService;
 import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.location.service.RecentLocationCacheService;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
@@ -25,12 +26,17 @@ import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 @Service
 public class RideRecordService {
@@ -43,6 +49,9 @@ public class RideRecordService {
     private final RideRecordPointRepository rideRecordPointRepository;
     private final RecentLocationCacheService recentLocationCacheService;
     private final RideRecordFinalizationService rideRecordFinalizationService;
+    private final TransactionOperations transactionOperations;
+    private final IdempotencyLockService idempotencyLockService;
+    private final RideSaveConcurrencyGate rideSaveConcurrencyGate;
 
     public RideRecordService(
             AuthService authService,
@@ -50,7 +59,10 @@ public class RideRecordService {
             RideRecordRepository rideRecordRepository,
             RideRecordPointRepository rideRecordPointRepository,
             RecentLocationCacheService recentLocationCacheService,
-            RideRecordFinalizationService rideRecordFinalizationService
+            RideRecordFinalizationService rideRecordFinalizationService,
+            TransactionOperations transactionOperations,
+            IdempotencyLockService idempotencyLockService,
+            RideSaveConcurrencyGate rideSaveConcurrencyGate
     ) {
         this.authService = authService;
         this.courseRepository = courseRepository;
@@ -58,30 +70,42 @@ public class RideRecordService {
         this.rideRecordPointRepository = rideRecordPointRepository;
         this.recentLocationCacheService = recentLocationCacheService;
         this.rideRecordFinalizationService = rideRecordFinalizationService;
+        this.transactionOperations = transactionOperations;
+        this.idempotencyLockService = idempotencyLockService;
+        this.rideSaveConcurrencyGate = rideSaveConcurrencyGate;
     }
 
     @MeasuredOperation("ride.record.save_full")
-    @Transactional
     public RideRecordResponse saveRideRecord(String subject, CreateRideRecordRequest request) {
         // 자유 주행 저장은 입력 검증 -> 현재 사용자 식별 -> ride record 저장 -> route point 저장 순서로 진행한다.
         // point와 summary는 항상 DB가 원본이고, 캐시는 후속 조회 최적화 용도로만 갱신한다.
         RideRecordRequestValidator.validateCreateRequest(request);
         UserEntity user = authService.findUserBySubject(subject);
         String clientRideId = normalizeClientRideId(request.clientRideId());
-        if (clientRideId != null) {
-            java.util.Optional<RideRecordEntity> existingRideRecord = rideRecordRepository.findByOwnerUserIdAndClientRideId(user.getId(), clientRideId);
-            if (existingRideRecord.isPresent()) {
-                RideRecordEntity existing = existingRideRecord.get();
-                long routePointCount = rideRecordPointRepository.countByRideRecordId(existing.getId());
-                return new RideRecordResponse(
-                        existing.getId(),
-                        existing.getOwnerUserId(),
-                        Math.toIntExact(routePointCount),
-                        existing.getFinalizationStatus().name()
-                );
-            }
-        }
+        return idempotencyLockService.executeOrWait(
+                "ride_record_save_full",
+                rideRecordIdempotencyKey(user.getId(), clientRideId),
+                () -> findExistingRideRecordResponse(user.getId(), clientRideId),
+                () -> saveRideRecordWithDuplicateRecovery(subject, user, clientRideId, request)
+        );
+    }
 
+    private RideRecordResponse saveRideRecordWithDuplicateRecovery(String subject, UserEntity user, String clientRideId, CreateRideRecordRequest request) {
+        return rideSaveConcurrencyGate.execute(() -> {
+            try {
+                return requireTransactionResponse(transactionOperations.execute(status -> createRideRecord(subject, user, clientRideId, request)));
+            } catch (DataIntegrityViolationException exception) {
+                return findExistingRideRecordResponse(user.getId(), clientRideId)
+                        .orElseThrow(() -> exception);
+            }
+        });
+    }
+
+    private RideRecordResponse createRideRecord(String subject, UserEntity user, String clientRideId, CreateRideRecordRequest request) {
+        Optional<RideRecordResponse> existingResponse = findExistingRideRecordResponse(user.getId(), clientRideId);
+        if (existingResponse.isPresent()) {
+            return existingResponse.get();
+        }
         RideRecordEntity rideRecord = rideRecordRepository.save(new RideRecordEntity(
                 user.getId(),
                 clientRideId,
@@ -90,6 +114,7 @@ public class RideRecordService {
                 request.summary().distanceM(),
                 request.summary().durationSec()
         ));
+        rideRecordRepository.flush();
 
         rideRecord.markFinalizing(OffsetDateTime.now());
         rideRecord = rideRecordRepository.save(rideRecord);
@@ -107,26 +132,33 @@ public class RideRecordService {
     }
 
     @MeasuredOperation("ride.record.save_summary")
-    @Transactional
     public RideRecordResponse saveRideRecordSummary(String subject, CreateRideRecordSummaryRequest request) {
         // 웹 HUD 기본 저장은 요약만 남긴다. trace가 없으면 후처리 대상 raw point가 없어 finalization을 시작하지 않는다.
         RideRecordRequestValidator.validateSummaryRequest(request);
         UserEntity user = authService.findUserBySubject(subject);
         String clientRideId = normalizeClientRideId(request.clientRideId());
-        if (clientRideId != null) {
-            java.util.Optional<RideRecordEntity> existingRideRecord = rideRecordRepository.findByOwnerUserIdAndClientRideId(user.getId(), clientRideId);
-            if (existingRideRecord.isPresent()) {
-                RideRecordEntity existing = existingRideRecord.get();
-                long routePointCount = rideRecordPointRepository.countByRideRecordId(existing.getId());
-                return new RideRecordResponse(
-                        existing.getId(),
-                        existing.getOwnerUserId(),
-                        Math.toIntExact(routePointCount),
-                        existing.getFinalizationStatus().name()
-                );
-            }
-        }
+        return idempotencyLockService.executeOrWait(
+                "ride_record_save_summary",
+                rideRecordIdempotencyKey(user.getId(), clientRideId),
+                () -> findExistingRideRecordResponse(user.getId(), clientRideId),
+                () -> saveRideRecordSummaryWithDuplicateRecovery(user, clientRideId, request)
+        );
+    }
 
+    private RideRecordResponse saveRideRecordSummaryWithDuplicateRecovery(UserEntity user, String clientRideId, CreateRideRecordSummaryRequest request) {
+        try {
+            return requireTransactionResponse(transactionOperations.execute(status -> createRideRecordSummary(user, clientRideId, request)));
+        } catch (DataIntegrityViolationException exception) {
+            return findExistingRideRecordResponse(user.getId(), clientRideId)
+                    .orElseThrow(() -> exception);
+        }
+    }
+
+    private RideRecordResponse createRideRecordSummary(UserEntity user, String clientRideId, CreateRideRecordSummaryRequest request) {
+        Optional<RideRecordResponse> existingResponse = findExistingRideRecordResponse(user.getId(), clientRideId);
+        if (existingResponse.isPresent()) {
+            return existingResponse.get();
+        }
         RideRecordEntity rideRecord = rideRecordRepository.save(new RideRecordEntity(
                 user.getId(),
                 clientRideId,
@@ -135,6 +167,7 @@ public class RideRecordService {
                 request.summary().distanceM(),
                 request.summary().durationSec()
         ));
+        rideRecordRepository.flush();
 
         return new RideRecordResponse(rideRecord.getId(), user.getId(), 0, rideRecord.getFinalizationStatus().name());
     }
@@ -189,35 +222,32 @@ public class RideRecordService {
         UserEntity user = authService.findUserBySubject(subject);
         RideRecordEntity rideRecord = rideRecordRepository.findByIdAndOwnerUserId(rideRecordId, user.getId())
                 .orElseThrow(() -> new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
-        RideRecordFinalizationStatusResponse status = rideRecordFinalizationService.getStatus(rideRecord);
-
-        return new RideRecordFinalizationStatusResponse(
-                status.rideRecordId(),
-                status.status(),
-                status.rawPointCount(),
-                status.processedPointCount(),
-                status.finalizationAttempts(),
-                status.errorMessage(),
-                rideRecord.getStartedAt(),
-                rideRecord.getEndedAt(),
-                rideRecord.getDistanceM(),
-                rideRecord.getDurationSec(),
-                findLinkedCourseId(user.getId(), rideRecord.getId())
-        );
+        return toRideRecordFinalizationStatusResponse(user.getId(), rideRecord);
     }
 
     @MeasuredOperation("ride.record.regenerate")
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public RideRecordFinalizationStatusResponse regenerateRideRecord(String subject, Long rideRecordId) {
         UserEntity user = authService.findUserBySubject(subject);
-        RideRecordEntity rideRecord = rideRecordRepository.findByIdAndOwnerUserId(rideRecordId, user.getId())
-                .orElseThrow(() -> new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
-        if (rideRecordPointRepository.countByRideRecordId(rideRecordId) == 0) {
-            throw new BadRequestException("trace가 없는 자유 주행 기록은 재처리할 수 없습니다.");
-        }
-        rideRecordFinalizationService.markForRegeneration(rideRecord);
-        registerFinalizationAfterCommit(rideRecordId);
-        return rideRecordFinalizationService.getStatus(rideRecord);
+        return idempotencyLockService.executeOrWaitAfterContention(
+                "ride_record_regenerate",
+                rideRecordRegenerateIdempotencyKey(user.getId(), rideRecordId),
+                () -> findRideRecordStatusResponse(user.getId(), rideRecordId),
+                () -> regenerateRideRecordWithLock(user.getId(), rideRecordId)
+        );
+    }
+
+    private RideRecordFinalizationStatusResponse regenerateRideRecordWithLock(Long ownerUserId, Long rideRecordId) {
+        return requireFinalizationTransactionResponse(transactionOperations.execute(status -> {
+            RideRecordEntity rideRecord = rideRecordRepository.findByIdAndOwnerUserId(rideRecordId, ownerUserId)
+                    .orElseThrow(() -> new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
+            if (rideRecordPointRepository.countByRideRecordId(rideRecordId) == 0) {
+                throw new BadRequestException("trace가 없는 자유 주행 기록은 재처리할 수 없습니다.");
+            }
+            rideRecordFinalizationService.markForRegeneration(rideRecord);
+            registerFinalizationAfterCommit(rideRecordId);
+            return toRideRecordFinalizationStatusResponse(ownerUserId, rideRecord);
+        }));
     }
 
     private void cacheLatestCompletedLocation(
@@ -247,6 +277,28 @@ public class RideRecordService {
                 .orElse(null);
     }
 
+    private Optional<RideRecordFinalizationStatusResponse> findRideRecordStatusResponse(Long ownerUserId, Long rideRecordId) {
+        return rideRecordRepository.findByIdAndOwnerUserId(rideRecordId, ownerUserId)
+                .map(rideRecord -> toRideRecordFinalizationStatusResponse(ownerUserId, rideRecord));
+    }
+
+    private RideRecordFinalizationStatusResponse toRideRecordFinalizationStatusResponse(Long ownerUserId, RideRecordEntity rideRecord) {
+        RideRecordFinalizationStatusResponse status = rideRecordFinalizationService.getStatus(rideRecord);
+        return new RideRecordFinalizationStatusResponse(
+                status.rideRecordId(),
+                status.status(),
+                status.rawPointCount(),
+                status.processedPointCount(),
+                status.finalizationAttempts(),
+                status.errorMessage(),
+                rideRecord.getStartedAt(),
+                rideRecord.getEndedAt(),
+                rideRecord.getDistanceM(),
+                rideRecord.getDurationSec(),
+                findLinkedCourseId(ownerUserId, rideRecord.getId())
+        );
+    }
+
     private Map<Long, Long> resolveLinkedCourseIds(Long ownerUserId, List<RideRecordEntity> rideRecords) {
         Map<Long, Long> linkedCourseIds = new HashMap<>();
         if (rideRecords.isEmpty()) {
@@ -271,6 +323,44 @@ public class RideRecordService {
             return null;
         }
         return clientRideId.trim();
+    }
+
+    private Optional<RideRecordResponse> findExistingRideRecordResponse(Long ownerUserId, String clientRideId) {
+        if (clientRideId == null) {
+            return Optional.empty();
+        }
+        return rideRecordRepository.findByOwnerUserIdAndClientRideId(ownerUserId, clientRideId)
+                .map(existing -> {
+                    long routePointCount = rideRecordPointRepository.countByRideRecordId(existing.getId());
+                    return new RideRecordResponse(
+                            existing.getId(),
+                            existing.getOwnerUserId(),
+                            Math.toIntExact(routePointCount),
+                            existing.getFinalizationStatus().name()
+                    );
+                });
+    }
+
+    private String rideRecordIdempotencyKey(Long ownerUserId, String clientRideId) {
+        if (ownerUserId == null || clientRideId == null) {
+            return null;
+        }
+        return "ride-record:" + ownerUserId + ":" + clientRideId;
+    }
+
+    private String rideRecordRegenerateIdempotencyKey(Long ownerUserId, Long rideRecordId) {
+        if (ownerUserId == null || rideRecordId == null) {
+            return null;
+        }
+        return "ride-record-regenerate:" + ownerUserId + ":" + rideRecordId;
+    }
+
+    private RideRecordResponse requireTransactionResponse(RideRecordResponse response) {
+        return Objects.requireNonNull(response, "ride record transaction response must not be null");
+    }
+
+    private RideRecordFinalizationStatusResponse requireFinalizationTransactionResponse(RideRecordFinalizationStatusResponse response) {
+        return Objects.requireNonNull(response, "ride record finalization transaction response must not be null");
     }
 
     private void registerFinalizationAfterCommit(Long rideRecordId) {

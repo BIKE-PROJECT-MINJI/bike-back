@@ -4,9 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
+import com.bikeprojectminji.bikeback.global.idempotency.IdempotencyLockService;
+import com.bikeprojectminji.bikeback.global.exception.RetryableServiceUnavailableException;
 import com.bikeprojectminji.bikeback.location.service.RecentLocationCacheService;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordSummaryRequest;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
@@ -22,16 +25,23 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionOperations;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.doThrow;
 
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
@@ -54,8 +64,42 @@ class RideRecordServiceTest {
     @Mock
     private RideRecordFinalizationService rideRecordFinalizationService;
 
+    @Mock
+    private TransactionOperations transactionOperations;
+
+    @Mock
+    private IdempotencyLockService idempotencyLockService;
+
+    @Mock
+    private RideSaveConcurrencyGate rideSaveConcurrencyGate;
+
     @InjectMocks
     private RideRecordService rideRecordService;
+
+    @BeforeEach
+    void executeTransactionsInline() {
+        lenient().when(transactionOperations.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(new SimpleTransactionStatus());
+        });
+        lenient().when(idempotencyLockService.executeOrWait(any(), any(), any(), any())).thenAnswer(invocation -> {
+            Supplier<Optional<?>> existingLookup = invocation.getArgument(2);
+            Optional<?> existing = existingLookup.get();
+            if (existing.isPresent()) {
+                return existing.get();
+            }
+            Supplier<?> creator = invocation.getArgument(3);
+            return creator.get();
+        });
+        lenient().when(idempotencyLockService.executeOrWaitAfterContention(any(), any(), any(), any())).thenAnswer(invocation -> {
+            Supplier<?> creator = invocation.getArgument(3);
+            return creator.get();
+        });
+        lenient().doAnswer(invocation -> {
+            Supplier<?> supplier = invocation.getArgument(0);
+            return supplier.get();
+        }).when(rideSaveConcurrencyGate).execute(any());
+    }
 
     @Test
     @DisplayName("자유 주행 기록 저장은 10초 미만 duration을 거절한다")
@@ -249,6 +293,82 @@ class RideRecordServiceTest {
         assertThat(response.rideRecordId()).isEqualTo(1001L);
         assertThat(response.routePointCount()).isEqualTo(2);
         verifyNoInteractions(recentLocationCacheService, rideRecordFinalizationService);
+    }
+
+    @Test
+    @DisplayName("자유 주행 기록 저장은 같은 clientRideId 동시 저장 경쟁에서 기존 기록을 200 응답으로 복구한다")
+    void saveRideRecordReturnsExistingRecordAfterConcurrentClientRideIdRace() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity existingRideRecord = new RideRecordEntity(
+                1L,
+                "android-ride-race-001",
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                18250,
+                3600
+        );
+        ReflectionTestUtils.setField(existingRideRecord, "id", 1001L);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByOwnerUserIdAndClientRideId(1L, "android-ride-race-001"))
+                .willReturn(Optional.empty(), Optional.empty(), Optional.of(existingRideRecord));
+        given(rideRecordRepository.save(any(RideRecordEntity.class)))
+                .willThrow(new DataIntegrityViolationException("uq_ride_records_owner_client_ride_id"));
+        given(rideRecordPointRepository.countByRideRecordId(1001L)).willReturn(2L);
+
+        RideRecordResponse response = rideRecordService.saveRideRecord("1", new CreateRideRecordRequest(
+                "android-ride-race-001",
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                new RideRecordSummaryRequest(18250, 3600),
+                List.of(
+                        new RideRecordPointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                        new RideRecordPointRequest(2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
+                )
+        ));
+
+        assertThat(response.rideRecordId()).isEqualTo(1001L);
+        assertThat(response.routePointCount()).isEqualTo(2);
+        assertThat(response.finalizationStatus()).isEqualTo("FINALIZING");
+        verify(idempotencyLockService).executeOrWait(
+                eq("ride_record_save_full"),
+                eq("ride-record:1:android-ride-race-001"),
+                any(),
+                any()
+        );
+        verifyNoInteractions(recentLocationCacheService, rideRecordFinalizationService);
+    }
+
+    @Test
+    @DisplayName("자유 주행 신규 저장은 DB transaction 전에 저장 전용 gate를 통과해야 한다")
+    void saveRideRecordUsesRideSaveGateBeforeTransaction() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        given(authService.findUserBySubject("1")).willReturn(user);
+        doThrow(new RetryableServiceUnavailableException("busy", "RIDE_SAVE_BUSY", 3))
+                .when(rideSaveConcurrencyGate).execute(any());
+
+        assertThatThrownBy(() -> rideRecordService.saveRideRecord("1", new CreateRideRecordRequest(
+                "android-ride-gate-001",
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                new RideRecordSummaryRequest(18250, 3600),
+                List.of(
+                        new RideRecordPointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
+                        new RideRecordPointRequest(2, BigDecimal.valueOf(37.5671), BigDecimal.valueOf(126.9792))
+                )
+        )))
+                .isInstanceOf(RetryableServiceUnavailableException.class)
+                .hasMessage("busy");
+
+        verify(rideSaveConcurrencyGate).execute(any());
+        verify(transactionOperations, never()).execute(any());
+        verify(rideRecordRepository).findByOwnerUserIdAndClientRideId(1L, "android-ride-gate-001");
+        verify(rideRecordRepository, never()).save(any());
+        verify(rideRecordRepository, never()).flush();
+        verifyNoInteractions(rideRecordPointRepository,
+                recentLocationCacheService, rideRecordFinalizationService);
     }
 
     @Test
