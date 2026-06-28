@@ -8,24 +8,27 @@ AI_ROUTE_DIR="${AI_ROUTE_DIR:-$PARENT_DIR/bike-ai-route}"
 AWS_REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || true)}"
 AWS_REGION="${AWS_REGION:-ap-northeast-2}"
 PREFIX="${PREFIX:-bike-ulw-loadtest-$(date +%Y%m%d-%H%M%S)}"
-INSTANCE_TYPE="${INSTANCE_TYPE:-t3.xlarge}"
-ROOT_VOLUME_SIZE_GB="${ROOT_VOLUME_SIZE_GB:-50}"
+INSTANCE_TYPE="${INSTANCE_TYPE:-t3.small}"
+ALLOWED_INSTANCE_TYPES="${ALLOWED_INSTANCE_TYPES:-t3.micro t3.small}"
+ROOT_VOLUME_SIZE_GB="${ROOT_VOLUME_SIZE_GB:-30}"
+MAX_ROOT_VOLUME_SIZE_GB="${MAX_ROOT_VOLUME_SIZE_GB:-30}"
 BEFORE_REF="${BEFORE_REF:-origin/main}"
-RUN_DURATION="${RUN_DURATION:-2m}"
+RUN_DURATION="${RUN_DURATION:-30s}"
+MAX_RUN_DURATION_SECONDS="${MAX_RUN_DURATION_SECONDS:-900}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-$ROOT_DIR/ops/loadtest/results/$PREFIX}"
 SSH_USER="${SSH_USER:-ubuntu}"
 K6_VERSION="${K6_VERSION:-v1.4.1}"
 SECRET_ENV_FILE="${SECRET_ENV_FILE:-}"
 K6_AI_ROUTE_VUS="${K6_AI_ROUTE_VUS:-0}"
 K6_COURSE_MAP_READ_VUS="${K6_COURSE_MAP_READ_VUS:-0}"
-K6_FREE_RIDE_VUS="${K6_FREE_RIDE_VUS:-50}"
-K6_COURSE_FOLLOW_VUS="${K6_COURSE_FOLLOW_VUS:-50}"
+K6_FREE_RIDE_VUS="${K6_FREE_RIDE_VUS:-1}"
+K6_COURSE_FOLLOW_VUS="${K6_COURSE_FOLLOW_VUS:-1}"
 K6_RIDE_FINALIZATION_VUS="${K6_RIDE_FINALIZATION_VUS:-0}"
 K6_COURSE_READY_MAX_ATTEMPTS="${K6_COURSE_READY_MAX_ATTEMPTS:-80}"
 K6_COURSE_READY_POLL_SECONDS="${K6_COURSE_READY_POLL_SECONDS:-0.1}"
 K6_RIDE_FINALIZATION_REQUIRE_READY="${K6_RIDE_FINALIZATION_REQUIRE_READY:-false}"
 K6_RIDE_FINALIZATION_READY_FAILURE_THRESHOLD="${K6_RIDE_FINALIZATION_READY_FAILURE_THRESHOLD:-}"
-RUN_BEFORE="${RUN_BEFORE:-true}"
+RUN_BEFORE="${RUN_BEFORE:-false}"
 RESET_GRAPHHOPPER_CACHE="${RESET_GRAPHHOPPER_CACHE:-false}"
 SSH_READY_MAX_ATTEMPTS="${SSH_READY_MAX_ATTEMPTS:-60}"
 SSH_CONNECT_TIMEOUT_SECONDS="${SSH_CONNECT_TIMEOUT_SECONDS:-10}"
@@ -33,8 +36,15 @@ REMOTE_HEALTH_MAX_ATTEMPTS="${REMOTE_HEALTH_MAX_ATTEMPTS:-120}"
 REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS="${REMOTE_GRAPHHOPPER_READY_MAX_ATTEMPTS:-180}"
 GRAPHHOPPER_CACHE_ARCHIVE_URL="${GRAPHHOPPER_CACHE_ARCHIVE_URL:-}"
 GRAPHHOPPER_CACHE_EXPORT="${GRAPHHOPPER_CACHE_EXPORT:-false}"
-INSTANCE_TTL_SECONDS="${INSTANCE_TTL_SECONDS:-14400}"
+INSTANCE_TTL_SECONDS="${INSTANCE_TTL_SECONDS:-1800}"
+MAX_INSTANCE_TTL_SECONDS="${MAX_INSTANCE_TTL_SECONDS:-3600}"
 ALLOW_AFTER_K6_FAILURE="${ALLOW_AFTER_K6_FAILURE:-false}"
+ALLOW_HIGH_VU_AWS_RUN="${ALLOW_HIGH_VU_AWS_RUN:-false}"
+MAX_SINGLE_COMPOSE_TOTAL_VUS="${MAX_SINGLE_COMPOSE_TOTAL_VUS:-25}"
+VALIDATE_ONLY="${VALIDATE_ONLY:-false}"
+ALLOW_LONG_TTL_AWS_RUN="${ALLOW_LONG_TTL_AWS_RUN:-false}"
+ALLOW_LARGE_VOLUME_AWS_RUN="${ALLOW_LARGE_VOLUME_AWS_RUN:-false}"
+ALLOW_LONG_DURATION_AWS_RUN="${ALLOW_LONG_DURATION_AWS_RUN:-false}"
 
 TMP_DIR=""
 KEY_NAME=""
@@ -54,6 +64,128 @@ require_command() {
     echo "missing required command: $1" >&2
     exit 10
   fi
+}
+
+is_non_negative_integer() {
+  [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+validate_instance_type() {
+  local allowed
+  case "$INSTANCE_TYPE" in
+    *large*|*metal*)
+      cat >&2 <<EOF
+Refusing AWS run with INSTANCE_TYPE=$INSTANCE_TYPE.
+Large, xlarge, and metal instances are disabled for BIKE cost protection and cannot be re-enabled with ALLOWED_INSTANCE_TYPES.
+Use the separated AWS runbook with explicit architecture approval instead.
+EOF
+      exit 14
+      ;;
+  esac
+
+  allowed=" $ALLOWED_INSTANCE_TYPES "
+  if [[ "$allowed" != *" $INSTANCE_TYPE "* ]]; then
+    cat >&2 <<EOF
+Refusing AWS run with INSTANCE_TYPE=$INSTANCE_TYPE.
+Allowed instance types for this low-cost BIKE validation wrapper: $ALLOWED_INSTANCE_TYPES.
+Use the separated AWS runbook for larger validation.
+EOF
+    exit 14
+  fi
+}
+
+duration_to_seconds() {
+  local raw="$1"
+  case "$raw" in
+    *s)
+      printf '%s\n' "${raw%s}"
+      ;;
+    *m)
+      printf '%s\n' "$(( ${raw%m} * 60 ))"
+      ;;
+    *)
+      echo "unsupported RUN_DURATION=$raw; use seconds or minutes, for example 30s or 2m" >&2
+      exit 19
+      ;;
+  esac
+}
+
+validate_cost_guardrails() {
+  local duration_seconds total_vus
+  validate_instance_type
+
+  for value_name in ROOT_VOLUME_SIZE_GB MAX_ROOT_VOLUME_SIZE_GB INSTANCE_TTL_SECONDS MAX_INSTANCE_TTL_SECONDS MAX_RUN_DURATION_SECONDS \
+    K6_AI_ROUTE_VUS K6_COURSE_MAP_READ_VUS K6_FREE_RIDE_VUS K6_COURSE_FOLLOW_VUS K6_RIDE_FINALIZATION_VUS MAX_SINGLE_COMPOSE_TOTAL_VUS; do
+    if ! is_non_negative_integer "${!value_name}"; then
+      echo "$value_name must be a non-negative integer: ${!value_name}" >&2
+      exit 18
+    fi
+  done
+
+  total_vus=$((K6_AI_ROUTE_VUS + K6_COURSE_MAP_READ_VUS + K6_FREE_RIDE_VUS + K6_COURSE_FOLLOW_VUS + K6_RIDE_FINALIZATION_VUS))
+  if (( total_vus > MAX_SINGLE_COMPOSE_TOTAL_VUS )) && [[ "$ALLOW_HIGH_VU_AWS_RUN" != "true" ]]; then
+    cat >&2 <<EOF
+Refusing AWS run with total VUs=$total_vus.
+Runs above $MAX_SINGLE_COMPOSE_TOTAL_VUS VUs require explicit user approval and ALLOW_HIGH_VU_AWS_RUN=true because they can create provider/cost pressure.
+EOF
+    exit 15
+  fi
+  if (( INSTANCE_TTL_SECONDS > MAX_INSTANCE_TTL_SECONDS )) && [[ "$ALLOW_LONG_TTL_AWS_RUN" != "true" ]]; then
+    cat >&2 <<EOF
+Refusing AWS run with INSTANCE_TTL_SECONDS=$INSTANCE_TTL_SECONDS.
+Runs above $MAX_INSTANCE_TTL_SECONDS seconds require explicit user approval and ALLOW_LONG_TTL_AWS_RUN=true.
+EOF
+    exit 16
+  fi
+  if (( ROOT_VOLUME_SIZE_GB > MAX_ROOT_VOLUME_SIZE_GB )) && [[ "$ALLOW_LARGE_VOLUME_AWS_RUN" != "true" ]]; then
+    cat >&2 <<EOF
+Refusing AWS run with ROOT_VOLUME_SIZE_GB=$ROOT_VOLUME_SIZE_GB.
+Volumes above $MAX_ROOT_VOLUME_SIZE_GB GiB require explicit user approval and ALLOW_LARGE_VOLUME_AWS_RUN=true.
+EOF
+    exit 17
+  fi
+  duration_seconds="$(duration_to_seconds "$RUN_DURATION")"
+  if ! is_non_negative_integer "$duration_seconds"; then
+    echo "RUN_DURATION must resolve to non-negative seconds: $RUN_DURATION" >&2
+    exit 20
+  fi
+  if (( duration_seconds > MAX_RUN_DURATION_SECONDS )) && [[ "$ALLOW_LONG_DURATION_AWS_RUN" != "true" ]]; then
+    cat >&2 <<EOF
+Refusing AWS run with RUN_DURATION=$RUN_DURATION.
+Runs above $MAX_RUN_DURATION_SECONDS seconds require explicit user approval and ALLOW_LONG_DURATION_AWS_RUN=true.
+EOF
+    exit 21
+  fi
+}
+
+write_preflight_receipt() {
+  local duration_seconds run_before_json total_vus
+  run_before_json=false
+  if [[ "$RUN_BEFORE" == "true" ]]; then
+    run_before_json=true
+  fi
+  duration_seconds="$(duration_to_seconds "$RUN_DURATION")"
+  total_vus=$((K6_AI_ROUTE_VUS + K6_COURSE_MAP_READ_VUS + K6_FREE_RIDE_VUS + K6_COURSE_FOLLOW_VUS + K6_RIDE_FINALIZATION_VUS))
+  {
+    echo "{"
+    echo "  \"prefix\": \"$PREFIX\","
+    echo "  \"region\": \"$AWS_REGION\","
+    echo "  \"instanceType\": \"$INSTANCE_TYPE\","
+    echo "  \"allowedInstanceTypes\": \"$ALLOWED_INSTANCE_TYPES\","
+    echo "  \"rootVolumeSizeGb\": $ROOT_VOLUME_SIZE_GB,"
+    echo "  \"maxRootVolumeSizeGb\": $MAX_ROOT_VOLUME_SIZE_GB,"
+    echo "  \"runDuration\": \"$RUN_DURATION\","
+    echo "  \"runDurationSeconds\": $duration_seconds,"
+    echo "  \"maxRunDurationSeconds\": $MAX_RUN_DURATION_SECONDS,"
+    echo "  \"runBefore\": $run_before_json,"
+    echo "  \"instanceTtlSeconds\": $INSTANCE_TTL_SECONDS,"
+    echo "  \"maxInstanceTtlSeconds\": $MAX_INSTANCE_TTL_SECONDS,"
+    echo "  \"totalVus\": $total_vus,"
+    echo "  \"maxSingleComposeTotalVus\": $MAX_SINGLE_COMPOSE_TOTAL_VUS,"
+    echo "  \"aiRouteDir\": \"$AI_ROUTE_DIR\","
+    echo "  \"createdAt\": \"$(date -Iseconds)\""
+    echo "}"
+  } > "$EVIDENCE_DIR/C000-aws-preflight.json"
 }
 
 add_cleanup_detail() {
@@ -164,6 +296,7 @@ package_tree() {
     --exclude .venv \
     --exclude .pytest_cache \
     --exclude '__pycache__' \
+    --exclude '*.pyc' \
     "$AI_ROUTE_DIR/" "$package_dir/dev/bike-ai-route/"
 
   tar -C "$package_dir" -czf "$tarball" dev
@@ -461,6 +594,7 @@ main() {
   require_command ssh
   require_command scp
   require_command tar
+  validate_cost_guardrails
 
   if [[ ! -d "$AI_ROUTE_DIR" ]]; then
     echo "AI route worker directory not found: $AI_ROUTE_DIR" >&2
@@ -472,6 +606,12 @@ main() {
   fi
 
   mkdir -p "$EVIDENCE_DIR"
+  write_preflight_receipt
+  if [[ "$VALIDATE_ONLY" == "true" ]]; then
+    log "preflight validation complete. Evidence: $EVIDENCE_DIR/C000-aws-preflight.json"
+    return 0
+  fi
+
   TMP_DIR="$(mktemp -d)"
 
   local vpc_id subnet_id ami_id my_cidr expires_at user_data_file

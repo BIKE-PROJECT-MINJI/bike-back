@@ -44,4 +44,31 @@ class GraphHopperReadinessScriptTest {
         assertThat(script).contains("docker compose --env-file .env.test -f docker-compose.test.yml down");
         assertThat(script).contains("docker compose --env-file .env.test -f docker-compose.test.yml down -v");
     }
+
+    @Test
+    @DisplayName("AWS k6 wrapper는 저비용 smoke 기본값과 instance type allowlist를 강제한다")
+    void awsWrapperUsesLowCostDefaultsAndInstanceTypeAllowlist() throws Exception {
+        String script = Files.readString(Path.of("ops/loadtest/run-aws-compose-k6.sh"));
+
+        assertThat(script).contains("INSTANCE_TYPE=\"${INSTANCE_TYPE:-t3.small}\"");
+        assertThat(script).doesNotContain("INSTANCE_TYPE=\"${INSTANCE_TYPE:-t3.xlarge}\"");
+        assertThat(script).contains("validate_instance_type");
+        assertThat(script).contains("Large, xlarge, and metal instances are disabled");
+        assertThat(script).contains("cannot be re-enabled with ALLOWED_INSTANCE_TYPES");
+        assertThat(script).contains("validate_cost_guardrails");
+        assertThat(script).contains("ALLOWED_INSTANCE_TYPES=\"${ALLOWED_INSTANCE_TYPES:-t3.micro t3.small}\"");
+        assertThat(script).contains("ROOT_VOLUME_SIZE_GB=\"${ROOT_VOLUME_SIZE_GB:-30}\"");
+        assertThat(script).contains("MAX_ROOT_VOLUME_SIZE_GB=\"${MAX_ROOT_VOLUME_SIZE_GB:-30}\"");
+        assertThat(script).contains("K6_FREE_RIDE_VUS=\"${K6_FREE_RIDE_VUS:-1}\"");
+        assertThat(script).contains("K6_COURSE_FOLLOW_VUS=\"${K6_COURSE_FOLLOW_VUS:-1}\"");
+        assertThat(script).contains("RUN_BEFORE=\"${RUN_BEFORE:-false}\"");
+        assertThat(script).contains("INSTANCE_TTL_SECONDS=\"${INSTANCE_TTL_SECONDS:-1800}\"");
+        assertThat(script).contains("MAX_INSTANCE_TTL_SECONDS=\"${MAX_INSTANCE_TTL_SECONDS:-3600}\"");
+        assertThat(script).contains("ALLOW_LONG_TTL_AWS_RUN");
+        assertThat(script).contains("ALLOW_HIGH_VU_AWS_RUN");
+        assertThat(script).contains("MAX_SINGLE_COMPOSE_TOTAL_VUS=\"${MAX_SINGLE_COMPOSE_TOTAL_VUS:-25}\"");
+        assertThat(script).contains("MAX_RUN_DURATION_SECONDS=\"${MAX_RUN_DURATION_SECONDS:-900}\"");
+        assertThat(script).contains("ALLOW_LONG_DURATION_AWS_RUN");
+        assertThat(script).contains("duration_to_seconds");
+    }
 }
