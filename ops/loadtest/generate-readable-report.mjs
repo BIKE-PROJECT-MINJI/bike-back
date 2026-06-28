@@ -89,11 +89,26 @@ function testId() {
 
 function durationSeconds() {
   const millis = summary?.state?.testRunDurationMs || 0;
-  return (millis / 1000).toFixed(1);
+  if (millis > 0) {
+    return (millis / 1000).toFixed(1);
+  }
+  const minuteMatch = stdoutText.match(/for\s+(\d+)m(\d+)s/);
+  if (minuteMatch) {
+    return String(Number(minuteMatch[1]) * 60 + Number(minuteMatch[2]));
+  }
+  const secondMatch = stdoutText.match(/for\s+(\d+)s/);
+  if (secondMatch) {
+    return secondMatch[1];
+  }
+  return '알 수 없음';
 }
 
 function metricValue(metricName, valueName) {
-  const value = summary?.metrics?.[metricName]?.values?.[valueName];
+  const metric = summary?.metrics?.[metricName];
+  const values = metric?.values || metric || {};
+  const value = valueName === 'rate' && Number.isFinite(metric?.value)
+    ? metric.value
+    : values[valueName];
   return Number.isFinite(value) ? value : 0;
 }
 
@@ -137,7 +152,7 @@ function apiTable() {
     .sort(([left], [right]) => left.localeCompare(right))
     .forEach(([name, metric]) => {
       const flow = name.match(/flow:([^}]+)/)?.[1] || name;
-      const values = metric.values || {};
+      const values = metric.values || metric || {};
       rows.push([flow, ms(values.avg || 0), ms(values['p(95)'] || 0), ms(values.max || 0), apiMeaning(flow)]);
     });
   return rows.length > 1 ? table(rows) : 'API별 flow metric이 없습니다.';

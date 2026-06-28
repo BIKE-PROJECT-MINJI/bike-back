@@ -141,22 +141,25 @@ class RideRecordFinalizationIntegrationTest {
     }
 
     @Test
-    @DisplayName("기록 기반 코스 생성은 같은 자유 주행 기록으로 중복 생성할 수 없다")
-    void createCourseFromRideRecordRejectsDuplicateSourceRideRecord() throws Exception {
+    @DisplayName("기록 기반 코스 생성은 같은 자유 주행 기록 재요청이면 기존 코스를 반환한다")
+    void createCourseFromRideRecordReturnsExistingCourseForDuplicateSourceRideRecord() throws Exception {
         RideRecordResponse response = rideRecordService.saveRideRecord("1", validRideRecordRequest("android-ride-duplicate"));
         awaitReady(response.rideRecordId());
 
-        courseService.createCourseFromRideRecord(
+        CourseWriteResponse firstResponse = courseService.createCourseFromRideRecord(
                 "1",
                 new CreateCourseFromRideRecordRequest(response.rideRecordId(), "첫 저장 코스", "설명", "PRIVATE")
         );
 
-        assertThatThrownBy(() -> courseService.createCourseFromRideRecord(
+        CourseWriteResponse duplicateResponse = courseService.createCourseFromRideRecord(
                 "1",
                 new CreateCourseFromRideRecordRequest(response.rideRecordId(), "중복 저장 코스", "설명", "PRIVATE")
-        ))
-                .isInstanceOf(BadRequestException.class)
-                .hasMessage("이미 코스로 저장된 자유 주행 기록입니다.");
+        );
+
+        assertThat(duplicateResponse.courseId()).isEqualTo(firstResponse.courseId());
+        assertThat(duplicateResponse.sourceRideRecordId()).isEqualTo(response.rideRecordId());
+        assertThat(courseRepository.findByOwnerUserIdAndSourceRideRecordIdIn(1L, List.of(response.rideRecordId())))
+                .hasSize(1);
     }
 
     @Test

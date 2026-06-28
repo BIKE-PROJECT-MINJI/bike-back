@@ -158,6 +158,13 @@ public class BikeMetricsRecorder {
         ).increment();
     }
 
+    public void recordRideSaveConcurrencyGate(String outcome) {
+        meterRegistry.counter(
+                "bike_ride_save_concurrency_gate_total",
+                "outcome", normalize(outcome)
+        ).increment();
+    }
+
     public void recordIdempotencyLock(String operation, String outcome) {
         meterRegistry.counter(
                 "bike_idempotency_lock_total",

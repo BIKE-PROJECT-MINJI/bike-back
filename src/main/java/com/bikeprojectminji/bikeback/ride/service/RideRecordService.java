@@ -51,6 +51,7 @@ public class RideRecordService {
     private final RideRecordFinalizationService rideRecordFinalizationService;
     private final TransactionOperations transactionOperations;
     private final IdempotencyLockService idempotencyLockService;
+    private final RideSaveConcurrencyGate rideSaveConcurrencyGate;
 
     public RideRecordService(
             AuthService authService,
@@ -60,7 +61,8 @@ public class RideRecordService {
             RecentLocationCacheService recentLocationCacheService,
             RideRecordFinalizationService rideRecordFinalizationService,
             TransactionOperations transactionOperations,
-            IdempotencyLockService idempotencyLockService
+            IdempotencyLockService idempotencyLockService,
+            RideSaveConcurrencyGate rideSaveConcurrencyGate
     ) {
         this.authService = authService;
         this.courseRepository = courseRepository;
@@ -70,6 +72,7 @@ public class RideRecordService {
         this.rideRecordFinalizationService = rideRecordFinalizationService;
         this.transactionOperations = transactionOperations;
         this.idempotencyLockService = idempotencyLockService;
+        this.rideSaveConcurrencyGate = rideSaveConcurrencyGate;
     }
 
     @MeasuredOperation("ride.record.save_full")
@@ -88,12 +91,14 @@ public class RideRecordService {
     }
 
     private RideRecordResponse saveRideRecordWithDuplicateRecovery(String subject, UserEntity user, String clientRideId, CreateRideRecordRequest request) {
-        try {
-            return requireTransactionResponse(transactionOperations.execute(status -> createRideRecord(subject, user, clientRideId, request)));
-        } catch (DataIntegrityViolationException exception) {
-            return findExistingRideRecordResponse(user.getId(), clientRideId)
-                    .orElseThrow(() -> exception);
-        }
+        return rideSaveConcurrencyGate.execute(() -> {
+            try {
+                return requireTransactionResponse(transactionOperations.execute(status -> createRideRecord(subject, user, clientRideId, request)));
+            } catch (DataIntegrityViolationException exception) {
+                return findExistingRideRecordResponse(user.getId(), clientRideId)
+                        .orElseThrow(() -> exception);
+            }
+        });
     }
 
     private RideRecordResponse createRideRecord(String subject, UserEntity user, String clientRideId, CreateRideRecordRequest request) {

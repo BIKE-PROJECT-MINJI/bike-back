@@ -20,14 +20,17 @@ import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepositor
 import com.bikeprojectminji.bikeback.course.service.CourseRouteSnapshotService;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
+import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Objects;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 @Service
 public class AiRouteGenerationSessionService {
@@ -44,6 +47,7 @@ public class AiRouteGenerationSessionService {
     private final CourseRouteGeometryRepository courseRouteGeometryRepository;
     private final CourseRouteSnapshotService courseRouteSnapshotService;
     private final ObjectMapper objectMapper;
+    private final TransactionOperations transactionOperations;
 
     public AiRouteGenerationSessionService(
             AuthService authService,
@@ -55,7 +59,8 @@ public class AiRouteGenerationSessionService {
             CourseRoutePointRepository courseRoutePointRepository,
             CourseRouteGeometryRepository courseRouteGeometryRepository,
             CourseRouteSnapshotService courseRouteSnapshotService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TransactionOperations transactionOperations
     ) {
         this.authService = authService;
         this.aiRoutePlannerService = aiRoutePlannerService;
@@ -67,9 +72,10 @@ public class AiRouteGenerationSessionService {
         this.courseRouteGeometryRepository = courseRouteGeometryRepository;
         this.courseRouteSnapshotService = courseRouteSnapshotService;
         this.objectMapper = objectMapper;
+        this.transactionOperations = transactionOperations;
     }
 
-    @Transactional
+    @MeasuredOperation("ai_route.session.create")
     public AiRouteGenerationSessionResponse createSession(String subject, AiRouteGenerationSessionCreateRequest request) {
         validateCreateRequest(request);
         UserEntity user = authService.findUserBySubject(subject);
@@ -81,6 +87,15 @@ public class AiRouteGenerationSessionService {
             throw new BadRequestException("생성된 경로 포인트가 비어 있습니다.");
         }
 
+        return requireSessionResponse(transactionOperations.execute(status -> persistGeneratedSession(user, request, plan, routePoints)));
+    }
+
+    private AiRouteGenerationSessionResponse persistGeneratedSession(
+            UserEntity user,
+            AiRouteGenerationSessionCreateRequest request,
+            AiRoutePlanResponse plan,
+            List<AiRoutePointResponse> routePoints
+    ) {
         boolean fallbackUsed = !plan.aiGenerated();
         AiRouteGenerationSessionEntity session = sessionRepository.save(new AiRouteGenerationSessionEntity(
                 user.getId(),
@@ -95,6 +110,7 @@ public class AiRouteGenerationSessionService {
         return toResponse(session);
     }
 
+    @MeasuredOperation("ai_route.session.get")
     @Transactional(readOnly = true)
     public AiRouteGenerationSessionResponse getSession(String subject, Long sessionId) {
         UserEntity user = authService.findUserBySubject(subject);
@@ -102,6 +118,7 @@ public class AiRouteGenerationSessionService {
         return toResponse(session);
     }
 
+    @MeasuredOperation("ai_route.session.promote")
     @Transactional
     public AiRoutePromotedCourseResponse promoteCandidate(
             String subject,
@@ -321,6 +338,10 @@ public class AiRouteGenerationSessionService {
 
     private String normalizeOptionalText(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private AiRouteGenerationSessionResponse requireSessionResponse(AiRouteGenerationSessionResponse response) {
+        return Objects.requireNonNull(response, "AI route generation session transaction response must not be null");
     }
 
     private void validateCreateRequest(AiRouteGenerationSessionCreateRequest request) {
