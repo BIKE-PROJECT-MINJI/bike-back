@@ -382,6 +382,17 @@ function commonChecks(response, expectedStatus) {
   return check(response, checksObj);
 }
 
+function parseJsonBody(response) {
+  if (!response || !response.body) {
+    return null;
+  }
+  try {
+    return JSON.parse(response.body);
+  } catch (_) {
+    return null;
+  }
+}
+
 function runHealthCheck() {
   group('health', function() {
     var response = getJson('/health', { flow: 'health', endpoint: 'health' });
@@ -570,6 +581,29 @@ function runWeatherRead() {
       endpoint: 'weather-current',
     });
     commonChecks(response, 200);
+    check(response, {
+      'weather freshness status is valid': function(r) {
+        var payload = parseJsonBody(r);
+        var status = payload && payload.data && payload.data.freshnessStatus;
+        return [
+          'FRESH_PROVIDER',
+          'FRESH_CACHE',
+          'STALE_LAST_SUCCESS',
+          'UNAVAILABLE',
+        ].indexOf(status) >= 0;
+      },
+      'weather unavailable keeps payload explicit': function(r) {
+        var payload = parseJsonBody(r);
+        var data = payload && payload.data;
+        if (!data || data.freshnessStatus !== 'UNAVAILABLE') {
+          return true;
+        }
+        return data.weather === null
+          && data.wind === null
+          && data.stale === false
+          && data.staleReason === 'PROVIDER_FAILURE';
+      },
+    });
   });
 }
 
@@ -784,9 +818,21 @@ export function handleSummary(data) {
     write_route_point_count: WRITE_ROUTE_POINT_COUNT,
     write_poll_finalization: WRITE_POLL_FINALIZATION,
   };
+  var sanitizedData = sanitizedSummaryData(data);
   result.stdout = textSummary(data, { indent: ' ', enableColors: true });
-  result[SUMMARY_DIR + '/' + TEST_ID + '-summary.json'] = JSON.stringify(data, null, 2);
+  result[SUMMARY_DIR + '/' + TEST_ID + '-summary.json'] = JSON.stringify(sanitizedData, null, 2);
   return result;
+}
+
+function sanitizedSummaryData(data) {
+  var sanitized = JSON.parse(JSON.stringify(data));
+  if (sanitized.setup_data && sanitized.setup_data.tokens) {
+    sanitized.setup_data.tokens = '[REDACTED]';
+  }
+  if (sanitized.setup_data && sanitized.setup_data.authToken) {
+    sanitized.setup_data.authToken = '[REDACTED]';
+  }
+  return sanitized;
 }
 
 function textSummary(data, options) {
