@@ -91,7 +91,7 @@ flowchart LR
 
 주요 기준:
 
-- GraphHopper 호출은 기본 1회, 후보 비교 시 최대 3회로 제한합니다.
+- GraphHopper 호출 수는 quota, timeout, provider capacity 기준으로 제한하고, 후보 비교가 필요할 때도 비용과 지연 시간을 먼저 봅니다.
 - 안전/통행 가능성은 hard filter, 평지/자전거도로/강변/노면 선호는 soft weight로 처리합니다.
 - scenery, riverside, park 같은 근거가 부족하면 성공처럼 숨기지 않고 `PARTIAL` 또는 `UNKNOWN` metadata로 내려줍니다.
 - AI worker가 실패해도 좌표와 route point 정합성은 백엔드/GraphHopper evidence를 기준으로 유지합니다.
@@ -125,7 +125,7 @@ flowchart LR
 | 주소검색 | Kakao Local | Nominatim fallback, fallback metadata 제공 |
 | 날씨 | Open-Meteo | 구역 단위 Redis cache, stale fallback, cold miss soft-degrade |
 | AI 설명 | Gemini / AI worker | backend fallback explanation, provider failure metadata |
-| Routing | self-host GraphHopper | fake/hosted fallback 후보를 분리 검증 |
+| Routing | self-host GraphHopper | 운영 응답은 실패/부분 metadata로 보호하고, smoke/load에서는 fake/hosted profile을 분리 검증 |
 
 ## API Groups
 
@@ -160,7 +160,7 @@ flowchart LR
 ## Operational Testing Evidence
 
 운영 검증은 "몇 명까지 버틴다"보다 **어떤 병목을 어떤 근거로 찾았는가**에 집중했습니다.
-아래 수치는 출시 보증이 아니라, AWS 분리형 테스트 환경에서 병목을 찾고 개선 방향을 정한 evidence입니다.
+아래 수치는 출시 보증이 아니라, short AWS/k6 실행에서 병목을 찾고 개선 방향을 정한 evidence입니다.
 
 | 검증 | 대표 결과 | Evidence |
 |---|---|---|
@@ -273,4 +273,4 @@ ops/
 - finalization worker와 비동기 UX 설계
 - k6 p95/p99, Hikari, Redis, provider metric 기반 병목 분석
 - 외부 provider 장애 시 fallback metadata와 soft-degrade UX 설계
-- AWS 분리형 검증 환경에서 병목 분리와 비용 보호 runbook 운영
+- short AWS/k6 검증에서 병목 분리와 비용 보호 runbook 운영
