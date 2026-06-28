@@ -7,22 +7,28 @@
 ![GraphHopper](https://img.shields.io/badge/GraphHopper-routing%20engine-1F6FEB?style=flat-square)
 ![Observability](https://img.shields.io/badge/Observability-k6%20%2F%20Prometheus%20%2F%20Grafana-FF6F00?style=flat-square)
 
-BIKE/GAJA는 자전거 여행자를 위한 **경로 추천, 코스따라가기 HUD, 자유주행 기록 저장, Party 위치 공유** 백엔드입니다.
+BIKE/GAJA는 자전거 여행 앱을 위한 Spring Boot 백엔드입니다.
+자연어 기반 코스 추천, 코스따라가기 HUD, 자유주행 기록 저장, Party 위치 공유를 지원합니다.
 
-단순 CRUD 서버가 아니라, 실제 출시 전에 생길 수 있는 병목과 장애를 먼저 가정하고 검증하는 것을 목표로 만들었습니다.
-예를 들어 "AI가 경로를 만들어준다"에서 끝내지 않고, GraphHopper/GIS evidence로 경로 품질을 검증하고, 저장 요청이 몰릴 때 DB connection이 고갈되지 않도록 backpressure와 비동기 후처리 기준을 잡았습니다.
+이 저장소의 핵심은 단순 CRUD가 아니라, 위치/경로 도메인에서 생기는 운영 리스크를 검증 가능한 방식으로 다룬 점입니다.
+"AI가 경로를 만든다"는 표현 뒤에 숨기 쉬운 좌표 정합성, 외부 API 실패, DB connection 고갈, 주행 기록 후처리 지연을 백엔드 설계와 테스트 기준으로 분리했습니다.
 
-## What This Backend Solves
+## At a Glance
 
-자전거 앱에서 사용자는 보통 아래 흐름을 기대합니다.
+| 사용자 흐름 | 백엔드가 책임지는 것 | 운영 관점 |
+|---|---|---|
+| AI 코스 추천 | 자연어를 `RoutePreference`로 정규화하고 GraphHopper/GIS evidence로 후보를 평가 | provider 실패와 품질 근거 부족을 fallback metadata로 노출 |
+| 코스따라가기 | route polyline projection으로 진행률, 이탈, 잔여거리, 완주 가능성 계산 | read/HUD 부하를 저장/AI 부하와 분리해 p95/p99 측정 |
+| 자유주행 저장 | 모바일 GPS trace를 batch 저장하고 finalization worker가 보정 | 저장 폭주 시 `RIDE_SAVE_BUSY`와 비동기 `FINALIZING -> READY` UX로 보호 |
+| Party 위치 공유 | socket token과 Party 권한을 기준으로 위치 공유 | Redis token/cache 장애와 다중 인스턴스 한계를 별도 검증 대상으로 분리 |
 
-- "평지 위주, 한강이 보이는 코스"처럼 자연어로 코스를 추천받는다.
-- 추천받은 코스를 지도와 HUD로 따라간다.
-- 자유주행을 기록하고, 나중에 코스로 저장한다.
-- 친구와 같은 코스를 타면서 위치를 공유한다.
-- 서버가 느려지거나 외부 API가 실패해도 데이터가 깨지지 않고, 사용자는 재시도 가능한 상태를 받는다.
+## Quick Links
 
-이 저장소는 위 흐름을 Spring Boot 백엔드로 구현하고, 성능/장애/관측성까지 같이 검증합니다.
+- [Architecture](#architecture)
+- [Core Features](#core-features)
+- [API Groups](#api-groups)
+- [Operational Testing Evidence](#operational-testing-evidence)
+- [Getting Started](#getting-started)
 
 ## Highlights
 
@@ -33,7 +39,7 @@ BIKE/GAJA는 자전거 여행자를 위한 **경로 추천, 코스따라가기 H
 | 자유주행 저장 | 모바일에서 모은 GPS trace를 REST batch로 저장하고, finalization worker가 smoothing/후처리를 수행합니다. 저장 직후에는 `FINALIZING`, 완료 후 `READY`로 전환합니다. |
 | 운영 보호 | DB connection 고갈, provider timeout, Redis 장애, GraphHopper 지연 같은 상황을 빠른 429/503, fallback metadata, stale cache, retryable response로 분리합니다. |
 | 관측성 | request id/trace id, endpoint p95/p99, 내부 operation duration, Hikari metric, Redis metric, provider latency/failure, finalization backlog를 함께 봅니다. |
-| AWS 검증 | app, DB, Redis, GraphHopper, load generator를 분리해 병목을 추적하고, 테스트 후 리소스를 삭제하는 비용 보호 원칙을 둡니다. |
+| 검증 방식 | local smoke에서 AWS short evidence gate까지 단계화하고, 비용이 생기는 검증은 TTL/삭제 기준을 둡니다. |
 
 ## Architecture
 
@@ -57,7 +63,7 @@ flowchart LR
     API --> Provider
     API --> Worker
     Worker --> DB
-    API --> Obs
+    Obs -. "load / scrape" .-> API
 ```
 
 ### Runtime Roles
@@ -154,16 +160,16 @@ flowchart LR
 ## Operational Testing Evidence
 
 운영 검증은 "몇 명까지 버틴다"보다 **어떤 병목을 어떤 근거로 찾았는가**에 집중했습니다.
+아래 수치는 출시 보증이 아니라, AWS 분리형 테스트 환경에서 병목을 찾고 개선 방향을 정한 evidence입니다.
 
-| 날짜 | 테스트 | 결과 |
+| 검증 | 대표 결과 | Evidence |
 |---|---|---|
-| 2026-06-28 | AWS 25VU baseline | HTTP 실패율 0%, p95 약 33ms |
-| 2026-06-28 | AWS 50VU read/HUD/write stress | HTTP 실패율 0%, p95 약 28ms |
-| 2026-06-28 | AWS AI route 2VU provider drill | HTTP 실패율 0%, p95 약 249ms |
-| 2026-06-28 | AWS AI 포함 50VU mixed 1차 | 실패율 약 4.23%, p95 약 5011ms, Hikari timeout 확인 |
-| 2026-06-28 | Hikari/app sizing + token pool + 429 판정 보정 후 50VU | HTTP 실패율 0%, endpoint failure 0%, p95 약 39ms, p99 약 108ms |
-| 2026-06-28 | Course follow read/HUD 50VU 분리 검증 | 실패율 0%, p95 약 41ms, p99 약 95ms |
-| 2026-06-28 | Ride finalization 50VU 분리 검증 | READY 실패율 0%, READY wait p95 약 5.8초, 저장 backpressure 리스크 확인 |
+| 50VU read/HUD/write stress | HTTP 실패율 0%, p95 약 28ms | `ops/loadtest/results/aws-stress-50vu-20260628-0112-summary.json` |
+| AI route provider drill | HTTP 실패율 0%, p95 약 249ms | `ops/loadtest/results/aws-ai-route-2vu-20260628-0114-summary.json` |
+| AI 포함 50VU 1차 | 실패율 약 4.23%, p95 약 5011ms, Hikari timeout 확인 | `ops/loadtest/results/aws-mixed-ai-50vu-20260628-0115-summary.json` |
+| Hikari/app sizing + token pool 보정 후 AI 포함 50VU | HTTP 실패율 0%, endpoint failure 0%, p95 약 39ms, p99 약 108ms | `ops/loadtest/results/aws-mixed-ai-50vu-tokenpool-ready8s-20260628-0412-summary.json` |
+| Course follow read/HUD 50VU 분리 검증 | 실패율 0%, p95 약 41ms, p99 약 95ms | `ops/loadtest/results/aws-course-follow-readhud-50vu-20260628-0423-summary.json` |
+| Ride finalization 50VU 분리 검증 | READY 실패율 0%, READY wait p95 약 5.8초. 저장 backpressure 리스크는 별도 대응 대상으로 분리 | `ops/loadtest/results/aws-ride-finalization-50vu-20260628-0424-summary.json` |
 
 ### 확인한 병목과 대응
 
@@ -256,9 +262,9 @@ ops/
 
 - AI route worker: [BIKE-PROJECT-MINJI/bike-ai-route](https://github.com/BIKE-PROJECT-MINJI/bike-ai-route)
 
-## Portfolio Keywords
+## What I Can Explain From This Project
 
-이 프로젝트에서 설명할 수 있는 핵심 경험은 아래와 같습니다.
+이 저장소에서 포트폴리오나 면접 때 설명할 수 있는 핵심 경험입니다.
 
 - Spring Boot 기반 위치/경로 도메인 API 설계
 - GraphHopper custom weighting과 GIS evidence 기반 경로 추천
