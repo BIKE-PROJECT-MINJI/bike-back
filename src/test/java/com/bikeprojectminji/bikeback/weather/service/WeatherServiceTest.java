@@ -1,14 +1,12 @@
 package com.bikeprojectminji.bikeback.weather.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
-import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
 import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
@@ -86,7 +84,23 @@ class WeatherServiceTest {
     }
 
     @Test
-    @DisplayName("provider 실패 시 60분 이내 마지막 성공값이 있으면 stale=true로 응답한다")
+    @DisplayName("5분 이내 구역 캐시가 있으면 provider를 호출하지 않고 fresh cache로 응답한다")
+    void getCurrentReturnsFreshGridCacheResponse() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.of(snapshot(false, "2026-03-29T10:16:00+09:00")));
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.stale()).isFalse();
+        assertThat(response.freshnessStatus()).isEqualTo("FRESH_CACHE");
+        assertThat(response.staleReason()).isNull();
+        assertThat(response.cacheAgeSec()).isEqualTo(240);
+        verify(weatherProviderPort, never()).getCurrent(key);
+        verify(bikeMetricsRecorder).recordWeatherCacheHit("fresh_grid");
+    }
+
+    @Test
+    @DisplayName("5분을 넘고 60분 이내 구역 캐시가 있으면 stale=true로 응답하고 비동기 refresh를 건다")
     void getCurrentReturnsStaleFallbackResponse() {
         WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
         lenient().when(weatherProviderPort.getCurrent(key)).thenReturn(WeatherProviderResult.failure());
@@ -104,7 +118,7 @@ class WeatherServiceTest {
     }
 
     @Test
-    @DisplayName("유효한 last-success가 있으면 stale 응답을 먼저 반환하고 provider refresh는 비동기로 수행한다")
+    @DisplayName("5분을 넘고 60분 이내 구역 캐시가 있으면 stale 응답을 먼저 반환하고 provider refresh는 비동기로 수행한다")
     void getCurrentReturnsStaleFirstAndRefreshesAsync() {
         WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
         WeatherSnapshot staleSnapshot = snapshot(true, "2026-03-29T09:40:00+09:00");
@@ -222,27 +236,37 @@ class WeatherServiceTest {
     }
 
     @Test
-    @DisplayName("provider 실패 시 마지막 성공값이 60분을 넘기면 명시적 실패로 처리한다")
-    void getCurrentThrowsWhenLastSuccessExpired() {
+    @DisplayName("provider 실패 시 마지막 성공값이 60분을 넘기면 unavailable metadata로 응답한다")
+    void getCurrentReturnsUnavailableWhenLastSuccessExpired() {
         WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
         given(weatherProviderPort.getCurrent(key)).willReturn(WeatherProviderResult.failure());
         given(lastSuccessWeatherStore.find(key)).willReturn(Optional.of(snapshot(false, "2026-03-29T09:10:00+09:00")));
 
-        assertThatThrownBy(() -> weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)))
-                .isInstanceOf(NotFoundException.class)
-                .hasMessage("현재 날씨 정보를 사용할 수 없습니다.");
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.weather()).isNull();
+        assertThat(response.wind()).isNull();
+        assertThat(response.stale()).isFalse();
+        assertThat(response.freshnessStatus()).isEqualTo("UNAVAILABLE");
+        assertThat(response.staleReason()).isEqualTo("PROVIDER_FAILURE");
+        verify(bikeMetricsRecorder).recordWeatherUnavailable("provider_failure");
     }
 
     @Test
-    @DisplayName("provider 실패 시 마지막 성공값이 없으면 명시적 실패로 처리한다")
-    void getCurrentThrowsWhenLastSuccessMissing() {
+    @DisplayName("provider 실패 시 마지막 성공값이 없으면 unavailable metadata로 응답한다")
+    void getCurrentReturnsUnavailableWhenLastSuccessMissing() {
         WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
         given(weatherProviderPort.getCurrent(key)).willReturn(WeatherProviderResult.failure());
         given(lastSuccessWeatherStore.find(key)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)))
-                .isInstanceOf(NotFoundException.class)
-                .hasMessage("현재 날씨 정보를 사용할 수 없습니다.");
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.weather()).isNull();
+        assertThat(response.wind()).isNull();
+        assertThat(response.stale()).isFalse();
+        assertThat(response.freshnessStatus()).isEqualTo("UNAVAILABLE");
+        assertThat(response.staleReason()).isEqualTo("PROVIDER_FAILURE");
+        verify(bikeMetricsRecorder).recordWeatherUnavailable("provider_failure");
     }
 
     @Test
@@ -302,6 +326,36 @@ class WeatherServiceTest {
         assertThat(response.stale()).isFalse();
         assertThat(response.forecastFallbackUsed()).isFalse();
         verify(lastSuccessWeatherStore).save(key, snapshot(false, "2026-03-29T10:19:00+09:00"));
+    }
+
+    @Test
+    @DisplayName("cold 요청이 grace timeout 이후 성공해도 늦은 성공값을 구역 캐시에 저장한다")
+    void getCurrentWarmsCacheWhenProviderCompletesAfterGraceTimeout() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        WeatherSnapshot snapshot = snapshot(false, "2026-03-29T10:19:00+09:00");
+        weatherService = new WeatherService(
+                locationKey -> {
+                    try {
+                        Thread.sleep(500);
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        return WeatherProviderResult.failure();
+                    }
+                    return WeatherProviderResult.success(snapshot);
+                },
+                lastSuccessWeatherStore,
+                bikeMetricsRecorder,
+                weatherProviderExecutor,
+                50,
+                Clock.fixed(Instant.parse("2026-03-29T01:20:00Z"), ZoneOffset.UTC)
+        );
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.empty());
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.freshnessStatus()).isEqualTo("UNAVAILABLE");
+        verify(lastSuccessWeatherStore, timeout(1000)).save(key, snapshot);
+        verify(bikeMetricsRecorder, timeout(1000)).recordWeatherProviderResult("current", "late_success");
     }
 
     private WeatherSnapshot snapshot(boolean forecastFallbackUsed, String lastSucceededAt) {

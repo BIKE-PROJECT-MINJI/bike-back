@@ -1,6 +1,5 @@
 package com.bikeprojectminji.bikeback.weather.service;
 
-import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
 import java.math.BigDecimal;
@@ -28,8 +27,8 @@ import org.springframework.stereotype.Service;
 public class WeatherService {
 
     private static final Logger log = LoggerFactory.getLogger(WeatherService.class);
+    private static final Duration FRESH_CACHE_TTL = Duration.ofMinutes(5);
     private static final Duration LAST_SUCCESS_TTL = Duration.ofMinutes(60);
-    private static final String WEATHER_UNAVAILABLE_MESSAGE = "현재 날씨 정보를 사용할 수 없습니다.";
     private static final long DEFAULT_TOTAL_TIMEOUT_MS = 900;
     private static final long PROVIDER_TIMEOUT_GRACE_MS = 300;
 
@@ -61,14 +60,26 @@ public class WeatherService {
     }
 
     public CurrentWeatherResponse getCurrent(BigDecimal lat, BigDecimal lon) {
-        // 현재 날씨 조회는 provider 성공을 우선 사용하고,
-        // 실패 시에는 last-success 캐시를 60분 범위 안에서만 fallback으로 허용한다.
+        // 현재 날씨는 구역 단위 캐시를 우선 사용한다.
+        // 5분 이내 fresh cache는 외부 provider를 호출하지 않고, 60분 이내 값은 stale fallback으로 즉시 반환한다.
         long startedAtNanos = System.nanoTime();
         WeatherLocationKey locationKey = WeatherLocationKey.from(lat, lon);
-        Optional<WeatherSnapshot> fallback = lastSuccessWeatherStore.find(locationKey)
+        Optional<WeatherSnapshot> cached = lastSuccessWeatherStore.find(locationKey)
                 .filter(this::isWithinLastSuccessTtl);
 
-        if (fallback.isPresent()) {
+        if (cached.isPresent() && isWithinFreshCacheTtl(cached.get())) {
+            bikeMetricsRecorder.recordWeatherCacheHit("fresh_grid");
+            log.info(
+                    "weather_cache_hit request_id={} location_key={} total_duration_ms={} cache_age_ms={} mode=fresh_grid",
+                    RequestLogContext.currentRequestId(),
+                    locationKey,
+                    toDurationMs(startedAtNanos),
+                    cacheAgeMs(cached.get())
+            );
+            return toResponse(cached.get(), false, "FRESH_CACHE", null);
+        }
+
+        if (cached.isPresent()) {
             bikeMetricsRecorder.recordWeatherCacheHit("last_success_stale");
             bikeMetricsRecorder.recordWeatherStaleServed();
             bikeMetricsRecorder.recordWeatherFallback();
@@ -79,10 +90,10 @@ public class WeatherService {
                     locationKey,
                     0,
                     toDurationMs(startedAtNanos),
-                    cacheAgeMs(fallback.get()),
-                    fallback.get().forecastFallbackUsed()
+                    cacheAgeMs(cached.get()),
+                    cached.get().forecastFallbackUsed()
             );
-            return toResponse(fallback.get(), true);
+            return toResponse(cached.get(), true, "STALE_LAST_SUCCESS", "LAST_SUCCESS_CACHE");
         }
 
         bikeMetricsRecorder.recordWeatherCacheMiss();
@@ -109,7 +120,7 @@ public class WeatherService {
                     toDurationMs(startedAtNanos),
                     providerResult.snapshot().forecastFallbackUsed()
             );
-            return toResponse(providerResult.snapshot(), false);
+            return toResponse(providerResult.snapshot(), false, "FRESH_PROVIDER", null);
         }
 
         log.info(
@@ -120,7 +131,12 @@ public class WeatherService {
                 toDurationMs(startedAtNanos)
         );
         bikeMetricsRecorder.recordWeatherUnavailable("provider_failure");
-        throw new NotFoundException(WEATHER_UNAVAILABLE_MESSAGE);
+        return unavailableResponse();
+    }
+
+    private boolean isWithinFreshCacheTtl(WeatherSnapshot snapshot) {
+        OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        return Duration.between(snapshot.lastSucceededAt(), now).compareTo(FRESH_CACHE_TTL) <= 0;
     }
 
     private boolean isWithinLastSuccessTtl(WeatherSnapshot snapshot) {
@@ -129,7 +145,12 @@ public class WeatherService {
         return Duration.between(snapshot.lastSucceededAt(), now).compareTo(LAST_SUCCESS_TTL) <= 0;
     }
 
-    private CurrentWeatherResponse toResponse(WeatherSnapshot snapshot, boolean stale) {
+    private CurrentWeatherResponse toResponse(
+            WeatherSnapshot snapshot,
+            boolean stale,
+            String freshnessStatus,
+            String staleReason
+    ) {
         // 외부 응답에서는 snapshot 내부 구조를 그대로 노출하지 않고,
         // stale 여부와 forecast fallback 사용 여부만 함께 풀어서 전달한다.
         return new CurrentWeatherResponse(
@@ -137,10 +158,23 @@ public class WeatherService {
                 snapshot.wind(),
                 stale,
                 snapshot.forecastFallbackUsed(),
-                stale ? "STALE_LAST_SUCCESS" : "FRESH_PROVIDER",
-                stale ? "LAST_SUCCESS_CACHE" : null,
+                freshnessStatus,
+                staleReason,
                 snapshot.observedAt(),
-                stale ? Math.max(0L, cacheAgeMs(snapshot) / 1000L) : 0L
+                "FRESH_PROVIDER".equals(freshnessStatus) ? 0L : Math.max(0L, cacheAgeMs(snapshot) / 1000L)
+        );
+    }
+
+    private CurrentWeatherResponse unavailableResponse() {
+        return new CurrentWeatherResponse(
+                null,
+                null,
+                false,
+                false,
+                "UNAVAILABLE",
+                "PROVIDER_FAILURE",
+                null,
+                0L
         );
     }
 
@@ -226,6 +260,7 @@ public class WeatherService {
         } catch (TimeoutException graceTimeoutException) {
             bikeMetricsRecorder.recordWeatherProviderTimeout("grace");
             bikeMetricsRecorder.recordWeatherProviderFailure("grace_timeout");
+            cacheLateProviderSuccess(future, locationKey, RequestLogContext.currentRequestId());
             return WeatherProviderResult.failure();
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
@@ -247,6 +282,33 @@ public class WeatherService {
             );
             return WeatherProviderResult.failure();
         }
+    }
+
+    private void cacheLateProviderSuccess(Future<WeatherProviderResult> future, WeatherLocationKey locationKey, String requestId) {
+        if (!(future instanceof CompletableFuture<?> rawFuture)) {
+            return;
+        }
+        @SuppressWarnings("unchecked")
+        CompletableFuture<WeatherProviderResult> completableFuture = (CompletableFuture<WeatherProviderResult>) rawFuture;
+        completableFuture.thenAccept(result -> {
+            if (result == null || !result.success() || result.snapshot() == null) {
+                return;
+            }
+            bikeMetricsRecorder.recordWeatherProviderResult(
+                    result.snapshot().forecastFallbackUsed() ? "hourly_fallback" : "current",
+                    "late_success"
+            );
+            if (result.snapshot().forecastFallbackUsed()) {
+                bikeMetricsRecorder.recordWeatherFallback();
+            }
+            lastSuccessWeatherStore.save(locationKey, result.snapshot());
+            log.info(
+                    "weather_late_success_cached request_id={} location_key={} forecast_fallback_used={}",
+                    requestId,
+                    locationKey,
+                    result.snapshot().forecastFallbackUsed()
+            );
+        });
     }
 
     private void refreshWeatherAsync(WeatherLocationKey locationKey, String requestId) {
