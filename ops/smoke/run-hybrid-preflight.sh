@@ -77,6 +77,7 @@ main() {
     require_command docker
     run_shell_step "compose-local-config" "docker compose -f docker-compose.local.yml config >/tmp/bike-compose-local.yml"
     run_shell_step "compose-test-config" "docker compose -f docker-compose.test.yml config >/tmp/bike-compose-test.yml"
+    run_shell_step "compose-test-fake-routing-config" "docker compose -f docker-compose.test.yml -f docker-compose.test.fake-routing.yml config >/tmp/bike-compose-test-fake-routing.yml"
   fi
 
   if [[ "$RUN_AWS_SCRIPT_SYNTAX" == "true" ]]; then

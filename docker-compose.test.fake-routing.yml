@@ -1,0 +1,18 @@
+services:
+  graphhopper-prepare:
+    image: alpine:3.20
+    command: ["sh", "-c", "echo fake routing mode: skip graphhopper prepare"]
+    environment: {}
+    volumes: []
+
+  graphhopper:
+    image: alpine:3.20
+    command: ["sh", "-c", "echo fake routing mode: graphhopper disabled; sleep infinity"]
+    environment: {}
+    volumes: []
+
+  bike-back:
+    environment:
+      BICYCLE_ROUTING_PROVIDER: fake
+      BICYCLE_ROUTING_FAKE_ENABLED: "true"
+      GRAPHHOPPER_BASE_URL: http://graphhopper:8989
