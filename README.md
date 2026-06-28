@@ -1,138 +1,214 @@
 # BIKE Backend
 
-BIKE/GAJA의 Spring Boot 백엔드 저장소다.
-자전거 여행 경로 추천, 코스따라가기 HUD, 자유주행 기록 저장/보정, Party 위치 공유, 운영 관측성을 담당한다.
+![Java](https://img.shields.io/badge/Java-17-007396?style=flat-square)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?style=flat-square)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20PostGIS-4169E1?style=flat-square)
+![Redis](https://img.shields.io/badge/Redis-cache%20%2F%20quota%20%2F%20lock-DC382D?style=flat-square)
+![GraphHopper](https://img.shields.io/badge/GraphHopper-routing%20engine-1F6FEB?style=flat-square)
+![Observability](https://img.shields.io/badge/Observability-k6%20%2F%20Prometheus%20%2F%20Grafana-FF6F00?style=flat-square)
 
-## 핵심 목표
+BIKE/GAJA는 자전거 여행자를 위한 **경로 추천, 코스따라가기 HUD, 자유주행 기록 저장, Party 위치 공유** 백엔드입니다.
 
-- 사용자가 `평지`, `한강이 보이는`, `자전거도로 위주` 같은 자연어 조건으로 코스를 추천받는다.
-- 추천 후보는 GraphHopper/GIS evidence와 백엔드 scorer를 근거로 점수화한다.
-- AI worker는 route point를 직접 만들지 않고, 사용자 의도 정규화와 후보 설명/주의 문구를 보강한다.
-- 자유주행 trace는 저장 후 finalization worker가 보정하고, READY 상태가 되면 코스로 승격할 수 있다.
-- 코스따라가기 HUD는 route point 단순 최근접이 아니라 route polyline 정사영, 진행률, 이탈, coverage 기반 완주 판정을 사용한다.
-- 운영 검증은 smoke, contract, integration, concurrency, load, failure, recovery, observability 순서로 evidence를 남긴다.
+단순 CRUD 서버가 아니라, 실제 출시 전에 생길 수 있는 병목과 장애를 먼저 가정하고 검증하는 것을 목표로 만들었습니다.
+예를 들어 "AI가 경로를 만들어준다"에서 끝내지 않고, GraphHopper/GIS evidence로 경로 품질을 검증하고, 저장 요청이 몰릴 때 DB connection이 고갈되지 않도록 backpressure와 비동기 후처리 기준을 잡았습니다.
 
-## 기술 스택
+## What This Backend Solves
 
-| 영역 | 기준 |
+자전거 앱에서 사용자는 보통 아래 흐름을 기대합니다.
+
+- "평지 위주, 한강이 보이는 코스"처럼 자연어로 코스를 추천받는다.
+- 추천받은 코스를 지도와 HUD로 따라간다.
+- 자유주행을 기록하고, 나중에 코스로 저장한다.
+- 친구와 같은 코스를 타면서 위치를 공유한다.
+- 서버가 느려지거나 외부 API가 실패해도 데이터가 깨지지 않고, 사용자는 재시도 가능한 상태를 받는다.
+
+이 저장소는 위 흐름을 Spring Boot 백엔드로 구현하고, 성능/장애/관측성까지 같이 검증합니다.
+
+## Highlights
+
+| 영역 | 구현 포인트 |
 |---|---|
-| Runtime | Java 17, Spring Boot 3.5.x, Gradle |
-| DB | PostgreSQL 16, PostGIS, Flyway |
-| Cache/Lock | Redis, quota/rate-limit, socket token, idempotency lock |
-| Routing | GraphHopper self-host 우선, fake/hosted fallback 후보 |
-| AI route | 별도 `bike-ai-route` worker, Gemini provider, backend fallback |
-| Observability | Actuator, Prometheus metrics, request id / trace id, k6 evidence |
-| Infra | Local compose, Neon/Upstash dev 후보, AWS short evidence gate |
+| AI 코스 생성 | LLM이 좌표를 찍는 구조가 아니라, 자연어를 `RoutePreference`로 정규화하고 GraphHopper custom weighting/GIS evidence/백엔드 scorer로 후보를 평가합니다. |
+| 코스따라가기 HUD | route point 하나와 현재 위치를 단순 비교하지 않고, route polyline projection으로 진행률, 이탈 거리, 잔여 거리, 완주 가능성을 계산합니다. |
+| 자유주행 저장 | 모바일에서 모은 GPS trace를 REST batch로 저장하고, finalization worker가 smoothing/후처리를 수행합니다. 저장 직후에는 `FINALIZING`, 완료 후 `READY`로 전환합니다. |
+| 운영 보호 | DB connection 고갈, provider timeout, Redis 장애, GraphHopper 지연 같은 상황을 빠른 429/503, fallback metadata, stale cache, retryable response로 분리합니다. |
+| 관측성 | request id/trace id, endpoint p95/p99, 내부 operation duration, Hikari metric, Redis metric, provider latency/failure, finalization backlog를 함께 봅니다. |
+| AWS 검증 | app, DB, Redis, GraphHopper, load generator를 분리해 병목을 추적하고, 테스트 후 리소스를 삭제하는 비용 보호 원칙을 둡니다. |
 
-## 주요 기능
+## Architecture
 
-| 기능 | 구현/검증 기준 |
-|---|---|
-| Auth | 이메일/카카오 로그인, refresh token rotation, logout, me/delete |
-| Course | 목록, 상세, route points, 공개 범위, 신고/공유/다운로드 후보 |
-| Course follow | HUD 진행률, 이탈 후보/경고/복귀, coverage 완주 판정 |
-| Ride record | 자유주행 저장, trace 저장, finalization job, 코스 승격 |
-| AI route | 주소/텍스트 기반 코스 생성, GraphHopper evidence, AI 설명, fallback metadata |
-| Address | Kakao Local 우선, Nominatim fallback |
-| Weather | Open-Meteo, 구역 단위 Redis cache, stale fallback, prewarm |
-| Party | 생성/참여/나가기/신고, socket token, 위치 공유 |
-| Ops | health, monitor, metrics, smoke, k6, AWS cleanup evidence |
+```mermaid
+flowchart LR
+    RN["Mobile App / Expo"]
+    API["Spring Boot API"]
+    DB[("PostgreSQL 16 + PostGIS")]
+    Redis[("Redis")]
+    GH["GraphHopper"]
+    AI["bike-ai-route worker"]
+    Provider["Kakao Local / Open-Meteo / Gemini"]
+    Worker["Finalization Worker"]
+    Obs["k6 / Prometheus / Grafana"]
 
-## AI 코스생성 방향
-
-현재 기준은 "LLM이 좌표를 만드는 서비스"가 아니다.
-
-1. 사용자의 자연어를 `RoutePreference`로 정규화한다.
-   예: `FLAT_FIRST`, `RIVERSIDE`, `BIKE_PATH_FIRST`, `LOW_TRAFFIC`, `LOOP`.
-2. 백엔드가 `RoutePreference`를 GraphHopper profile/custom model/weighting 후보로 변환한다.
-3. GraphHopper가 route와 detail을 반환한다.
-4. 백엔드 scorer가 경사, 고도, 노면, 자전거도로, 수변/공원 근접도 같은 GIS evidence로 점수화한다.
-5. AI worker는 이미 검증된 후보에 대한 설명, trade-off, 주의 문구만 생성한다.
-
-운영 제한:
-
-- GraphHopper 호출은 기본 1회, 후보 비교 시 최대 3회로 제한한다.
-- hard filter는 안전/통행 가능성에만 사용하고, 사용자 취향은 soft weight로 반영한다.
-- 풍경/한강/공원 근거가 별도 GIS layer 없이 근사되면 `PARTIAL` 또는 `UNKNOWN` metadata로 표시한다.
-- 고도 요약이 없으면 `elevationStatus=UNAVAILABLE` 같은 명시 상태를 내려야 한다.
-
-## 원본 문서
-
-제품, 정책, API, 인프라, ADR, 운영 검증, 장애 대응, USM의 최종 원본은 이 저장소 내부 `docs/`가 아니라 루트 `DOCS/개발용` 문서 묶음이다.
-
-| 기준 | 위치 |
-|---|---|
-| 기능/비기능 요구사항 | `/mnt/e/bike-work/bike/DOCS/개발용/01_기능_비기능_요구사항.md` |
-| 도메인 정책 | `/mnt/e/bike-work/bike/DOCS/개발용/02_도메인_정책.md` |
-| API 명세 | `/mnt/e/bike-work/bike/DOCS/개발용/03_API_명세서.md` |
-| 데이터/인프라 아키텍처 | `/mnt/e/bike-work/bike/DOCS/개발용/04_데이터_인프라_아키텍처.md` |
-| ADR/기술 결정 | `/mnt/e/bike-work/bike/DOCS/개발용/05_ADR_기술결정.md` |
-| 개발/운영/검증 기준 | `/mnt/e/bike-work/bike/DOCS/개발용/06_개발_운영_검증.md` |
-| 운영/장애/테스트 대응록 | `/mnt/e/bike-work/bike/DOCS/개발용/07_운영_장애_테스트_대응록.md` |
-| USM/사용자 시나리오 | `/mnt/e/bike-work/bike/DOCS/개발용/08_USM_사용자_시나리오.md` |
-
-## 로컬 실행
-
-```bash
-cd /mnt/e/bike-work/bike/dev/bike-back
-./gradlew bootRun
+    RN --> API
+    API --> DB
+    API --> Redis
+    API --> GH
+    API --> AI
+    API --> Provider
+    API --> Worker
+    Worker --> DB
+    API --> Obs
 ```
 
-환경 변수와 provider 설정은 루트 `DOCS/개발용/04_데이터_인프라_아키텍처.md`와 실제 secret store를 기준으로 확인한다.
-비밀값은 README, Markdown, k6 summary, app log에 평문으로 쓰지 않는다.
+### Runtime Roles
 
-## 로컬 30분 온보딩
+| Role | 책임 |
+|---|---|
+| API | 인증, 코스, 주행 기록, 주소검색, 날씨, AI route session, Party API를 처리합니다. |
+| Worker | 자유주행 기록 finalization, smoothing, 재처리, job 상태 전이를 담당합니다. |
+| Redis | quota/rate-limit, socket token, idempotency lock, weather/route cache를 담당합니다. |
+| GraphHopper | 실제 자전거 경로 탐색과 route detail evidence를 제공합니다. |
+| AI worker | 자연어 의도 정규화, 후보 설명, trade-off 문구 생성을 담당합니다. |
 
-1. 현재 브랜치와 원격을 확인한다.
+## Core Features
 
-```bash
-git status --short --branch
-git remote -v
+### 1. AI Route Recommendation
+
+```text
+사용자 입력
+  -> RoutePreference 정규화
+  -> GraphHopper profile/custom weighting 적용
+  -> GIS evidence 기반 score 계산
+  -> AI worker 설명 생성
+  -> 후보 저장/따라가기 연결
 ```
 
-2. JDK/Gradle 빌드와 테스트를 확인한다.
+주요 기준:
+
+- GraphHopper 호출은 기본 1회, 후보 비교 시 최대 3회로 제한합니다.
+- 안전/통행 가능성은 hard filter, 평지/자전거도로/강변/노면 선호는 soft weight로 처리합니다.
+- scenery, riverside, park 같은 근거가 부족하면 성공처럼 숨기지 않고 `PARTIAL` 또는 `UNKNOWN` metadata로 내려줍니다.
+- AI worker가 실패해도 좌표와 route point 정합성은 백엔드/GraphHopper evidence를 기준으로 유지합니다.
+
+### 2. Course Follow HUD
+
+코스따라가기는 단순히 "현재 위치가 route point와 가까운가"를 보지 않습니다.
+
+- route points를 polyline segment로 변환합니다.
+- 현재 위치를 가장 가까운 선분에 정사영합니다.
+- `nearestSegmentIndex`, `distanceAlongRouteM`, `remainingDistanceM`, `progressPercent`를 계산합니다.
+- GPS 튐을 흡수하기 위해 `ON_ROUTE -> CANDIDATE -> WARNING -> ON_ROUTE` 상태 전이를 둡니다.
+- 완주는 종점 근접만 보지 않고 coverage 기반으로 판단합니다.
+
+### 3. Ride Record Finalization
+
+자유주행 저장은 사용자 응답 경로와 후처리를 분리합니다.
+
+- 모바일 앱은 GPS trace를 로컬에 보존합니다.
+- 서버는 `clientRideId` 기준으로 중복 저장을 막습니다.
+- 저장 성공 후 finalization job을 만들고 `FINALIZING` 상태를 반환할 수 있습니다.
+- worker가 trace smoothing과 보정 작업을 끝내면 `READY`가 됩니다.
+- 저장 요청이 몰리면 오래 버티다 실패하지 않고 `RIDE_SAVE_BUSY`와 `Retry-After`로 빠르게 보호합니다.
+
+### 4. Weather / Address / Provider Fallback
+
+외부 API는 핵심 사용자 흐름을 막지 않도록 기능별로 다르게 처리합니다.
+
+| 기능 | 우선 provider | fallback / 보호 정책 |
+|---|---|---|
+| 주소검색 | Kakao Local | Nominatim fallback, fallback metadata 제공 |
+| 날씨 | Open-Meteo | 구역 단위 Redis cache, stale fallback, cold miss soft-degrade |
+| AI 설명 | Gemini / AI worker | backend fallback explanation, provider failure metadata |
+| Routing | self-host GraphHopper | fake/hosted fallback 후보를 분리 검증 |
+
+## API Groups
+
+| Group | 대표 API |
+|---|---|
+| Health/Ops | `GET /health`, `GET /health/monitor` |
+| Auth | `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me` |
+| Course | `GET /api/v1/courses`, `GET /api/v1/courses/{id}`, `GET /api/v1/courses/{id}/route-points` |
+| Follow | `POST /api/v1/courses/{id}/ride-policy/evaluate` |
+| Ride Record | `POST /api/v1/ride-records`, `POST /api/v1/ride-records/{id}/trace`, `POST /api/v1/ride-records/{id}/regenerate`, `DELETE /api/v1/ride-records/{id}` |
+| AI Route | `POST /api/v1/ai-routes/plan`, `POST /api/v1/ai-routes/plan/from-text`, AI route session/candidate APIs |
+| Address | `GET /api/v1/addresses/search` |
+| Weather | `GET /api/v1/weather/current` |
+| Party | Party REST APIs, socket token, `WS /ws/v1/parties/{id}/locations` |
+| Events | client event single/batch 수집 |
+
+## Tech Stack
+
+| Layer | Stack |
+|---|---|
+| Language | Java 17 |
+| Framework | Spring Boot 3.5.x |
+| Build | Gradle |
+| Database | PostgreSQL 16, PostGIS, Flyway |
+| Cache / Lock | Redis |
+| Routing | GraphHopper self-host |
+| AI | `bike-ai-route` worker, Gemini provider, backend fallback |
+| Testing | JUnit, Spring Boot Test, Python smoke scripts, k6 |
+| Observability | Actuator, Prometheus metrics, Grafana, request id / trace id |
+| Infra | Docker Compose local, managed dev infra 후보, AWS short evidence gate |
+
+## Operational Testing Evidence
+
+운영 검증은 "몇 명까지 버틴다"보다 **어떤 병목을 어떤 근거로 찾았는가**에 집중했습니다.
+
+| 날짜 | 테스트 | 결과 |
+|---|---|---|
+| 2026-06-28 | AWS 25VU baseline | HTTP 실패율 0%, p95 약 33ms |
+| 2026-06-28 | AWS 50VU read/HUD/write stress | HTTP 실패율 0%, p95 약 28ms |
+| 2026-06-28 | AWS AI route 2VU provider drill | HTTP 실패율 0%, p95 약 249ms |
+| 2026-06-28 | AWS AI 포함 50VU mixed 1차 | 실패율 약 4.23%, p95 약 5011ms, Hikari timeout 확인 |
+| 2026-06-28 | Hikari/app sizing + token pool + 429 판정 보정 후 50VU | HTTP 실패율 0%, endpoint failure 0%, p95 약 39ms, p99 약 108ms |
+| 2026-06-28 | Course follow read/HUD 50VU 분리 검증 | 실패율 0%, p95 약 41ms, p99 약 95ms |
+| 2026-06-28 | Ride finalization 50VU 분리 검증 | READY 실패율 0%, READY wait p95 약 5.8초, 저장 backpressure 리스크 확인 |
+
+### 확인한 병목과 대응
+
+- 50VU 혼합 부하에서 GraphHopper보다 DB connection 경쟁이 먼저 병목이 됐습니다.
+- Hikari pool만 무작정 키우지 않고, 테스트 모델의 반복 회원가입 write 부하를 token pool로 분리했습니다.
+- AI route capacity `429`는 장애가 아니라 provider 보호용 backpressure로 분류했습니다.
+- 저장 직후 즉시 코스화는 동기 완료를 강제하지 않고 `FINALIZING -> READY` 비동기 UX로 확정했습니다.
+- 주행 저장 요청은 read/HUD를 보호하기 위해 빠른 `RIDE_SAVE_BUSY` 응답과 재시도 UX를 둡니다.
+
+## Getting Started
+
+### Requirements
+
+- JDK 17
+- Docker / Docker Compose
+- PostgreSQL 16 + PostGIS
+- Redis
+- GraphHopper local data, or fake routing profile for smoke tests
+
+### Run Locally
 
 ```bash
+git clone https://github.com/BIKE-PROJECT-MINJI/bike-back.git
+cd bike-back
+
 ./gradlew --no-daemon clean check
-```
-
-3. 로컬 DB/Redis/GraphHopper 구성은 루트 `DOCS/개발용/04_데이터_인프라_아키텍처.md`를 확인한다.
-
-4. 앱을 실행한다.
-
-```bash
 ./gradlew bootRun
 ```
 
-5. Swagger/OpenAPI와 health를 확인한다.
+Health check:
 
 ```bash
 curl -fsS http://127.0.0.1:8080/health
 curl -i http://127.0.0.1:8080/health/monitor
 ```
 
-## Smoke / 검증
+### Smoke Tests
 
-기본 검증:
-
-```bash
-./gradlew --no-daemon clean check
-```
-
-AWS를 켜기 전 Hybrid 개발 레인 preflight:
+Hybrid preflight:
 
 ```bash
 ./ops/smoke/run-hybrid-preflight.sh
 ```
 
-Neon/Upstash/터널을 붙인 뒤 실제 기기 접근 smoke:
-
-```bash
-BIKE_SMOKE_BASE_URL=http://127.0.0.1:8080 ./ops/smoke/run-hybrid-device-smoke.sh
-BIKE_SMOKE_BASE_URL=https://replace-with-device-tunnel-host ./ops/smoke/run-hybrid-device-smoke.sh
-```
-
-AI route/GraphHopper evidence smoke:
+AI route / GraphHopper evidence smoke:
 
 ```bash
 BIKE_SMOKE_BASE_URL=http://127.0.0.1:8080 \
@@ -146,39 +222,49 @@ AWS short evidence gate:
 AWS_ROUTING_MODE=fake ./ops/loadtest/run-aws-compose-k6.sh
 ```
 
-GraphHopper 실 provider drill은 fake smoke와 분리해서 실행한다.
-GraphHopper cache restore를 쓰는 경우 `GRAPHHOPPER_CACHE_ARCHIVE_FILE` 또는 `GRAPHHOPPER_CACHE_ARCHIVE_URL`을 명시한다.
+AWS 검증은 비용이 발생하므로 기본 개발 루프로 사용하지 않습니다. 실행 전 테스트 목적, TTL, 삭제 대상, 중단 기준을 먼저 정합니다.
 
-DB/Flyway 기준:
+## Project Structure
 
-- 이미 적용된 migration 파일은 수정하지 않는다.
-- 개발/검증 DB에서 Flyway checksum mismatch가 나면 기본 판단은 새 DB recreate 또는 smoke 전용 DB 생성이다.
-- 보존해야 하는 DB의 `flyway repair`는 사용자 결정과 변경 전 evidence 없이는 수행하지 않는다.
+```text
+src/main/java/com/bikeprojectminji/bikeback
+  auth/              인증, refresh token rotation
+  course/            코스 목록/상세/route points/follow 정책
+  ride/              자유주행 기록, trace, finalization
+  airoute/           AI route orchestration, fallback, metadata
+  address/           Kakao/Nominatim 주소검색
+  weather/           Open-Meteo, Redis cache, stale fallback
+  party/             Party REST/WebSocket 위치 공유
+  common/            공통 응답, 예외, request id/trace id
 
-## 최근 AWS 검증 요약
+ops/
+  smoke/             로컬/하이브리드/API smoke scripts
+  loadtest/          k6 부하테스트와 readable report
+  graphhopper/       GraphHopper local config
+  observability/     Prometheus/Grafana/CloudWatch sample
+```
 
-| 날짜 | 테스트 | 결과 |
-|---|---|---|
-| 2026-06-28 | AWS fake routing 3VU smoke | 실패율 0%, p95 약 99ms |
-| 2026-06-28 | AWS real GraphHopper 2VU drill | 실패율 0%, p95 약 78ms |
-| 2026-06-28 | AWS real GraphHopper 5VU read/HUD drill | 실패율 0%, p95 약 35ms |
-| 2026-06-29 | AWS real GraphHopper 10VU read/HUD drill | 실패율 0%, p95 약 43ms |
-| 2026-06-29 | AWS fake routing 25VU mixed smoke | 실패율 0%, p95 약 116ms |
-| 2026-06-29 | AWS Gemini AI route 1VU provider drill | HTTP 실패율 0%, checks 89.7%, elevation summary 품질 계약 보강 필요 |
+## Engineering Rules
 
-상세 evidence와 판단은 `/mnt/e/bike-work/bike/DOCS/개발용/07_운영_장애_테스트_대응록.md`를 기준으로 본다.
+- 이미 적용된 Flyway migration은 수정하지 않고 새 migration으로 보정합니다.
+- API 응답 계약이 바뀌면 controller/DTO, Swagger/OpenAPI, 프론트 상태 모델, smoke를 함께 확인합니다.
+- secret, token, provider key, DB/Redis credential은 README, log, k6 summary, evidence에 평문으로 남기지 않습니다.
+- 운영 부하테스트는 smoke/contract/integration이 통과한 뒤에만 실행합니다.
+- AWS 리소스는 테스트 후 삭제 evidence까지 확인해야 완료로 봅니다.
 
-## Git 기준
+## Related Repository
 
-- 작업 시작 전 `git status --short --branch`와 `git remote -v`를 확인한다.
-- 기능/API 변경은 가능한 한 작은 브랜치와 PR로 나눈다.
-- API, DB, 운영, 장애 대응, 사용자 시나리오 기준이 바뀌면 루트 `DOCS/개발용` 문서 동기화 여부를 확인한다.
-- PR 본문에는 변경 요약, 검증 명령, evidence 위치, 남은 리스크를 남긴다.
+- AI route worker: [BIKE-PROJECT-MINJI/bike-ai-route](https://github.com/BIKE-PROJECT-MINJI/bike-ai-route)
 
-## 이 저장소 안에서 원본으로 보지 않는 것
+## Portfolio Keywords
 
-- 과거 `docs/` 하위 ADR/인프라/검토 Markdown
-- `.omo/` 초안
-- 임시 보고서나 중간 계획서
+이 프로젝트에서 설명할 수 있는 핵심 경험은 아래와 같습니다.
 
-필요한 기준성 내용은 루트 `DOCS/개발용` 문서로 흡수하고, 이 저장소에는 코드, 테스트, 실행 스크립트, raw evidence만 남긴다.
+- Spring Boot 기반 위치/경로 도메인 API 설계
+- GraphHopper custom weighting과 GIS evidence 기반 경로 추천
+- route polyline projection 기반 HUD 진행률/이탈/완주 판정
+- `clientRideId` 멱등성, Redis lock, DB unique constraint를 이용한 중복 저장 방지
+- finalization worker와 비동기 UX 설계
+- k6 p95/p99, Hikari, Redis, provider metric 기반 병목 분석
+- 외부 provider 장애 시 fallback metadata와 soft-degrade UX 설계
+- AWS 분리형 검증 환경에서 병목 분리와 비용 보호 runbook 운영
