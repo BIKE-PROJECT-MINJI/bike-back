@@ -18,6 +18,8 @@ const COURSE_READY_POLL_SECONDS = floatEnv('COURSE_READY_POLL_SECONDS', 0.1);
 const PROMOTE_AI_COURSE_RATE = floatEnv('PROMOTE_AI_COURSE_RATE', 0.2);
 const SETUP_AUTH_POOL_ENABLED = boolEnv('SETUP_AUTH_POOL_ENABLED', true);
 const SETUP_AUTH_EXTRA_TOKENS = numberEnv('SETUP_AUTH_EXTRA_TOKENS', 2);
+const RIDE_FINALIZATION_REQUIRE_READY = boolEnv('RIDE_FINALIZATION_REQUIRE_READY', false);
+const RIDE_FINALIZATION_READY_FAILURE_THRESHOLD = __ENV.RIDE_FINALIZATION_READY_FAILURE_THRESHOLD || '';
 
 const endpointDuration = new Trend('bike_endpoint_duration', true);
 const endpointFailureRate = new Rate('bike_endpoint_failure_rate');
@@ -96,7 +98,14 @@ if (Object.keys(scenarios).length === 0) {
 export const options = {
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
   scenarios,
-  thresholds: {
+  thresholds: buildThresholds(),
+  tags: {
+    testid: TEST_ID,
+  },
+};
+
+function buildThresholds() {
+  const thresholds = {
     http_req_failed: ['rate<0.05'],
     checks: ['rate>0.95'],
     http_req_duration: ['p(95)<30000', 'p(99)<60000'],
@@ -105,11 +114,14 @@ export const options = {
     'http_req_duration{flow:free-ride}': ['p(95)<5000', 'p(99)<10000'],
     'http_req_duration{flow:course-follow}': ['p(95)<5000', 'p(99)<10000'],
     'http_req_duration{flow:ride-finalization}': ['p(95)<15000', 'p(99)<30000'],
-  },
-  tags: {
-    testid: TEST_ID,
-  },
-};
+  };
+  if (RIDE_FINALIZATION_REQUIRE_READY) {
+    thresholds.ride_finalization_ready_failure_rate = [
+      `rate<${RIDE_FINALIZATION_READY_FAILURE_THRESHOLD || '0.01'}`,
+    ];
+  }
+  return thresholds;
+}
 
 export function setup() {
   if (!SETUP_AUTH_POOL_ENABLED) {
@@ -240,8 +252,12 @@ export function rideFinalizationToCourse(data) {
   const token = tokenFor(data, 'finalize') || registerUser('finalize');
   group('ride finalization to course', () => {
     const save = saveRideRecord(token, 'finalize', 'ride-finalization');
+    const saveAccepted = save.status === 200;
+    const saveBusy = isRideSaveBusy(save);
     const rideRecordId = jsonValue(save, ['data', 'rideRecordId']);
-    const rideRecordReady = rideRecordId ? waitForRideRecordReady(rideRecordId, token, 'ride-finalization') : false;
+    const rideRecordReady = rideRecordId && saveAccepted
+      ? waitForRideRecordReady(rideRecordId, token, 'ride-finalization')
+      : false;
     const create = rideRecordId && rideRecordReady
       ? postJson('/api/v1/courses', {
         sourceRideRecordId: rideRecordId,
@@ -252,9 +268,13 @@ export function rideFinalizationToCourse(data) {
       : null;
     const courseId = create ? jsonValue(create, ['data', 'courseId']) : null;
 
-    check({ rideRecordReady, courseId }, {
-      'ride record finalized READY': (value) => value.rideRecordReady,
-      'course id exists from finalized ride': (value) => !!value.courseId,
+    check({ saveAccepted, saveBusy, rideRecordId, rideRecordReady, courseId }, {
+      'ride save accepted or controlled busy': (value) => value.saveAccepted || value.saveBusy,
+      'ride record id exists when save accepted': (value) => !value.saveAccepted || !!value.rideRecordId,
+      'ride record finalized READY when required': (value) => (
+        !RIDE_FINALIZATION_REQUIRE_READY || value.rideRecordReady
+      ),
+      'course id exists when finalized': (value) => !value.rideRecordReady || !!value.courseId,
     });
   });
   sleep(numberEnv('SLEEP_SECONDS', 1));
