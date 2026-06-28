@@ -89,4 +89,49 @@ class AddressSearchControllerTest {
 
         verify(addressSearchRateLimitService).checkAllowed("127.0.0.1");
     }
+
+    @Test
+    @DisplayName("주소 검색 API는 provider fallback metadata를 프론트 계약으로 보존한다")
+    void searchKeepsFallbackMetadataInWrappedResponse() throws Exception {
+        given(addressSearchService.search("여의나루역", 1, 5))
+                .willReturn(new AddressSearchResponse(
+                        "SUCCESS",
+                        1,
+                        5,
+                        1,
+                        "NOMINATIM",
+                        "KAKAO_LOCAL",
+                        true,
+                        "KAKAO_LOCAL_PROVIDER_FAILURE",
+                        "주소 후보를 찾았습니다.",
+                        List.of(
+                                new AddressCandidateResponse(
+                                        "nominatim-1",
+                                        "여의나루역",
+                                        "서울 영등포구 여의도동",
+                                        BigDecimal.valueOf(37.5271),
+                                        BigDecimal.valueOf(126.9328),
+                                        "NOMINATIM",
+                                        "STATION",
+                                        "MEDIUM"
+                                )
+                        )
+                ));
+
+        mockMvc.perform(get("/api/v1/addresses/search")
+                        .param("query", "여의나루역")
+                        .param("page", "1")
+                        .param("size", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.status").value("SUCCESS"))
+                .andExpect(jsonPath("$.data.provider").value("NOMINATIM"))
+                .andExpect(jsonPath("$.data.primaryProvider").value("KAKAO_LOCAL"))
+                .andExpect(jsonPath("$.data.fallbackUsed").value(true))
+                .andExpect(jsonPath("$.data.fallbackReason").value("KAKAO_LOCAL_PROVIDER_FAILURE"))
+                .andExpect(jsonPath("$.data.candidates[0].source").value("NOMINATIM"))
+                .andExpect(jsonPath("$.data.candidates[0].confidence").value("MEDIUM"));
+
+        verify(addressSearchRateLimitService).checkAllowed("127.0.0.1");
+    }
 }
