@@ -32,6 +32,10 @@ public class BikeMetricsRecorder {
         meterRegistry.counter("bike_weather_cache_miss_total").increment();
     }
 
+    public void recordWeatherCacheFailure(String operation) {
+        meterRegistry.counter("bike_weather_cache_failure_total", "operation", normalize(operation)).increment();
+    }
+
     public void recordWeatherProviderResult(String source, String outcome) {
         meterRegistry.counter(
                 "bike_weather_provider_result_total",

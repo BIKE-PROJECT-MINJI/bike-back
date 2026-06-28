@@ -16,11 +16,14 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
@@ -270,6 +273,59 @@ class WeatherServiceTest {
     }
 
     @Test
+    @DisplayName("Redis cache read 실패는 provider 조회로 복구하고 raw 500으로 전파하지 않는다")
+    void getCurrentFallsBackToProviderWhenCacheReadFails() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        WeatherSnapshot snapshot = snapshot(false, "2026-03-29T10:19:00+09:00");
+        given(lastSuccessWeatherStore.find(key)).willThrow(new IllegalStateException("redis down"));
+        given(weatherProviderPort.getCurrent(key)).willReturn(WeatherProviderResult.success(snapshot));
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.freshnessStatus()).isEqualTo("FRESH_PROVIDER");
+        assertThat(response.weather()).isNotNull();
+        verify(bikeMetricsRecorder).recordWeatherCacheFailure("read");
+    }
+
+    @Test
+    @DisplayName("Redis cache write 실패는 provider 성공 응답을 실패시키지 않는다")
+    void getCurrentKeepsProviderResponseWhenCacheWriteFails() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        WeatherSnapshot snapshot = snapshot(false, "2026-03-29T10:19:00+09:00");
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.empty());
+        given(weatherProviderPort.getCurrent(key)).willReturn(WeatherProviderResult.success(snapshot));
+        org.mockito.BDDMockito.willThrow(new IllegalStateException("redis down"))
+                .given(lastSuccessWeatherStore).save(key, snapshot);
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.freshnessStatus()).isEqualTo("FRESH_PROVIDER");
+        assertThat(response.weather()).isNotNull();
+        verify(bikeMetricsRecorder).recordWeatherCacheFailure("write_provider_success");
+    }
+
+    @Test
+    @DisplayName("provider executor가 포화되어 reject되면 unavailable metadata로 응답한다")
+    void getCurrentReturnsUnavailableWhenProviderBulkheadRejects() {
+        WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+        weatherService = new WeatherService(
+                weatherProviderPort,
+                lastSuccessWeatherStore,
+                bikeMetricsRecorder,
+                new RejectingExecutorService(),
+                50,
+                Clock.fixed(Instant.parse("2026-03-29T01:20:00Z"), ZoneOffset.UTC)
+        );
+        given(lastSuccessWeatherStore.find(key)).willReturn(Optional.empty());
+
+        CurrentWeatherResponse response = weatherService.getCurrent(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
+
+        assertThat(response.freshnessStatus()).isEqualTo("UNAVAILABLE");
+        verify(bikeMetricsRecorder).recordWeatherProviderFailure("bulkhead_rejected");
+        verify(bikeMetricsRecorder).recordWeatherUnavailable("provider_failure");
+    }
+
+    @Test
     @DisplayName("provider 총 요청 시간이 초과되면 60분 이내 마지막 성공값으로 fallback한다")
     void getCurrentReturnsStaleFallbackWhenProviderTimesOut() {
         WeatherLocationKey key = WeatherLocationKey.from(BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780));
@@ -366,5 +422,37 @@ class WeatherServiceTest {
                 OffsetDateTime.parse(lastSucceededAt),
                 OffsetDateTime.parse(lastSucceededAt)
         );
+    }
+
+    private static class RejectingExecutorService extends AbstractExecutorService {
+
+        @Override
+        public void shutdown() {
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            return List.of();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return false;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return false;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) {
+            return false;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            throw new RejectedExecutionException("weather provider executor rejected");
+        }
     }
 }

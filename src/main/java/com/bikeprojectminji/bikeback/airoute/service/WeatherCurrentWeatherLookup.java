@@ -18,7 +18,11 @@ public class WeatherCurrentWeatherLookup implements CurrentWeatherLookup {
     @Override
     public Optional<CurrentWeatherResponse> find(BigDecimal lat, BigDecimal lon) {
         try {
-            return Optional.of(weatherService.getCurrent(lat, lon));
+            CurrentWeatherResponse current = weatherService.getCurrent(lat, lon);
+            if (current.weather() == null || current.wind() == null) {
+                return Optional.empty();
+            }
+            return Optional.of(current);
         } catch (RuntimeException exception) {
             return Optional.empty();
         }

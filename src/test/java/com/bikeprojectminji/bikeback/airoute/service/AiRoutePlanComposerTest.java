@@ -71,6 +71,49 @@ class AiRoutePlanComposerTest {
     }
 
     @Test
+    @DisplayName("날씨가 UNAVAILABLE이면 날씨 없음으로 보고 fallback 경로를 정상 생성한다")
+    void composeFallbackTreatsUnavailableWeatherAsUnknown() {
+        AiRoutePlanRequest request = new AiRoutePlanRequest(
+                BigDecimal.valueOf(37.48),
+                BigDecimal.valueOf(126.95),
+                null,
+                null,
+                "관악 순환",
+                "balanced"
+        );
+        CurrentWeatherResponse unavailableWeather = new CurrentWeatherResponse(
+                null,
+                null,
+                false,
+                false,
+                "UNAVAILABLE",
+                "PROVIDER_FAILURE",
+                null,
+                0
+        );
+
+        AiRoutePlanResponse response = composer.composeFallback(
+                request,
+                new AiRouteConditionContext(
+                        Optional.of(unavailableWeather),
+                        "공사 정보 미확인",
+                        "노면 정보 미확인"
+                )
+        );
+
+        assertThat(response.status()).isEqualTo("READY");
+        assertThat(response.weather()).isNull();
+        assertThat(response.wind()).isNull();
+        assertThat(response.confidence()).isEqualTo("low");
+        assertThat(response.summary()).contains("날씨와 노면 데이터는 다시 확인");
+        assertThat(response.actions()).contains("날씨 데이터가 없으므로 출발 전 외부 날씨를 한 번 더 확인하세요.");
+        assertThat(response.evidenceBadges())
+                .filteredOn(badge -> "weather".equals(badge.source()))
+                .extracting("status")
+                .containsExactly("UNKNOWN");
+    }
+
+    @Test
     @DisplayName("route candidate evidence는 AI route badge와 score breakdown에 반영된다")
     void composeRouteCandidateIncludesRouteEvidenceBadgesAndScore() {
         AiRoutePlanRequest request = new AiRoutePlanRequest(

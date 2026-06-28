@@ -40,7 +40,7 @@ public class AiRoutePlanComposer {
     }
 
     public AiRoutePlanResponse composeFallback(AiRoutePlanRequest request, AiRouteConditionContext context) {
-        Optional<CurrentWeatherResponse> weather = context.weather();
+        Optional<CurrentWeatherResponse> weather = usableWeather(context.weather());
         List<AiRouteRiskResponse> risks = detailsFactory.buildRisks(weather, context);
         List<ProviderEvidenceBadgeResponse> evidenceBadges = detailsFactory.buildEvidenceBadges(weather, context);
         RecommendationScore score = recommendationScoreCalculator.calculateFallback(
@@ -81,7 +81,7 @@ public class AiRoutePlanComposer {
             BicycleRouteCandidate candidate,
             BicycleRoutePlan routePlan
     ) {
-        Optional<CurrentWeatherResponse> weather = context.weather();
+        Optional<CurrentWeatherResponse> weather = usableWeather(context.weather());
         List<AiRouteRiskResponse> risks = detailsFactory.buildRisks(weather, context);
         List<ProviderEvidenceBadgeResponse> evidenceBadges = detailsFactory.buildEvidenceBadges(weather, context);
         evidenceBadges.addAll(candidate.evidenceBadges().stream()
@@ -119,6 +119,10 @@ public class AiRoutePlanComposer {
                 toElevationSummaryResponse(candidate.elevationSummary()),
                 AiRouteRoutingMetadataResponse.from(routePlan)
         );
+    }
+
+    private Optional<CurrentWeatherResponse> usableWeather(Optional<CurrentWeatherResponse> weather) {
+        return weather.filter(current -> current.weather() != null && current.wind() != null);
     }
 
     private String buildSummary(AiRoutePlanRequest request, Optional<CurrentWeatherResponse> weather) {
