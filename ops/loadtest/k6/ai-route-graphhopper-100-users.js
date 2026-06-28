@@ -618,10 +618,19 @@ function boolEnv(name, fallback) {
 }
 
 export function handleSummary(data) {
+  const sanitizedData = sanitizedSummaryData(data);
   return {
     stdout: summaryText(data),
-    [SUMMARY_PATH]: JSON.stringify(data, null, 2),
+    [SUMMARY_PATH]: JSON.stringify(sanitizedData, null, 2),
   };
+}
+
+function sanitizedSummaryData(data) {
+  const sanitized = JSON.parse(JSON.stringify(data));
+  if (sanitized.setup_data && sanitized.setup_data.tokens) {
+    sanitized.setup_data.tokens = '[REDACTED]';
+  }
+  return sanitized;
 }
 
 function summaryText(data) {

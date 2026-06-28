@@ -15,7 +15,7 @@ class AiRoutePlanDetailsFactory {
 
     List<AiRouteRiskResponse> buildRisks(Optional<CurrentWeatherResponse> weather, AiRouteConditionContext context) {
         List<AiRouteRiskResponse> risks = new ArrayList<>();
-        weather.ifPresent(current -> {
+        usableWeather(weather).ifPresent(current -> {
             if (current.wind().speedKmh() >= 18) {
                 risks.add(new AiRouteRiskResponse("weather", "강한 바람", "medium", "측풍이 강해 한강변 직선 구간은 피하는 편이 좋습니다."));
             }
@@ -30,8 +30,9 @@ class AiRoutePlanDetailsFactory {
 
     List<ProviderEvidenceBadgeResponse> buildEvidenceBadges(Optional<CurrentWeatherResponse> weather, AiRouteConditionContext context) {
         List<ProviderEvidenceBadgeResponse> badges = new ArrayList<>();
-        if (weather.isPresent()) {
-            CurrentWeatherResponse current = weather.get();
+        Optional<CurrentWeatherResponse> currentWeather = usableWeather(weather);
+        if (currentWeather.isPresent()) {
+            CurrentWeatherResponse current = currentWeather.get();
             boolean weatherRisk = current.wind().speedKmh() >= 18 || !"none".equals(current.weather().precipType());
             badges.add(new ProviderEvidenceBadgeResponse(
                     "weather",
@@ -66,7 +67,7 @@ class AiRoutePlanDetailsFactory {
     List<String> buildActions(Optional<CurrentWeatherResponse> weather, List<AiRouteRiskResponse> risks) {
         List<String> actions = new ArrayList<>();
         actions.add("출발 전 브레이크와 라이트를 확인하세요.");
-        if (weather.isEmpty()) {
+        if (usableWeather(weather).isEmpty()) {
             actions.add("날씨 데이터가 없으므로 출발 전 외부 날씨를 한 번 더 확인하세요.");
         }
         if (risks.stream().anyMatch(risk -> "high".equals(risk.severity()))) {
@@ -111,6 +112,10 @@ class AiRoutePlanDetailsFactory {
                 badge.summary(),
                 null
         );
+    }
+
+    private Optional<CurrentWeatherResponse> usableWeather(Optional<CurrentWeatherResponse> weather) {
+        return weather.filter(current -> current.weather() != null && current.wind() != null);
     }
 
     Optional<ProviderEvidenceBadgeResponse> canonicalRouteBadge(AiRoutePlanRequest request) {

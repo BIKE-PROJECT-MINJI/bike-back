@@ -7,6 +7,7 @@ var ACTIVE_PERSONAS = parsePersonaFilter(__ENV.PERSONAS || 'home,profile,preRide
 var TEST_ID = __ENV.TEST_ID || 'bike-' + SCENARIO;
 var SUMMARY_DIR = (__ENV.SUMMARY_DIR || 'ops/loadtest/results').replace(/\/$/, '');
 var ENABLE_WEATHER_READ = ((__ENV.ENABLE_WEATHER_READ || 'true') + '').toLowerCase() !== 'false';
+var ENABLE_ADDRESS_SEARCH = ((__ENV.ENABLE_ADDRESS_SEARCH || 'true') + '').toLowerCase() !== 'false';
 var SLOW_REQUEST_SAMPLE_MS = intEnv('SLOW_REQUEST_SAMPLE_MS', 1000);
 var WRITE_ROUTE_POINT_COUNT = Math.max(2, intEnv('WRITE_ROUTE_POINT_COUNT', 2));
 var WRITE_POLL_FINALIZATION = ((__ENV.WRITE_POLL_FINALIZATION || 'false') + '').toLowerCase() === 'true';
@@ -215,6 +216,7 @@ function buildOptions() {
     'http_req_duration{flow:health}': ['p(95)<300'],
     'http_req_duration{flow:course-read}': ['p(95)<' + p95Ms],
     'http_req_duration{flow:route-read}': ['p(95)<' + intEnv('ROUTE_READ_P95_MS', 1000)],
+    'http_req_duration{flow:address-search}': ['p(95)<' + intEnv('ADDRESS_SEARCH_P95_MS', 1200)],
     'http_req_duration{flow:weather-read}': ['p(95)<' + intEnv('WEATHER_P95_MS', 1200)],
     'http_req_duration{flow:ride-policy}': ['p(95)<' + intEnv('RIDE_POLICY_P95_MS', 1200)],
     checks: ['rate>0.99'],
@@ -380,6 +382,17 @@ function commonChecks(response, expectedStatus) {
   checksObj['status is ' + expectedStatus] = function(r) { return r.status === expectedStatus; };
   checksObj['body is not empty'] = function(r) { return !!r.body; };
   return check(response, checksObj);
+}
+
+function parseJsonBody(response) {
+  if (!response || !response.body) {
+    return null;
+  }
+  try {
+    return JSON.parse(response.body);
+  } catch (_) {
+    return null;
+  }
 }
 
 function runHealthCheck() {
@@ -558,6 +571,47 @@ function runRoutePointsRead(setupData) {
   });
 }
 
+function runAddressSearch() {
+  if (!ENABLE_ADDRESS_SEARCH) {
+    return;
+  }
+  group('address search', function() {
+    var query = encodeURIComponent(stringEnv('ADDRESS_SEARCH_QUERY', '여의나루역'));
+    var response = getJson('/api/v1/addresses/search?query=' + query + '&page=1&size=5', {
+      flow: 'address-search',
+      endpoint: 'address-search',
+    });
+    commonChecks(response, 200);
+    check(response, {
+      'address status is valid': function(r) {
+        var payload = parseJsonBody(r);
+        var status = payload && payload.data && payload.data.status;
+        return [
+          'SUCCESS',
+          'AMBIGUOUS',
+          'EMPTY',
+          'RATE_LIMITED',
+          'PROVIDER_FAILURE',
+        ].indexOf(status) >= 0;
+      },
+      'address fallback metadata contract is preserved': function(r) {
+        var payload = parseJsonBody(r);
+        var data = payload && payload.data;
+        if (!data) {
+          return false;
+        }
+        if (typeof data.fallbackUsed !== 'boolean') {
+          return false;
+        }
+        if (data.fallbackUsed) {
+          return !!data.primaryProvider && !!data.provider && !!data.fallbackReason;
+        }
+        return true;
+      },
+    });
+  });
+}
+
 function runWeatherRead() {
   if (!ENABLE_WEATHER_READ) {
     return;
@@ -570,6 +624,29 @@ function runWeatherRead() {
       endpoint: 'weather-current',
     });
     commonChecks(response, 200);
+    check(response, {
+      'weather freshness status is valid': function(r) {
+        var payload = parseJsonBody(r);
+        var status = payload && payload.data && payload.data.freshnessStatus;
+        return [
+          'FRESH_PROVIDER',
+          'FRESH_CACHE',
+          'STALE_LAST_SUCCESS',
+          'UNAVAILABLE',
+        ].indexOf(status) >= 0;
+      },
+      'weather unavailable keeps payload explicit': function(r) {
+        var payload = parseJsonBody(r);
+        var data = payload && payload.data;
+        if (!data || data.freshnessStatus !== 'UNAVAILABLE') {
+          return true;
+        }
+        return data.weather === null
+          && data.wind === null
+          && data.stale === false
+          && data.staleReason === 'PROVIDER_FAILURE';
+      },
+    });
   });
 }
 
@@ -732,6 +809,7 @@ export function coreJourney(setupData) {
   runHealthCheck();
   runCourseReads(setupData);
   runRoutePointsRead(setupData);
+  runAddressSearch();
   runWeatherRead();
   runRidePolicy(setupData);
   runRecentLocation(setupData);
@@ -752,6 +830,7 @@ export function personaProfileSummary(setupData) {
 export function personaPreRide(setupData) {
   runCourseReads(setupData);
   runRoutePointsRead(setupData);
+  runAddressSearch();
   runWeatherRead();
   runRidePolicy(setupData);
   sleep(Number.parseFloat(stringEnv('SLEEP_SECONDS', '1')));
@@ -780,13 +859,26 @@ export function handleSummary(data) {
     test_id: TEST_ID,
     scenario: SCENARIO,
     personas: ACTIVE_PERSONAS,
+    address_search_enabled: ENABLE_ADDRESS_SEARCH,
     weather_enabled: ENABLE_WEATHER_READ,
     write_route_point_count: WRITE_ROUTE_POINT_COUNT,
     write_poll_finalization: WRITE_POLL_FINALIZATION,
   };
+  var sanitizedData = sanitizedSummaryData(data);
   result.stdout = textSummary(data, { indent: ' ', enableColors: true });
-  result[SUMMARY_DIR + '/' + TEST_ID + '-summary.json'] = JSON.stringify(data, null, 2);
+  result[SUMMARY_DIR + '/' + TEST_ID + '-summary.json'] = JSON.stringify(sanitizedData, null, 2);
   return result;
+}
+
+function sanitizedSummaryData(data) {
+  var sanitized = JSON.parse(JSON.stringify(data));
+  if (sanitized.setup_data && sanitized.setup_data.tokens) {
+    sanitized.setup_data.tokens = '[REDACTED]';
+  }
+  if (sanitized.setup_data && sanitized.setup_data.authToken) {
+    sanitized.setup_data.authToken = '[REDACTED]';
+  }
+  return sanitized;
 }
 
 function textSummary(data, options) {

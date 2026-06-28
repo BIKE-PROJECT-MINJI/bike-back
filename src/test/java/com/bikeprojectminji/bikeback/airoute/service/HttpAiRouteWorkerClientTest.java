@@ -58,6 +58,11 @@ class HttpAiRouteWorkerClientTest {
                 .contains("VERIFIED", "UNKNOWN");
         assertThat(payload.path("fallbackPlan").path("explanation").path("caution").asText())
                 .contains("확인");
+        assertThat(payload.path("routingMetadata").path("routingStatus").asText())
+                .isEqualTo(fallbackPlan.routingMetadata() == null ? "" : fallbackPlan.routingMetadata().routingStatus());
+        assertThat(payload.path("preferenceSummary").asText()).isEqualTo(fallbackPlan.preferenceSummary());
+        assertThat(payload.path("elevationStatus").asText()).isEqualTo(fallbackPlan.elevationStatus());
+        assertThat(payload.path("sceneryEvidenceStatus").asText()).isEqualTo(fallbackPlan.sceneryEvidenceStatus());
     }
 
     @Test

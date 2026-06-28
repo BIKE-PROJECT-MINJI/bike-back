@@ -7,7 +7,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
-import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
 import com.bikeprojectminji.bikeback.weather.dto.WeatherData;
 import com.bikeprojectminji.bikeback.weather.dto.WindData;
@@ -68,17 +67,31 @@ class WeatherControllerTest {
     }
 
     @Test
-    @DisplayName("현재 날씨를 사용할 수 없으면 명시적 실패 응답을 반환한다")
-    void getCurrentReturnsNotFoundWhenWeatherUnavailable() throws Exception {
-        given(weatherService.getCurrent(any(), any())).willThrow(new NotFoundException("현재 날씨 정보를 사용할 수 없습니다."));
+    @DisplayName("현재 날씨를 사용할 수 없으면 unavailable metadata를 success wrapper로 반환한다")
+    void getCurrentReturnsUnavailableMetadataWhenWeatherUnavailable() throws Exception {
+        CurrentWeatherResponse response = new CurrentWeatherResponse(
+                null,
+                null,
+                false,
+                false,
+                "UNAVAILABLE",
+                "PROVIDER_FAILURE",
+                null,
+                0
+        );
+        given(weatherService.getCurrent(any(), any())).willReturn(response);
 
         mockMvc.perform(get("/api/v1/weather/current")
                         .param("lat", "37.5665")
                         .param("lon", "126.9780"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value(404))
-                .andExpect(jsonPath("$.message").value("현재 날씨 정보를 사용할 수 없습니다."))
-                .andExpect(jsonPath("$.data").doesNotExist());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.message").value("success"))
+                .andExpect(jsonPath("$.data.weather").doesNotExist())
+                .andExpect(jsonPath("$.data.wind").doesNotExist())
+                .andExpect(jsonPath("$.data.stale").value(false))
+                .andExpect(jsonPath("$.data.freshnessStatus").value("UNAVAILABLE"))
+                .andExpect(jsonPath("$.data.staleReason").value("PROVIDER_FAILURE"));
     }
 
     @Test

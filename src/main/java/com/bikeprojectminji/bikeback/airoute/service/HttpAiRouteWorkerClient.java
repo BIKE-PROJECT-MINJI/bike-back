@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.airoute.service;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteElevationSummaryResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRouteRoutingMetadataResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.ProviderEvidenceBadgeResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.RecommendationScoreResponse;
 import com.bikeprojectminji.bikeback.weather.dto.CurrentWeatherResponse;
@@ -15,7 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -26,7 +27,7 @@ import org.springframework.web.client.RestClientException;
 
 @Component
 @Primary
-@ConditionalOnProperty(name = "ai-route.worker.base-url")
+@Conditional(NonBlankAiRouteWorkerBaseUrlCondition.class)
 public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
 
     private static final Logger log = LoggerFactory.getLogger(HttpAiRouteWorkerClient.class);
@@ -115,7 +116,11 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
             int recommendationScore,
             RecommendationScoreResponse scoreBreakdown,
             AiRouteElevationSummaryResponse elevationSummary,
+            AiRouteRoutingMetadataResponse routingMetadata,
             List<ProviderEvidenceBadgeResponse> evidenceBadges,
+            String preferenceSummary,
+            String elevationStatus,
+            String sceneryEvidenceStatus,
             AiRoutePlanResponse fallbackPlan
     ) {
 
@@ -139,7 +144,11 @@ public class HttpAiRouteWorkerClient implements AiRouteWorkerClient {
                     fallbackPlan.recommendationScore(),
                     fallbackPlan.scoreBreakdown(),
                     fallbackPlan.elevationSummary(),
+                    fallbackPlan.routingMetadata(),
                     fallbackPlan.evidenceBadges(),
+                    fallbackPlan.preferenceSummary(),
+                    fallbackPlan.elevationStatus(),
+                    fallbackPlan.sceneryEvidenceStatus(),
                     fallbackPlan
             );
         }

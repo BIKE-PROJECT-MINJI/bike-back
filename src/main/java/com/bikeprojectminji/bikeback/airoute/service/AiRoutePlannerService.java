@@ -124,7 +124,8 @@ public class AiRoutePlannerService {
                 request.destinationLat(),
                 request.destinationLon(),
                 request.rideStyle(),
-                request.elevationPreference()
+                request.elevationPreference(),
+                request.textIntent()
         ));
         if (routePlan.candidates().isEmpty()) {
             throw new BadRequestException("GraphHopper 자전거 경로를 생성할 수 없습니다. self-host 또는 hosted GraphHopper 설정을 확인하세요.");

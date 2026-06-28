@@ -21,7 +21,10 @@ public record AiRoutePlanResponse(
         boolean aiGenerated,
         AiRouteElevationSummaryResponse elevationSummary,
         AiRouteRoutingMetadataResponse routingMetadata,
-        AiRouteWorkerMetadataResponse aiWorkerMetadata
+        AiRouteWorkerMetadataResponse aiWorkerMetadata,
+        String preferenceSummary,
+        String elevationStatus,
+        String sceneryEvidenceStatus
 ) {
 
     public AiRoutePlanResponse(
@@ -55,6 +58,9 @@ public record AiRoutePlanResponse(
                 explanation,
                 evidenceBadges,
                 aiGenerated,
+                null,
+                null,
+                null,
                 null,
                 null,
                 null
@@ -95,6 +101,9 @@ public record AiRoutePlanResponse(
                 aiGenerated,
                 elevationSummary,
                 null,
+                null,
+                null,
+                null,
                 null
         );
     }
@@ -134,7 +143,55 @@ public record AiRoutePlanResponse(
                 aiGenerated,
                 elevationSummary,
                 routingMetadata,
+                null,
+                null,
+                null,
                 null
+        );
+    }
+
+    public AiRoutePlanResponse(
+            String planId,
+            String status,
+            String summary,
+            String confidence,
+            WeatherData weather,
+            WindData wind,
+            List<AiRoutePointResponse> routePoints,
+            List<AiRouteRiskResponse> risks,
+            List<String> actions,
+            int recommendationScore,
+            RecommendationScoreResponse scoreBreakdown,
+            RecommendationExplanationResponse explanation,
+            List<ProviderEvidenceBadgeResponse> evidenceBadges,
+            boolean aiGenerated,
+            AiRouteElevationSummaryResponse elevationSummary,
+            AiRouteRoutingMetadataResponse routingMetadata,
+            String preferenceSummary,
+            String elevationStatus,
+            String sceneryEvidenceStatus
+    ) {
+        this(
+                planId,
+                status,
+                summary,
+                confidence,
+                weather,
+                wind,
+                routePoints,
+                risks,
+                actions,
+                recommendationScore,
+                scoreBreakdown,
+                explanation,
+                evidenceBadges,
+                aiGenerated,
+                elevationSummary,
+                routingMetadata,
+                null,
+                preferenceSummary,
+                elevationStatus,
+                sceneryEvidenceStatus
         );
     }
 
@@ -156,7 +213,10 @@ public record AiRoutePlanResponse(
                 aiGenerated,
                 elevationSummary,
                 routingMetadata,
-                metadata
+                metadata,
+                preferenceSummary,
+                elevationStatus,
+                sceneryEvidenceStatus
         );
     }
 }
