@@ -13,6 +13,20 @@ BIKE/GAJA는 자전거 여행 앱을 위한 Spring Boot 백엔드입니다.
 이 저장소의 핵심은 단순 CRUD가 아니라, 위치/경로 도메인에서 생기는 운영 리스크를 검증 가능한 방식으로 다룬 점입니다.
 "AI가 경로를 만든다"는 표현 뒤에 숨기 쉬운 좌표 정합성, 외부 API 실패, DB connection 고갈, 주행 기록 후처리 지연을 백엔드 설계와 테스트 기준으로 분리했습니다.
 
+## 30-Second Story
+
+GAJA를 만들면서 가장 먼저 본 문제는 "코스 추천 API를 만들었는가"가 아니라 **주행 중 서버나 외부 provider가 흔들릴 때 사용자가 어떤 상태를 보게 되는가**였습니다.
+
+사용자가 자전거를 타는 동안에는 코스 조회, HUD 판정, 날씨, 주소검색, 기록 저장이 동시에 섞입니다. 이때 AI route, GraphHopper, Redis, DB connection, finalization worker를 한 흐름으로 묶어 버리면 느린 provider 하나나 저장 폭주 하나가 주행 화면 전체를 흔들 수 있습니다.
+
+그래서 이 백엔드는 세 가지 기준으로 설계했습니다.
+
+1. **경로 판단의 source of truth를 분리합니다.** LLM은 좌표를 만들지 않고, 자연어 의도 정규화와 설명을 맡습니다. 실제 route point와 품질 근거는 GraphHopper route detail, GIS evidence, 백엔드 scorer가 책임집니다.
+2. **사용자 응답과 후처리를 분리합니다.** 자유주행 기록은 먼저 저장 요청을 멱등하게 받고, smoothing/finalization은 `FINALIZING -> READY` 상태 전이로 처리합니다.
+3. **장애를 성공처럼 숨기지 않습니다.** 주소, 날씨, AI worker, GraphHopper 실패는 fallback/stale/partial metadata로 드러내고, 비용/보안 보호가 필요한 요청은 빠른 429/503으로 격리합니다.
+
+그 결과 AWS/k6 short evidence에서 50VU 혼합 부하의 Hikari timeout과 finalization 지연을 병목으로 분리했고, token pool, backpressure, transaction boundary, 비동기 finalization 기준을 보정해 read/HUD 흐름과 저장 후처리 흐름을 나눠 검증했습니다.
+
 ## At a Glance
 
 | 사용자 흐름 | 백엔드가 책임지는 것 | 운영 관점 |
@@ -24,10 +38,13 @@ BIKE/GAJA는 자전거 여행 앱을 위한 Spring Boot 백엔드입니다.
 
 ## Quick Links
 
+- [30-Second Story](#30-second-story)
 - [Architecture](#architecture)
 - [Core Features](#core-features)
+- [Problem-Solving Notes](#problem-solving-notes)
 - [API Groups](#api-groups)
 - [Operational Testing Evidence](#operational-testing-evidence)
+- [What This Does Not Prove Yet](#what-this-does-not-prove-yet)
 - [Getting Started](#getting-started)
 
 ## Highlights
@@ -127,6 +144,53 @@ flowchart LR
 | AI 설명 | Gemini / AI worker | backend fallback explanation, provider failure metadata |
 | Routing | self-host GraphHopper | 운영 응답은 실패/부분 metadata로 보호하고, smoke/load에서는 fake/hosted profile을 분리 검증 |
 
+## Problem-Solving Notes
+
+이 섹션은 포트폴리오나 면접에서 설명할 때의 핵심 문제 해결 흐름입니다.
+
+### 1. 50VU 혼합 부하에서 DB connection 병목을 분리
+
+초기 50VU 혼합 부하에서는 AI route, 주행 저장, read/HUD 요청이 함께 들어왔고, HTTP 실패율과 p95가 동시에 나빠졌습니다. 로그와 metric을 같이 보니 GraphHopper 평균 latency보다 Hikari active/waiting 상태와 DB connection timeout이 먼저 튀었습니다.
+
+대응은 단순히 connection pool을 크게 키우는 쪽으로 가지 않았습니다.
+
+- 반복 회원가입/토큰 발급 write 부하는 테스트 token pool로 분리했습니다.
+- provider 호출과 DB 저장 transaction 경계를 분리했습니다.
+- 주행 저장 폭주는 `RIDE_SAVE_BUSY`와 `Retry-After`로 빠르게 돌려보내 read/HUD 요청을 보호했습니다.
+- finalization은 동기 완료를 강제하지 않고 `FINALIZING -> READY` 상태 모델로 분리했습니다.
+
+이후 AI 포함 50VU 보정 테스트에서 HTTP 실패율 0%, p95 약 39ms, p99 약 108ms 수준까지 회복한 evidence를 남겼습니다.
+
+### 2. 코스따라가기 HUD를 단순 거리 비교에서 projection 판정으로 변경
+
+코스따라가기는 현재 위치와 가까운 route point 하나를 비교하면 GPS 튐, 코너, 긴 segment에서 오판이 생깁니다. 그래서 route points를 polyline segment로 보고 현재 위치를 가장 가까운 선분에 정사영합니다.
+
+서버는 `nearestSegmentIndex`, `distanceAlongRouteM`, `remainingDistanceM`, `progressPercent`, 이탈 상태를 계산합니다. 이전 segment hint가 틀리면 full-scan fallback으로 올바른 선분을 다시 찾도록 설계했습니다.
+
+이 구조 덕분에 프론트가 임의로 경로 진행률을 계산하지 않고, 서버의 단일 정책으로 시작 가능/이탈/복귀/완주 후보 상태를 판단할 수 있습니다.
+
+### 3. AI 코스 생성에서 LLM 책임을 제한
+
+AI가 직접 좌표를 만들게 하면 그럴듯한 설명은 나와도 실제 주행 가능한 route point 정합성이 깨질 수 있습니다. GAJA에서는 LLM을 "경로 생성자"가 아니라 "의도 정규화와 설명 보조자"로 제한했습니다.
+
+- 자연어는 `RoutePreference`로 정규화합니다.
+- 실제 경로는 GraphHopper profile/custom weighting과 백엔드 scorer가 만듭니다.
+- GraphHopper route detail은 경사, 고도, 노면, 자전거도로, 도로 유형 evidence의 기준입니다.
+- 수변/공원/풍경 근거가 부족하면 `UNKNOWN` 또는 `PARTIAL` metadata로 표시합니다.
+- AI worker 실패는 backend fallback explanation으로 격리합니다.
+
+### 4. 외부 의존성을 기능별 fallback으로 나눔
+
+모든 실패를 재시도로 처리하면 사용자는 기다림만 느끼고, provider 비용과 queue가 같이 커집니다. 그래서 기능별로 실패 UX를 다르게 뒀습니다.
+
+| 기능 | 사용자에게 중요한 것 | 서버 정책 |
+|---|---|---|
+| HUD/코스따라가기 | 주행 흐름이 멈추지 않는 것 | 날씨 같은 보조 정보는 stale/unavailable로 분리 |
+| 주소검색 | 후보를 빠르게 확인하는 것 | Kakao Local 실패 시 fallback metadata와 대체 provider 결과 |
+| AI 코스 | 후보 품질과 근거를 아는 것 | partial/fallback metadata를 숨기지 않음 |
+| 주행 저장 | 기록이 중복/유실되지 않는 것 | `clientRideId`, Redis lock, DB unique constraint, finalization job |
+| Party socket | 권한과 토큰 재사용 방지 | one-time socket token과 Redis 기반 제한 |
+
 ## API Groups
 
 | Group | 대표 API |
@@ -178,6 +242,18 @@ flowchart LR
 - AI route capacity `429`는 장애가 아니라 provider 보호용 backpressure로 분류했습니다.
 - 저장 직후 즉시 코스화는 동기 완료를 강제하지 않고 `FINALIZING -> READY` 비동기 UX로 확정했습니다.
 - 주행 저장 요청은 read/HUD를 보호하기 위해 빠른 `RIDE_SAVE_BUSY` 응답과 재시도 UX를 둡니다.
+
+## What This Does Not Prove Yet
+
+이 저장소의 수치는 운영 보증이 아니라 개발 단계의 short evidence입니다. 아래 항목은 완료 claim으로 쓰지 않습니다.
+
+- 실제 장기 운영 사용자 데이터
+- 100/200VU 장시간 soak 통과
+- ALB 2 targets에서 Redis quota/idempotency 공유와 WebSocket broadcast 한계 검증 완료
+- Kakao Local, Gemini, Open-Meteo 같은 실제 provider 전체 고부하 검증 완료
+- 모든 raw evidence의 공개 가능 상태
+
+공개 포트폴리오에는 raw smoke/loadtest 결과를 그대로 올리지 않고, token/JWT/provider key가 제거된 redacted summary만 사용해야 합니다.
 
 ## Getting Started
 
@@ -254,7 +330,7 @@ ops/
 
 - 이미 적용된 Flyway migration은 수정하지 않고 새 migration으로 보정합니다.
 - API 응답 계약이 바뀌면 controller/DTO, Swagger/OpenAPI, 프론트 상태 모델, smoke를 함께 확인합니다.
-- secret, token, provider key, DB/Redis credential은 README, log, k6 summary, evidence에 평문으로 남기지 않습니다.
+- secret, token, provider key, DB/Redis credential은 README와 공개용 문서에 남기지 않습니다. raw smoke/loadtest evidence를 외부에 공유할 때는 JWT/token/key를 제거한 redacted summary로 변환합니다.
 - 운영 부하테스트는 smoke/contract/integration이 통과한 뒤에만 실행합니다.
 - AWS 리소스는 테스트 후 삭제 evidence까지 확인해야 완료로 봅니다.
 
