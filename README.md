@@ -7,25 +7,69 @@
 ![GraphHopper](https://img.shields.io/badge/GraphHopper-routing%20engine-1F6FEB?style=flat-square)
 ![Observability](https://img.shields.io/badge/Observability-k6%20%2F%20Prometheus%20%2F%20Grafana-FF6F00?style=flat-square)
 
-BIKE/GAJA는 자전거 여행 앱을 위한 Spring Boot 백엔드입니다.
-자연어 기반 코스 추천, 코스따라가기 HUD, 자유주행 기록 저장, Party 위치 공유를 지원합니다.
+BIKE/GAJA는 위치 기록, 코스 조회, 주행 상태 판단, 외부 provider 연동을 다루는 Spring Boot 백엔드입니다.
+이 README는 채용 검토자가 5분 안에 "무엇을 구현했고, 어디를 보면 되는지" 확인할 수 있도록 정리했습니다.
 
-이 저장소의 핵심은 단순 CRUD가 아니라, 위치/경로 도메인에서 생기는 운영 리스크를 검증 가능한 방식으로 다룬 점입니다.
-"AI가 경로를 만든다"는 표현 뒤에 숨기 쉬운 좌표 정합성, 외부 API 실패, DB connection 고갈, 주행 기록 후처리 지연을 백엔드 설계와 테스트 기준으로 분리했습니다.
+## For Reviewers: 5-Minute Route
+
+### 1. 이 프로젝트에서 확인할 수 있는 백엔드 기본기
+
+| 확인할 역량 | 이 저장소에서 보는 위치 |
+|---|---|
+| 등록/조회/상태 변경 API | `CourseController`, `RideRecordController`, `AiRouteGenerationSessionController` |
+| 권한과 인증 | `SecurityConfig`, `AuthController`, `CourseAccessPolicyTest`, `AdminEndpointSecurityTest` |
+| 검색/페이징/조회 최적화 | `CourseRepositoryImpl`, `CourseQueryServiceTest`, `CourseRouteSnapshotServiceTest` |
+| 트랜잭션과 데이터 정합성 | `CourseService`, `RideRecordService`, `IdempotencyLockService`, `RideSaveConcurrencyGateTest` |
+| 외부 API 실패 기준 | `AddressSearchService`, `WeatherService`, `AiRoutePlannerService` |
+| 운영 전 검증 | `ops/loadtest/results/*readable-report.md`, `ops/smoke/` |
+
+### 2. 대표 기능 4개
+
+1. **위치 기록 저장**: GPS trace를 저장하고 `FINALIZING -> READY/FAILED` 상태로 후처리합니다.
+2. **중복 저장 방지**: `clientRideId`, Redis lock, DB unique 기준으로 재시도 요청을 한 결과로 수렴시킵니다.
+3. **외부 연동 실패 대응**: 주소, 날씨, AI worker, GraphHopper 실패를 기능별 fallback/stale/unavailable 상태로 분리합니다.
+4. **부하와 병목 검증**: k6, request id/trace id, Hikari, provider latency, finalization backlog를 함께 보고 병목 후보를 좁혔습니다.
+
+### 3. 빠른 확인 명령
+
+전체 테스트가 아니라, 이력서/포트폴리오에 직접 연결되는 대표 테스트만 빠르게 확인하는 명령입니다.
+
+```bash
+./gradlew test \
+  --tests "com.bikeprojectminji.bikeback.global.database.DatabaseBackpressureFilterTest" \
+  --tests "com.bikeprojectminji.bikeback.global.idempotency.IdempotencyLockServiceTest" \
+  --tests "com.bikeprojectminji.bikeback.ride.service.RideSaveConcurrencyGateTest" \
+  --tests "com.bikeprojectminji.bikeback.ride.policy.service.RidePolicyServiceTest" \
+  --tests "com.bikeprojectminji.bikeback.course.repository.CourseRepositoryImplTest" \
+  --tests "com.bikeprojectminji.bikeback.airoute.session.AiRouteGenerationSessionServiceIntegrationTest" \
+  --no-daemon
+```
+
+최근 로컬 확인 결과: 위 대표 테스트 41개 통과, `BUILD SUCCESSFUL`.
+
+### 4. 대표 k6 evidence
+
+아래 수치는 운영 보증이 아니라, 개발 단계에서 병목을 찾기 위한 short evidence입니다.
+
+| 검증 | 결과 | 파일 |
+|---|---|---|
+| Smoke/contract | 실패율 0%, checks 100%, p95 약 79ms | `ops/loadtest/results/aws-approved-smoke-contract-20260628-0606-readable-report.md` |
+| 25VU baseline | 실패율 0%, checks 100%, p95 약 44ms | `ops/loadtest/results/aws-approved-baseline-25vu-20260628-0608-readable-report.md` |
+| Course follow/HUD 50VU | 실패율 0%, checks 100%, p95 약 41ms | `ops/loadtest/results/aws-course-follow-readhud-50vu-20260628-0423-readable-report.md` |
+| Ride finalization 50VU | 실패율 약 0.06%, checks 약 99.88%, p95 약 83.9ms | `ops/loadtest/results/aws-ride-gate-finalization-50vu-20260628-0518-readable-report.md` |
+| AI 포함 50VU 보정 후 | HTTP 실패율 0%, p95 약 39ms | `ops/loadtest/results/aws-approved-mixed-ai-50vu-20260628-0609-readable-report.md` |
+
+### 5. 범위와 한계
+
+- 이 프로젝트는 실제 장기 운영 서비스가 아니라, 운영 전 리스크를 개발 단계에서 검증한 개인 프로젝트입니다.
+- AI 코스 생성은 추천 품질을 사용자 데이터로 검증한 단계가 아닙니다. 핵심은 AI가 만든 결과를 그대로 믿지 않고, 서버 기준으로 저장 가능 여부와 evidence를 나눈 점입니다.
+- ALB 다중 인스턴스, 장기 Grafana evidence, 실제 provider 고부하 검증은 후속 과제입니다.
 
 ## 30-Second Story
 
-GAJA를 만들면서 가장 먼저 본 문제는 "코스 추천 API를 만들었는가"가 아니라 **주행 중 서버나 외부 provider가 흔들릴 때 사용자가 어떤 상태를 보게 되는가**였습니다.
+이 저장소의 핵심은 "위치 기반 서비스를 만들었다"가 아니라 **사용자가 저장, 조회, 외부 연동 실패를 겪는 순간 백엔드가 어떤 상태와 응답을 보장할지 정한 것**입니다.
 
-사용자가 자전거를 타는 동안에는 코스 조회, HUD 판정, 날씨, 주소검색, 기록 저장이 동시에 섞입니다. 이때 AI route, GraphHopper, Redis, DB connection, finalization worker를 한 흐름으로 묶어 버리면 느린 provider 하나나 저장 폭주 하나가 주행 화면 전체를 흔들 수 있습니다.
-
-그래서 이 백엔드는 세 가지 기준으로 설계했습니다.
-
-1. **경로 판단의 source of truth를 분리합니다.** LLM은 좌표를 만들지 않고, 자연어 의도 정규화와 설명을 맡습니다. 실제 route point와 품질 근거는 GraphHopper route detail, GIS evidence, 백엔드 scorer가 책임집니다.
-2. **사용자 응답과 후처리를 분리합니다.** 자유주행 기록은 먼저 저장 요청을 멱등하게 받고, smoothing/finalization은 `FINALIZING -> READY` 상태 전이로 처리합니다.
-3. **장애를 성공처럼 숨기지 않습니다.** 주소, 날씨, AI worker, GraphHopper 실패는 fallback/stale/partial metadata로 드러내고, 비용/보안 보호가 필요한 요청은 빠른 429/503으로 격리합니다.
-
-그 결과 AWS/k6 short evidence에서 50VU 혼합 부하의 Hikari timeout과 finalization 지연을 병목으로 분리했고, token pool, backpressure, transaction boundary, 비동기 finalization 기준을 보정해 read/HUD 흐름과 저장 후처리 흐름을 나눠 검증했습니다.
+자전거 주행 중에는 코스 조회, 주행 상태 판단, 날씨, 주소검색, 기록 저장이 동시에 섞입니다. 이때 느린 provider 하나나 저장 요청 폭주 하나가 전체 화면을 흔들지 않도록 API 응답 기준, DB 상태 모델, 중복 요청 방지, 후처리 job, fallback metadata를 나눴습니다.
 
 ## At a Glance
 
@@ -38,6 +82,7 @@ GAJA를 만들면서 가장 먼저 본 문제는 "코스 추천 API를 만들었
 
 ## Quick Links
 
+- [For Reviewers: 5-Minute Route](#for-reviewers-5-minute-route)
 - [30-Second Story](#30-second-story)
 - [Architecture](#architecture)
 - [Core Features](#core-features)
