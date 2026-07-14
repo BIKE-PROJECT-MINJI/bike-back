@@ -1,7 +1,7 @@
 {
   "testId" : "postgis-contract-v1",
-  "commit" : "8e6408c81b358b564b0a070ca195d4b447314682",
-  "executedAt" : "2026-07-14T04:19:53.972855397Z",
+  "commit" : "82596c9d1d17ef356c08176b623d42845049cbe8",
+  "executedAt" : "2026-07-14T05:35:59.399098999Z",
   "environment" : "Testcontainers postgis/postgis:16-3.4; synthetic V1-V16 schema history",
   "command" : "./gradlew postgisTest",
   "result" : "PASS",
