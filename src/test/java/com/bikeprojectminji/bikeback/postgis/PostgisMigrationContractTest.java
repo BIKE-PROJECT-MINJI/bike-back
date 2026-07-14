@@ -71,7 +71,7 @@ class PostgisMigrationContractTest {
                 "postgis-contract-v1",
                 System.getenv().getOrDefault("GIT_COMMIT", "working-tree"),
                 Instant.now().toString(),
-                "postgis/postgis:16-3.4",
+                "Testcontainers postgis/postgis:16-3.4; synthetic V1-V16 schema history",
                 "./gradlew postgisTest",
                 migrationContractPassed
                         && geometryContractPassed
@@ -87,7 +87,7 @@ class PostgisMigrationContractTest {
                 gistContractPassed ? 5 : 0,
                 routeLineContractPassed ? 4326 : null,
                 routeLineContractPassed ? 3 : 0,
-                "synthetic coordinates only; index existence is not a performance claim"
+                "synthetic coordinates and schema-history upgrade contract; not deployed to or validated against a production database; index existence is not a performance claim"
         ));
     }
 

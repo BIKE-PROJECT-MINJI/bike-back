@@ -61,6 +61,10 @@ if postgis.get("publishedV16Sha256") != "22e6221d1f07e89f8bd8c40a54b891e2962b6d0
         or postgis.get("historicalV16UpgradePassed") is not True \
         or not isinstance(postgis.get("historicalV16FlywayChecksum"), int):
     raise SystemExit("evidence integrity failed: published V16 upgrade contract missing")
+if "synthetic V1-V16 schema history" not in postgis.get("environment", "") \
+        or "synthetic" not in postgis.get("limitation", "") \
+        or "not deployed to or validated against a production database" not in postgis.get("limitation", ""):
+    raise SystemExit("evidence integrity failed: synthetic V16 boundary missing")
 
 application = documents["postgres-application-contract.json"]
 required_true = (
