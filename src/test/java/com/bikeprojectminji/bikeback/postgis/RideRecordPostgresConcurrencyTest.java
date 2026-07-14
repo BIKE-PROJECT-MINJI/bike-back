@@ -131,6 +131,8 @@ class RideRecordPostgresConcurrencyTest {
                 System.getenv().getOrDefault("GIT_COMMIT", "working-tree"),
                 Instant.now().toString(),
                 "postgis/postgis:16-3.4; Redis lock forced unavailable",
+                "./gradlew postgisTest --tests '*RideRecordPostgresConcurrencyTest'",
+                applicationContractPassed() ? "PASS" : "FAIL",
                 concurrencyPassed ? CONCURRENT_REQUESTS : 0,
                 concurrencyPassed ? 1 : 0,
                 concurrencyPassed ? 3 : 0,
@@ -558,6 +560,17 @@ class RideRecordPostgresConcurrencyTest {
         return result == null ? 0 : result;
     }
 
+    private static boolean applicationContractPassed() {
+        return concurrencyPassed
+                && gpxImportPassed
+                && invalidGpxRejectedWithoutRows
+                && gpxMidWriteRollbackPassed
+                && ownershipPassed
+                && aiCandidateConcurrentPromotePassed
+                && aiCandidateRollbackPassed
+                && ridePolicyApiPostgisPassed;
+    }
+
     private String fixture(String name) throws IOException {
         String path = "/fixtures/gpx/" + name;
         try (InputStream input = getClass().getResourceAsStream(path)) {
@@ -571,6 +584,8 @@ class RideRecordPostgresConcurrencyTest {
             String commit,
             String executedAt,
             String environment,
+            String command,
+            String result,
             int concurrentRequests,
             int rideRecordRows,
             int routePointRows,

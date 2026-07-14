@@ -101,6 +101,10 @@ class AiRouteGoldenSetTest {
         new ObjectMapper().findAndRegisterModules().writerWithDefaultPrettyPrinter().writeValue(output.toFile(), new GoldenEvidence(
                 "ai-route-deterministic-golden-v1",
                 System.getenv().getOrDefault("GIT_COMMIT", "working-tree"),
+                Instant.now().toString(),
+                "JVM unit test; deterministic fake GraphHopper; AI worker disabled",
+                "./gradlew test --tests '*AiRouteGoldenSetTest'",
+                "PASS",
                 "deterministic fake provider; not live inventory or real-user route quality",
                 results.size(),
                 results
@@ -293,6 +297,10 @@ class AiRouteGoldenSetTest {
     private record GoldenEvidence(
             String testId,
             String commit,
+            String executedAt,
+            String environment,
+            String command,
+            String result,
             String fixtureNotice,
             int caseCount,
             List<GoldenResult> results

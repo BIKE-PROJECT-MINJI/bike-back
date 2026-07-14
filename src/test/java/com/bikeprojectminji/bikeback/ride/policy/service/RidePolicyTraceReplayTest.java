@@ -126,6 +126,10 @@ class RidePolicyTraceReplayTest {
         new ObjectMapper().findAndRegisterModules().writerWithDefaultPrettyPrinter().writeValue(output.toFile(), new ReplayEvidence(
                 "route-policy-synthetic-replay-v1",
                 System.getenv().getOrDefault("GIT_COMMIT", "working-tree"),
+                Instant.now().toString(),
+                "JVM unit test; fixed clock; synthetic route and trace",
+                "./gradlew test --tests '*RidePolicyTraceReplayTest'",
+                "PASS",
                 "synthetic coordinates only; not a real ride accuracy claim",
                 results.size(),
                 results
@@ -294,6 +298,10 @@ class RidePolicyTraceReplayTest {
     private record ReplayEvidence(
             String testId,
             String commit,
+            String executedAt,
+            String environment,
+            String command,
+            String result,
             String fixtureNotice,
             int passedCases,
             List<ReplayResult> results
