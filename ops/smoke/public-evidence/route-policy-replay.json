@@ -1,0 +1,106 @@
+{
+  "testId" : "route-policy-synthetic-replay-v1",
+  "commit" : "47360c877c35b2cd9bfeb438fba883346e05ca10",
+  "fixtureNotice" : "synthetic coordinates only; not a real ride accuracy claim",
+  "passedCases" : 9,
+  "results" : [ {
+    "testId" : "RP-01",
+    "overallState" : "ACTIVE_ON_ROUTE",
+    "offRouteStatus" : "ON_ROUTE",
+    "offRouteReasonCode" : "WITHIN_ROUTE_THRESHOLD",
+    "distanceM" : 49,
+    "durationSec" : 0,
+    "completionStatus" : "IN_PROGRESS",
+    "completionReasonCode" : "COVERAGE_BELOW_THRESHOLD",
+    "coveragePercent" : 0,
+    "latencyMicros" : 87773
+  }, {
+    "testId" : "RP-02",
+    "overallState" : "ACTIVE_OFF_ROUTE_CANDIDATE",
+    "offRouteStatus" : "CANDIDATE",
+    "offRouteReasonCode" : "OFF_ROUTE_CANDIDATE_ACTIVE",
+    "distanceM" : 51,
+    "durationSec" : 10,
+    "completionStatus" : "IN_PROGRESS",
+    "completionReasonCode" : "COVERAGE_BELOW_THRESHOLD",
+    "coveragePercent" : 0,
+    "latencyMicros" : 2095
+  }, {
+    "testId" : "RP-03",
+    "overallState" : "ACTIVE_WARNING",
+    "offRouteStatus" : "WARNING",
+    "offRouteReasonCode" : "OFF_ROUTE_WARNING_ACTIVE",
+    "distanceM" : 51,
+    "durationSec" : 15,
+    "completionStatus" : "IN_PROGRESS",
+    "completionReasonCode" : "COVERAGE_BELOW_THRESHOLD",
+    "coveragePercent" : 0,
+    "latencyMicros" : 1764
+  }, {
+    "testId" : "RP-04",
+    "overallState" : "ACTIVE_ON_ROUTE",
+    "offRouteStatus" : "ON_ROUTE",
+    "offRouteReasonCode" : "RECOVERED_WITHIN_THRESHOLD",
+    "distanceM" : 29,
+    "durationSec" : 0,
+    "completionStatus" : "IN_PROGRESS",
+    "completionReasonCode" : "COVERAGE_BELOW_THRESHOLD",
+    "coveragePercent" : 0,
+    "latencyMicros" : 1653
+  }, {
+    "testId" : "RP-05",
+    "overallState" : "ACTIVE_UNDETERMINED",
+    "offRouteStatus" : "UNDETERMINED",
+    "offRouteReasonCode" : "LOCATION_LOW_ACCURACY",
+    "distanceM" : null,
+    "durationSec" : null,
+    "completionStatus" : "UNDETERMINED",
+    "completionReasonCode" : "LOCATION_LOW_ACCURACY",
+    "coveragePercent" : null,
+    "latencyMicros" : 2499
+  }, {
+    "testId" : "RP-06",
+    "overallState" : "ACTIVE_UNDETERMINED",
+    "offRouteStatus" : "UNDETERMINED",
+    "offRouteReasonCode" : "LOCATION_STALE",
+    "distanceM" : null,
+    "durationSec" : null,
+    "completionStatus" : "UNDETERMINED",
+    "completionReasonCode" : "LOCATION_STALE",
+    "coveragePercent" : null,
+    "latencyMicros" : 820
+  }, {
+    "testId" : "RP-07",
+    "overallState" : "ACTIVE_ON_ROUTE",
+    "offRouteStatus" : "ON_ROUTE",
+    "offRouteReasonCode" : "WITHIN_ROUTE_THRESHOLD",
+    "distanceM" : 0,
+    "durationSec" : 0,
+    "completionStatus" : "IN_PROGRESS",
+    "completionReasonCode" : "COVERAGE_BELOW_THRESHOLD",
+    "coveragePercent" : 79,
+    "latencyMicros" : 16594
+  }, {
+    "testId" : "RP-08",
+    "overallState" : "ACTIVE_COMPLETION_READY",
+    "offRouteStatus" : "ON_ROUTE",
+    "offRouteReasonCode" : "WITHIN_ROUTE_THRESHOLD",
+    "distanceM" : 0,
+    "durationSec" : 0,
+    "completionStatus" : "ELIGIBLE",
+    "completionReasonCode" : "NON_LOOP_COMPLETION_READY",
+    "coveragePercent" : 86,
+    "latencyMicros" : 970
+  }, {
+    "testId" : "RP-09",
+    "overallState" : "ACTIVE_COMPLETION_READY",
+    "offRouteStatus" : "ON_ROUTE",
+    "offRouteReasonCode" : "WITHIN_ROUTE_THRESHOLD",
+    "distanceM" : 0,
+    "durationSec" : 0,
+    "completionStatus" : "ELIGIBLE",
+    "completionReasonCode" : "LOOP_COMPLETION_READY",
+    "coveragePercent" : 100,
+    "latencyMicros" : 949
+  } ]
+}

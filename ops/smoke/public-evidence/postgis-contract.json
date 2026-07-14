@@ -1,0 +1,14 @@
+{
+  "testId" : "postgis-contract-v1",
+  "commit" : "47360c877c35b2cd9bfeb438fba883346e05ca10",
+  "executedAt" : "2026-07-14T02:04:39.589376075Z",
+  "environment" : "postgis/postgis:16-3.4",
+  "command" : "./gradlew postgisTest",
+  "migrationCount" : 35,
+  "migrationPassed" : true,
+  "geometryColumnsVerified" : 5,
+  "gistIndexesVerified" : 5,
+  "routeLineSrid" : 4326,
+  "routeLinePointCount" : 3,
+  "limitation" : "synthetic coordinates only; index existence is not a performance claim"
+}
