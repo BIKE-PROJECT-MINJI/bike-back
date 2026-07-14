@@ -121,20 +121,20 @@ Swagger UI는 서버 실행 후 `http://127.0.0.1:8080/swagger-ui.html`에서 �
 이번 공개 evidence가 증명하는 범위:
 
 - 고정 PostGIS 이미지의 빈 DB에서 현재 migration 전체 적용
+- 배포된 V16 원본 SHA-256을 고정하고, V16 schema history에서 repair 없이 V35까지 validate/migrate
 - synthetic fixture에서 공간 컬럼·인덱스·경로 geometry 계약
 - 실제 PostgreSQL 경합에서 주행 저장 중복 수렴
 - synthetic trace 경계의 상태 전이 일관성
-- deterministic fake provider에서 AI 책임 경계와 fallback metadata
+- deterministic fake GraphHopper와 disabled AI worker 조건에서 AI 책임 경계와 fallback metadata
 
 아직 증명하지 않은 범위:
 
 - 실기기 장거리 주행의 GPS 오탐률과 사용자 만족도
 - 실시간 외부 provider의 코스 품질·재고·가용성
-- 공개 evidence commit 이전에 적용된 DB의 V16 checksum 호환성
 - 이 작은 fixture에서 GiST가 실제 성능을 개선했다는 주장
 - synthetic replay latency를 운영 p95/p99로 일반화하는 주장
 
-운영 Flyway 이력은 불변이어야 합니다. 현재 V16 checksum 이력은 별도 차단 이슈로 추적하며, 복구 승인과 기존 schema history 검증 전에는 “기존 DB 업그레이드 안전”을 주장하지 않습니다.
+운영 Flyway 이력은 불변이어야 합니다. 사후 변경됐던 V16은 배포 원본 SHA-256으로 복원했고 보정 로직은 V35에만 유지했습니다. 별도 PostGIS schema에서 V1~V16 이력을 만든 뒤 현재 코드로 applied checksum을 검증하고 V17~V35를 `repair` 없이 적용했습니다. 이는 synthetic upgrade 계약이며 실제 운영 DB 배포 결과를 대신하지 않습니다.
 
 ## 저장소 구조
 
