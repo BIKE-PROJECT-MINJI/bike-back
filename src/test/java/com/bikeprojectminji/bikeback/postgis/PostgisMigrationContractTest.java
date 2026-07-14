@@ -3,6 +3,9 @@ package com.bikeprojectminji.bikeback.postgis;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -11,7 +14,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
+import java.time.Instant;
+import org.junit.jupiter.api.AfterAll;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -37,6 +41,10 @@ class PostgisMigrationContractTest {
             .withPassword("bike_test");
 
     private static int appliedMigrationCount;
+    private static boolean migrationContractPassed;
+    private static boolean geometryContractPassed;
+    private static boolean gistContractPassed;
+    private static boolean routeLineContractPassed;
 
     @BeforeAll
     static void migrateEmptyDatabase() {
@@ -46,6 +54,26 @@ class PostgisMigrationContractTest {
                 .load()
                 .migrate()
                 .migrationsExecuted;
+    }
+
+    @AfterAll
+    static void writeEvidence() throws Exception {
+        Path output = Path.of("build", "public-evidence", "postgis-contract.json");
+        Files.createDirectories(output.getParent());
+        new ObjectMapper().findAndRegisterModules().writerWithDefaultPrettyPrinter().writeValue(output.toFile(), new PostgisEvidence(
+                "postgis-contract-v1",
+                System.getenv().getOrDefault("GIT_COMMIT", "working-tree"),
+                Instant.now().toString(),
+                "postgis/postgis:16-3.4",
+                "./gradlew postgisTest",
+                appliedMigrationCount,
+                migrationContractPassed,
+                geometryContractPassed ? 5 : 0,
+                gistContractPassed ? 5 : 0,
+                routeLineContractPassed ? 4326 : null,
+                routeLineContractPassed ? 3 : 0,
+                "synthetic coordinates only; index existence is not a performance claim"
+        ));
     }
 
     @Test
@@ -66,6 +94,7 @@ class PostgisMigrationContractTest {
             assertThat(result.getInt("migration_count")).isEqualTo(35);
             assertThat(result.getInt("latest_version")).isEqualTo(35);
             assertThat(result.getBoolean("all_succeeded")).isTrue();
+            migrationContractPassed = true;
         }
     }
 
@@ -85,6 +114,7 @@ class PostgisMigrationContractTest {
                     "ride_record_points.point_geom", new GeometryColumn("POINT", 4326),
                     "ride_record_processed_points.point_geom", new GeometryColumn("POINT", 4326)
             ));
+            geometryContractPassed = true;
         }
     }
 
@@ -113,6 +143,7 @@ class PostgisMigrationContractTest {
                 }
                 assertThat(actual.keySet()).containsExactlyInAnyOrderElementsOf(expectedIndexes);
                 assertThat(actual.values()).allMatch(definition -> definition.contains("USING gist"));
+                gistContractPassed = true;
             }
         }
     }
@@ -161,6 +192,7 @@ class PostgisMigrationContractTest {
                     assertThat(result.getBigDecimal("first_lat")).isEqualByComparingTo("37.501");
                     assertThat(result.getBigDecimal("last_lon")).isEqualByComparingTo("127.003");
                     assertThat(result.getBigDecimal("last_lat")).isEqualByComparingTo("37.503");
+                    routeLineContractPassed = true;
                 }
             }
         }
@@ -227,5 +259,21 @@ class PostgisMigrationContractTest {
     }
 
     private record GeometryColumn(String type, int srid) {
+    }
+
+    private record PostgisEvidence(
+            String testId,
+            String commit,
+            String executedAt,
+            String environment,
+            String command,
+            int migrationCount,
+            boolean migrationPassed,
+            int geometryColumnsVerified,
+            int gistIndexesVerified,
+            Integer routeLineSrid,
+            int routeLinePointCount,
+            String limitation
+    ) {
     }
 }

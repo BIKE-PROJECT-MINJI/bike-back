@@ -22,9 +22,13 @@ import com.bikeprojectminji.bikeback.ride.dto.RideRecordSummaryRequest;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordDeletionService;
 import java.math.BigDecimal;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +40,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -71,6 +76,10 @@ class RideRecordPostgresConcurrencyTest {
     private static final DockerImageName POSTGIS_IMAGE = DockerImageName
             .parse("postgis/postgis:16-3.4")
             .asCompatibleSubstituteFor("postgres");
+    private static boolean concurrencyPassed;
+    private static boolean gpxImportPassed;
+    private static boolean invalidGpxRollbackPassed;
+    private static boolean ownershipPassed;
 
     @Container
     private static final PostgreSQLContainer<?> POSTGIS = new PostgreSQLContainer<>(POSTGIS_IMAGE)
@@ -84,6 +93,26 @@ class RideRecordPostgresConcurrencyTest {
         registry.add("spring.datasource.username", POSTGIS::getUsername);
         registry.add("spring.datasource.password", POSTGIS::getPassword);
         registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+    }
+
+    @AfterAll
+    static void writeEvidence() throws Exception {
+        Path output = Path.of("build", "public-evidence", "postgres-application-contract.json");
+        Files.createDirectories(output.getParent());
+        new ObjectMapper().findAndRegisterModules().writerWithDefaultPrettyPrinter().writeValue(output.toFile(), new ApplicationContractEvidence(
+                "postgres-application-contract-v1",
+                System.getenv().getOrDefault("GIT_COMMIT", "working-tree"),
+                Instant.now().toString(),
+                "postgis/postgis:16-3.4; Redis lock forced unavailable",
+                concurrencyPassed ? CONCURRENT_REQUESTS : 0,
+                concurrencyPassed ? 1 : 0,
+                concurrencyPassed ? 3 : 0,
+                concurrencyPassed ? 1 : 0,
+                gpxImportPassed,
+                invalidGpxRollbackPassed,
+                ownershipPassed,
+                "synthetic fixtures only; no real rider coordinates or credentials"
+        ));
     }
 
     @Autowired
@@ -175,6 +204,7 @@ class RideRecordPostgresConcurrencyTest {
                     .isEqualTo(3);
             assertThat(count("select count(*) from ride_finalization_jobs where ride_record_id = ?", rideRecordId))
                     .isEqualTo(1);
+            concurrencyPassed = true;
         } finally {
             executor.shutdownNow();
             assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
@@ -203,6 +233,7 @@ class RideRecordPostgresConcurrencyTest {
                   and ST_SRID(route_line_geom) = 4326
                   and ST_NPoints(route_line_geom) = 3
                 """, response.courseId())).isEqualTo(1);
+        gpxImportPassed = true;
     }
 
     @Test
@@ -221,6 +252,7 @@ class RideRecordPostgresConcurrencyTest {
 
         assertThat(count("select count(*) from courses where title = ? and owner_user_id = ?", title, owner.getId()))
                 .isZero();
+        invalidGpxRollbackPassed = true;
     }
 
     @Test
@@ -260,6 +292,7 @@ class RideRecordPostgresConcurrencyTest {
 
         assertThat(count("select count(*) from courses where id = ?", privateCourse.courseId())).isEqualTo(1);
         assertThat(count("select count(*) from ride_records where id = ?", ownerRide.rideRecordId())).isEqualTo(1);
+        ownershipPassed = true;
     }
 
     private CreateRideRecordRequest syntheticRequest() {
@@ -308,5 +341,21 @@ class RideRecordPostgresConcurrencyTest {
             assertThat(input).as(path).isNotNull();
             return new String(input.readAllBytes(), StandardCharsets.UTF_8);
         }
+    }
+
+    private record ApplicationContractEvidence(
+            String testId,
+            String commit,
+            String executedAt,
+            String environment,
+            int concurrentRequests,
+            int rideRecordRows,
+            int routePointRows,
+            int finalizationJobRows,
+            boolean gpxImportWithGeometryPassed,
+            boolean invalidGpxRollbackPassed,
+            boolean crossOwnerAccessDenied,
+            String limitation
+    ) {
     }
 }
