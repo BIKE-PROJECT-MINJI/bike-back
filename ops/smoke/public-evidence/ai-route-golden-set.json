@@ -1,6 +1,10 @@
 {
   "testId" : "ai-route-deterministic-golden-v1",
-  "commit" : "0aeda0b537830305e24ecbbe3086c026f0299284",
+  "commit" : "b3ef7f5bbf0d7f88bd123520196e7ed33c8e53a0",
+  "executedAt" : "2026-07-14T02:42:59.396144221Z",
+  "environment" : "JVM unit test; deterministic fake GraphHopper; AI worker disabled",
+  "command" : "./gradlew test --tests '*AiRouteGoldenSetTest'",
+  "result" : "PASS",
   "fixtureNotice" : "deterministic fake provider; not live inventory or real-user route quality",
   "caseCount" : 13,
   "results" : [ {
@@ -24,7 +28,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 213855,
+    "latencyMicros" : 186757,
     "note" : "implemented text normalization"
   }, {
     "testId" : "AI-02",
@@ -47,7 +51,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 281,
+    "latencyMicros" : 394,
     "note" : "implemented structured preference"
   }, {
     "testId" : "AI-03",
@@ -70,7 +74,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 433,
+    "latencyMicros" : 562,
     "note" : "unsupported: normalized to TEXT_BALANCED"
   }, {
     "testId" : "AI-04",
@@ -93,7 +97,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 340,
+    "latencyMicros" : 316,
     "note" : "unsupported: target distance not normalized"
   }, {
     "testId" : "AI-05",
@@ -116,7 +120,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 239,
+    "latencyMicros" : 196,
     "note" : "unsupported: target distance not normalized"
   }, {
     "testId" : "AI-06",
@@ -139,7 +143,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 280,
+    "latencyMicros" : 143,
     "note" : "destination supplied"
   }, {
     "testId" : "AI-07",
@@ -162,7 +166,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 227,
+    "latencyMicros" : 128,
     "note" : "default destination calculated"
   }, {
     "testId" : "AI-08",
@@ -185,7 +189,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 152,
+    "latencyMicros" : 129,
     "note" : "elevation remains UNAVAILABLE"
   }, {
     "testId" : "AI-09",
@@ -208,7 +212,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 188,
+    "latencyMicros" : 355,
     "note" : "scenery evidence is PARTIAL, not user quality proof"
   }, {
     "testId" : "AI-10",
@@ -231,7 +235,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 187,
+    "latencyMicros" : 151,
     "note" : "backend plan returned with worker fallback metadata"
   }, {
     "testId" : "AI-11",
@@ -254,7 +258,7 @@
     "fallbackReason" : null,
     "expectedHttpStatus" : 400,
     "resultStatus" : "BAD_REQUEST",
-    "latencyMicros" : 145,
+    "latencyMicros" : 203,
     "note" : "routing failure is 400; no fabricated coordinates"
   }, {
     "testId" : "AI-12",
@@ -277,7 +281,7 @@
     "fallbackReason" : null,
     "expectedHttpStatus" : 400,
     "resultStatus" : "BAD_REQUEST",
-    "latencyMicros" : 72,
+    "latencyMicros" : 84,
     "note" : "empty candidate is 400; no fabricated coordinates"
   }, {
     "testId" : "AI-13",

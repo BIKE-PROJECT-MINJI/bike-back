@@ -1,9 +1,10 @@
 {
   "testId" : "postgis-contract-v1",
-  "commit" : "0aeda0b537830305e24ecbbe3086c026f0299284",
-  "executedAt" : "2026-07-14T02:25:20.282889966Z",
+  "commit" : "b3ef7f5bbf0d7f88bd123520196e7ed33c8e53a0",
+  "executedAt" : "2026-07-14T02:45:05.850159863Z",
   "environment" : "postgis/postgis:16-3.4",
   "command" : "./gradlew postgisTest",
+  "result" : "PASS",
   "migrationCount" : 35,
   "migrationPassed" : true,
   "geometryColumnsVerified" : 5,
