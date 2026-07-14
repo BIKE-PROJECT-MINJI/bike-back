@@ -1,7 +1,7 @@
 {
   "testId" : "postgres-application-contract-v1",
-  "commit" : "82596c9d1d17ef356c08176b623d42845049cbe8",
-  "executedAt" : "2026-07-14T05:37:28.050130470Z",
+  "commit" : "10a234f7047020202e2f6da3807feccfae64ed3b",
+  "executedAt" : "2026-07-14T05:56:48.039753395Z",
   "environment" : "postgis/postgis:16-3.4; Redis lock forced unavailable",
   "command" : "./gradlew postgisTest --tests '*RideRecordPostgresConcurrencyTest'",
   "result" : "PASS",
