@@ -2,14 +2,30 @@ package com.bikeprojectminji.bikeback.postgis;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.reset;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePointResponse;
+import com.bikeprojectminji.bikeback.airoute.service.AiRoutePlannerService;
+import com.bikeprojectminji.bikeback.airoute.session.AiRouteGenerationSessionService;
+import com.bikeprojectminji.bikeback.airoute.session.AiRoutePromotedCourseResponse;
+import com.bikeprojectminji.bikeback.airoute.session.dto.AiRouteGenerationSessionCreateRequest;
+import com.bikeprojectminji.bikeback.airoute.session.dto.AiRouteGenerationSessionResponse;
+import com.bikeprojectminji.bikeback.airoute.session.dto.PromoteAiRouteCandidateRequest;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
 import com.bikeprojectminji.bikeback.course.dto.ImportGpxCourseRequest;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
+import com.bikeprojectminji.bikeback.course.repository.CourseRouteGeometryRepository;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
@@ -19,6 +35,8 @@ import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordPointRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordSummaryRequest;
+import com.bikeprojectminji.bikeback.ride.policy.dto.RideLocationRequest;
+import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationRequest;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordDeletionService;
 import java.math.BigDecimal;
@@ -38,6 +56,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterAll;
@@ -46,6 +65,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -53,6 +73,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -61,6 +83,7 @@ import org.testcontainers.utility.DockerImageName;
 @Tag("postgis")
 @Testcontainers
 @ActiveProfiles("test")
+@AutoConfigureMockMvc
 @SpringBootTest(properties = {
         "spring.flyway.enabled=true",
         "spring.sql.init.mode=never",
@@ -78,8 +101,12 @@ class RideRecordPostgresConcurrencyTest {
             .asCompatibleSubstituteFor("postgres");
     private static boolean concurrencyPassed;
     private static boolean gpxImportPassed;
-    private static boolean invalidGpxRollbackPassed;
+    private static boolean invalidGpxRejectedWithoutRows;
+    private static boolean gpxMidWriteRollbackPassed;
     private static boolean ownershipPassed;
+    private static boolean aiCandidateConcurrentPromotePassed;
+    private static boolean aiCandidateRollbackPassed;
+    private static boolean ridePolicyApiPostgisPassed;
 
     @Container
     private static final PostgreSQLContainer<?> POSTGIS = new PostgreSQLContainer<>(POSTGIS_IMAGE)
@@ -109,8 +136,12 @@ class RideRecordPostgresConcurrencyTest {
                 concurrencyPassed ? 3 : 0,
                 concurrencyPassed ? 1 : 0,
                 gpxImportPassed,
-                invalidGpxRollbackPassed,
+                invalidGpxRejectedWithoutRows,
+                gpxMidWriteRollbackPassed,
                 ownershipPassed,
+                aiCandidateConcurrentPromotePassed,
+                aiCandidateRollbackPassed,
+                ridePolicyApiPostgisPassed,
                 "synthetic fixtures only; no real rider coordinates or credentials"
         ));
     }
@@ -128,10 +159,16 @@ class RideRecordPostgresConcurrencyTest {
     private RideRecordDeletionService rideRecordDeletionService;
 
     @Autowired
+    private AiRouteGenerationSessionService aiRouteGenerationSessionService;
+
+    @Autowired
     private UserRepository userRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private MockMvc mockMvc;
 
     @MockitoBean
     private AuthService authService;
@@ -142,6 +179,12 @@ class RideRecordPostgresConcurrencyTest {
     @MockitoBean
     private StringRedisTemplate stringRedisTemplate;
 
+    @MockitoBean
+    private AiRoutePlannerService aiRoutePlannerService;
+
+    @MockitoSpyBean
+    private CourseRouteGeometryRepository courseRouteGeometryRepository;
+
     private UserEntity owner;
 
     @BeforeEach
@@ -149,7 +192,10 @@ class RideRecordPostgresConcurrencyTest {
         jdbcTemplate.update("delete from ride_finalization_jobs");
         jdbcTemplate.update("delete from ride_record_points");
         jdbcTemplate.update("delete from ride_records");
+        jdbcTemplate.update("delete from course_route_points where course_id in (select id from courses where owner_user_id in (select id from users where external_id = ?))", SUBJECT);
         jdbcTemplate.update("delete from courses where owner_user_id in (select id from users where external_id = ?)", SUBJECT);
+        jdbcTemplate.update("delete from ai_route_candidates where session_id in (select id from ai_route_generation_sessions where owner_user_id in (select id from users where external_id = ?))", SUBJECT);
+        jdbcTemplate.update("delete from ai_route_generation_sessions where owner_user_id in (select id from users where external_id = ?)", SUBJECT);
         jdbcTemplate.update("delete from users where external_id = ?", SUBJECT);
 
         owner = userRepository.saveAndFlush(new UserEntity(
@@ -252,7 +298,137 @@ class RideRecordPostgresConcurrencyTest {
 
         assertThat(count("select count(*) from courses where title = ? and owner_user_id = ?", title, owner.getId()))
                 .isZero();
-        invalidGpxRollbackPassed = true;
+        invalidGpxRejectedWithoutRows = true;
+    }
+
+    @Test
+    @DisplayName("GPX course와 points 저장 뒤 geometry 갱신 실패가 발생하면 전체 저장을 롤백한다")
+    void rollsBackGpxWhenGeometryRefreshFails() throws IOException {
+        String title = "synthetic-gpx-mid-write-failure";
+        doThrow(new IllegalStateException("synthetic geometry refresh failure"))
+                .when(courseRouteGeometryRepository).refreshRouteLine(anyLong());
+
+        try {
+            assertThatThrownBy(() -> courseService.importGpxCourse(SUBJECT, new ImportGpxCourseRequest(
+                    title,
+                    "non-user fixture",
+                    "PRIVATE",
+                    fixture("synthetic-normal.gpx")
+            )))
+                    .hasRootCauseInstanceOf(IllegalStateException.class)
+                    .hasRootCauseMessage("synthetic geometry refresh failure");
+        } finally {
+            reset(courseRouteGeometryRepository);
+        }
+
+        assertThat(count("select count(*) from courses where title = ? and owner_user_id = ?", title, owner.getId()))
+                .isZero();
+        assertThat(count("""
+                select count(*) from course_route_points p
+                join courses c on c.id = p.course_id
+                where c.title = ? and c.owner_user_id = ?
+                """, title, owner.getId())).isZero();
+        gpxMidWriteRollbackPassed = true;
+    }
+
+    @Test
+    @DisplayName("같은 AI 후보 동시 승격은 Course 한 건과 route point 한 묶음으로 수렴한다")
+    void convergesConcurrentAiCandidatePromotion() throws Exception {
+        AiRouteGenerationSessionResponse session = createAiRouteSession();
+        Long candidateId = session.candidates().get(0).candidateId();
+        PromoteAiRouteCandidateRequest request = promoteRequest("synthetic-concurrent-promote");
+        CyclicBarrier startBarrier = new CyclicBarrier(2);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            List<Callable<Object>> calls = List.of(
+                    () -> promoteAfterBarrier(session, candidateId, request, startBarrier),
+                    () -> promoteAfterBarrier(session, candidateId, request, startBarrier)
+            );
+            List<Future<Object>> futures = executor.invokeAll(calls, 20, TimeUnit.SECONDS);
+            int successCount = 0;
+            int failureCount = 0;
+            for (Future<Object> future : futures) {
+                assertThat(future.isCancelled()).isFalse();
+                try {
+                    assertThat(future.get(5, TimeUnit.SECONDS)).isInstanceOf(AiRoutePromotedCourseResponse.class);
+                    successCount++;
+                } catch (ExecutionException expectedConcurrentLoser) {
+                    failureCount++;
+                }
+            }
+
+            assertThat(successCount).isEqualTo(1);
+            assertThat(failureCount).isEqualTo(1);
+            assertThat(count("select count(*) from courses where source_ai_route_candidate_id = ?", candidateId))
+                    .isEqualTo(1);
+            assertThat(count("""
+                    select count(*) from course_route_points p
+                    join courses c on c.id = p.course_id
+                    where c.source_ai_route_candidate_id = ?
+                    """, candidateId)).isEqualTo(2);
+            assertThat(count("select count(*) from ai_route_candidates where id = ? and promoted_course_id is not null", candidateId))
+                    .isEqualTo(1);
+            aiCandidateConcurrentPromotePassed = true;
+        } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    @DisplayName("AI 후보 승격 중 geometry 갱신 실패가 발생하면 Course와 route points를 남기지 않는다")
+    void rollsBackAiCandidatePromotionWhenGeometryRefreshFails() {
+        AiRouteGenerationSessionResponse session = createAiRouteSession();
+        Long candidateId = session.candidates().get(0).candidateId();
+        doThrow(new IllegalStateException("synthetic promote geometry failure"))
+                .when(courseRouteGeometryRepository).refreshRouteLine(anyLong());
+
+        try {
+            assertThatThrownBy(() -> aiRouteGenerationSessionService.promoteCandidate(
+                    SUBJECT,
+                    session.sessionId(),
+                    candidateId,
+                    promoteRequest("synthetic-rollback-promote")
+            ))
+                    .hasRootCauseInstanceOf(IllegalStateException.class)
+                    .hasRootCauseMessage("synthetic promote geometry failure");
+        } finally {
+            reset(courseRouteGeometryRepository);
+        }
+
+        assertThat(count("select count(*) from courses where source_ai_route_candidate_id = ?", candidateId)).isZero();
+        assertThat(count("select count(*) from ai_route_candidates where id = ? and promoted_course_id is not null", candidateId))
+                .isZero();
+        aiCandidateRollbackPassed = true;
+    }
+
+    @Test
+    @DisplayName("대표 ride-policy HTTP 요청은 실제 PostGIS route points를 읽어 응답한다")
+    void evaluatesRidePolicyThroughHttpAndPostgis() throws Exception {
+        CourseWriteResponse course = courseService.importGpxCourse(SUBJECT, new ImportGpxCourseRequest(
+                "synthetic-http-replay",
+                "non-user fixture",
+                "PUBLIC",
+                fixture("synthetic-normal.gpx")
+        ));
+        OffsetDateTime now = OffsetDateTime.now();
+        RidePolicyEvaluationRequest request = new RidePolicyEvaluationRequest(
+                "ACTIVE",
+                new RideLocationRequest(new BigDecimal("37.5010000"), new BigDecimal("127.0010000"), new BigDecimal("5"), now),
+                List.of(new RideLocationRequest(
+                        new BigDecimal("37.5010000"), new BigDecimal("127.0010000"), new BigDecimal("5"), now.minusSeconds(1)
+                ))
+        );
+
+        mockMvc.perform(post("/api/v1/courses/{courseId}/ride-policy/evaluate", course.courseId())
+                        .contentType("application/json")
+                        .content(new ObjectMapper().findAndRegisterModules().writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.phase").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.offRoute.status").value("ON_ROUTE"))
+                .andExpect(jsonPath("$.data.progress.nearestSegmentIndex").isNumber());
+        ridePolicyApiPostgisPassed = true;
     }
 
     @Test
@@ -310,6 +486,53 @@ class RideRecordPostgresConcurrencyTest {
         );
     }
 
+    private AiRouteGenerationSessionResponse createAiRouteSession() {
+        given(aiRoutePlannerService.plan(org.mockito.ArgumentMatchers.eq(SUBJECT), org.mockito.ArgumentMatchers.any(AiRoutePlanRequest.class)))
+                .willReturn(new AiRoutePlanResponse(
+                        "synthetic-plan",
+                        "READY",
+                        "synthetic candidate",
+                        "HIGH",
+                        null,
+                        null,
+                        List.of(
+                                new AiRoutePointResponse(new BigDecimal("37.5000000"), new BigDecimal("127.0000000"), "synthetic start"),
+                                new AiRoutePointResponse(new BigDecimal("37.5100000"), new BigDecimal("127.0100000"), "synthetic end")
+                        ),
+                        List.of(),
+                        List.of(),
+                        80,
+                        null,
+                        null,
+                        List.of(),
+                        true
+                ));
+        return aiRouteGenerationSessionService.createSession(SUBJECT, new AiRouteGenerationSessionCreateRequest(
+                new BigDecimal("37.5000000"),
+                new BigDecimal("127.0000000"),
+                new BigDecimal("37.5100000"),
+                new BigDecimal("127.0100000"),
+                "synthetic destination",
+                "BALANCED",
+                "BALANCED_ELEVATION",
+                "synthetic preference"
+        ));
+    }
+
+    private Object promoteAfterBarrier(
+            AiRouteGenerationSessionResponse session,
+            Long candidateId,
+            PromoteAiRouteCandidateRequest request,
+            CyclicBarrier startBarrier
+    ) throws Exception {
+        startBarrier.await(10, TimeUnit.SECONDS);
+        return aiRouteGenerationSessionService.promoteCandidate(SUBJECT, session.sessionId(), candidateId, request);
+    }
+
+    private PromoteAiRouteCandidateRequest promoteRequest(String name) {
+        return new PromoteAiRouteCandidateRequest(name, "non-user fixture", "PRIVATE");
+    }
+
     private RideRecordPointRequest point(
             int pointOrder,
             String latitude,
@@ -353,8 +576,12 @@ class RideRecordPostgresConcurrencyTest {
             int routePointRows,
             int finalizationJobRows,
             boolean gpxImportWithGeometryPassed,
-            boolean invalidGpxRollbackPassed,
+            boolean invalidGpxRejectedWithoutRows,
+            boolean gpxMidWriteRollbackPassed,
             boolean crossOwnerAccessDenied,
+            boolean aiCandidateConcurrentPromotePassed,
+            boolean aiCandidateRollbackPassed,
+            boolean ridePolicyApiPostgisPassed,
             String limitation
     ) {
     }

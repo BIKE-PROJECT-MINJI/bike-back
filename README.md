@@ -13,10 +13,9 @@ GAJA는 자전거 코스 추천, 코스 따라가기, 자유주행 기록을 제
 
 | 검증 | 확인한 결과 | 공개 evidence |
 |---|---|---|
-| 실제 PostGIS 계약 | 빈 DB에 운영 Flyway **35개** 적용, SRID 4326 geometry와 GiST 생성, `ST_MakeLine` 점 순서 확인 | [postgis-contract.json](ops/smoke/public-evidence/postgis-contract.json) |
-| 모바일 중복 저장 | Redis 잠금 장애에서도 동일 `clientRideId` **동시 10요청 -> record 1건**과 finalization job 1건으로 수렴 | [postgres-application-contract.json](ops/smoke/public-evidence/postgres-application-contract.json) |
-| 경로 판단 | 고정 trace로 49/51m, 15초, 복귀, 위치 품질, 비순환·순환 완주 **9/9** 재현 | [route-policy-replay.json](ops/smoke/public-evidence/route-policy-replay.json) |
-| 근거 기반 AI 코스 | 자연어 정규화, soft weight, provider 실패, evidence 부족, quota를 deterministic golden set으로 확인 | [ai-route-golden-set.json](ops/smoke/public-evidence/ai-route-golden-set.json) |
+| 실제 DB 계약 | 고정 PostGIS에서 운영 schema·geometry·인덱스를 확인하고, Redis 잠금 실패를 주입한 동시 **10요청 -> record 1건** 수렴을 재현 | [schema](ops/smoke/public-evidence/postgis-contract.json) · [application](ops/smoke/public-evidence/postgres-application-contract.json) |
+| 경로 판단 | 고정 trace에서 이탈·복귀·위치 품질·비순환/순환 완주 **9/9** 재현 | [route-policy-replay.json](ops/smoke/public-evidence/route-policy-replay.json) |
+| 근거 기반 AI 코스 | 자연어 정규화, soft weight, provider 실패, evidence 부족, quota **13건** 확인 | [ai-route-golden-set.json](ops/smoke/public-evidence/ai-route-golden-set.json) |
 
 전체 evidence 재생성:
 

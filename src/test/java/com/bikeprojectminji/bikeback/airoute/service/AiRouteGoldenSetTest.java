@@ -89,9 +89,12 @@ class AiRouteGoldenSetTest {
         assertThat(result(results, "AI-08").elevationStatus()).isEqualTo("UNAVAILABLE");
         assertThat(result(results, "AI-09").sceneryEvidenceStatus()).isEqualTo("PARTIAL");
         assertThat(result(results, "AI-10").aiWorkerFallbackUsed()).isTrue();
-        assertThat(result(results, "AI-11").httpStatus()).isEqualTo(400);
+        assertThat(result(results, "AI-11").resultStatus()).isEqualTo("BAD_REQUEST");
+        assertThat(result(results, "AI-11").expectedHttpStatus()).isEqualTo(400);
+        assertThat(result(results, "AI-12").resultStatus()).isEqualTo("BAD_REQUEST");
         assertThat(result(results, "AI-12").routePointCount()).isZero();
-        assertThat(result(results, "AI-13").httpStatus()).isEqualTo(429);
+        assertThat(result(results, "AI-13").resultStatus()).isEqualTo("TOO_MANY_REQUESTS");
+        assertThat(result(results, "AI-13").expectedHttpStatus()).isEqualTo(429);
 
         Path output = Path.of("build", "public-evidence", "ai-route-golden-set.json");
         Files.createDirectories(output.getParent());
@@ -203,18 +206,18 @@ class AiRouteGoldenSetTest {
         );
         quotaService.checkAllowed("synthetic-user");
         quotaService.checkAllowed("synthetic-user");
-        int httpStatus = 200;
+        int expectedHttpStatus = 200;
         String status = "UNEXPECTED_SUCCESS";
         try {
             quotaService.checkAllowed("synthetic-user");
         } catch (TooManyRequestsException expected) {
-            httpStatus = 429;
+            expectedHttpStatus = 429;
             status = "TOO_MANY_REQUESTS";
         }
         return new GoldenResult(
                 "AI-13", "quota/rate limit", null, null, null, List.of(), null, 0,
                 null, 0, null, null, List.of(), null, null, false, false, null,
-                httpStatus, status, 0, "third request exceeds deterministic per-minute limit of two"
+                expectedHttpStatus, status, 0, "third request exceeds deterministic per-minute limit of two"
         );
     }
 
@@ -315,7 +318,7 @@ class AiRouteGoldenSetTest {
             boolean routingFallbackUsed,
             boolean aiWorkerFallbackUsed,
             String fallbackReason,
-            int httpStatus,
+            int expectedHttpStatus,
             String resultStatus,
             long latencyMicros,
             String note
