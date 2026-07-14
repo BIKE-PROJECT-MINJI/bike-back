@@ -1,0 +1,20 @@
+{
+  "testId" : "postgres-application-contract-v1",
+  "commit" : "10a234f7047020202e2f6da3807feccfae64ed3b",
+  "executedAt" : "2026-07-14T05:56:48.039753395Z",
+  "environment" : "postgis/postgis:16-3.4; Redis lock forced unavailable",
+  "command" : "./gradlew postgisTest --tests '*RideRecordPostgresConcurrencyTest'",
+  "result" : "PASS",
+  "concurrentRequests" : 10,
+  "rideRecordRows" : 1,
+  "routePointRows" : 3,
+  "finalizationJobRows" : 1,
+  "gpxImportWithGeometryPassed" : true,
+  "invalidGpxRejectedWithoutRows" : true,
+  "gpxMidWriteRollbackPassed" : true,
+  "crossOwnerAccessDenied" : true,
+  "aiCandidateConcurrentPromotePassed" : true,
+  "aiCandidateRollbackPassed" : true,
+  "ridePolicyApiPostgisPassed" : true,
+  "limitation" : "synthetic fixtures only; no real rider coordinates or credentials"
+}

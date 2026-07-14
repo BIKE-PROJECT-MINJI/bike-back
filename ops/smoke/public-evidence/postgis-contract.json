@@ -1,0 +1,18 @@
+{
+  "testId" : "postgis-contract-v1",
+  "commit" : "10a234f7047020202e2f6da3807feccfae64ed3b",
+  "executedAt" : "2026-07-14T05:55:19.577590678Z",
+  "environment" : "Testcontainers postgis/postgis:16-3.4; synthetic V1-V16 schema history",
+  "command" : "./gradlew postgisTest",
+  "result" : "PASS",
+  "migrationCount" : 35,
+  "migrationPassed" : true,
+  "publishedV16Sha256" : "22e6221d1f07e89f8bd8c40a54b891e2962b6d0760dd5a6cb1fdbf8aad61005e",
+  "historicalV16FlywayChecksum" : 735463982,
+  "historicalV16UpgradePassed" : true,
+  "geometryColumnsVerified" : 5,
+  "gistIndexesVerified" : 5,
+  "routeLineSrid" : 4326,
+  "routeLinePointCount" : 3,
+  "limitation" : "synthetic coordinates and schema-history upgrade contract; not deployed to or validated against a production database; index existence is not a performance claim"
+}
