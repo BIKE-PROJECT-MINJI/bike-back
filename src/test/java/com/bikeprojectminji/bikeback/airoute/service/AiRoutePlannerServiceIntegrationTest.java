@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePointResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteTextPlanRequest;
+import com.bikeprojectminji.bikeback.airoute.dto.RecommendationExplanationResponse;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteCandidate;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePoint;
@@ -33,16 +35,19 @@ class AiRoutePlannerServiceIntegrationTest {
     private final AiRoutePlannerService aiRoutePlannerService;
     private final ScenarioBicycleRoutingClient routingClient;
     private final ScenarioUserRoutePreferenceProvider preferenceProvider;
+    private final ScenarioAiRouteWorkerClient workerClient;
 
     @Autowired
     AiRoutePlannerServiceIntegrationTest(
             AiRoutePlannerService aiRoutePlannerService,
             ScenarioBicycleRoutingClient routingClient,
-            ScenarioUserRoutePreferenceProvider preferenceProvider
+            ScenarioUserRoutePreferenceProvider preferenceProvider,
+            ScenarioAiRouteWorkerClient workerClient
     ) {
         this.aiRoutePlannerService = aiRoutePlannerService;
         this.routingClient = routingClient;
         this.preferenceProvider = preferenceProvider;
+        this.workerClient = workerClient;
     }
 
     @Test
@@ -98,6 +103,26 @@ class AiRoutePlannerServiceIntegrationTest {
         assertThat(routingClient.lastRequest().destinationLon()).isEqualByComparingTo("126.9882");
         assertThat(response.summary()).contains("남산");
         assertThat(response.evidenceBadges()).extracting("source").contains("canonical-route");
+    }
+
+    @Test
+    @DisplayName("AI worker는 설명만 보강하고 GraphHopper 좌표와 backend 점수 evidence를 덮을 수 없다")
+    void workerCannotOverrideBackendRouteAndEvidence() {
+        routingClient.nextResult(BicycleRoutingProviderResult.success("GRAPHHOPPER", List.of(candidate())));
+        workerClient.returnMutatedPlan();
+
+        AiRoutePlanResponse response = aiRoutePlannerService.plan(request());
+
+        assertThat(response.planId()).doesNotContain("worker-owned");
+        assertThat(response.routePoints()).extracting(AiRoutePointResponse::lat)
+                .containsExactly(BigDecimal.valueOf(37.4812), BigDecimal.valueOf(37.5404));
+        assertThat(response.recommendationScore()).isNotEqualTo(1);
+        assertThat(response.scoreBreakdown().total()).isEqualTo(response.recommendationScore());
+        assertThat(response.evidenceBadges()).isNotEmpty();
+        assertThat(response.summary()).isEqualTo("worker narrative only");
+        assertThat(response.explanation().headline()).isEqualTo("worker explanation");
+        assertThat(response.aiGenerated()).isTrue();
+        assertThat(response.aiWorkerMetadata().fallbackUsed()).isFalse();
     }
 
     private AiRoutePlanRequest request() {
@@ -159,8 +184,8 @@ class AiRoutePlannerServiceIntegrationTest {
         }
 
         @Bean
-        AiRouteWorkerClient aiRouteWorkerClient() {
-            return (request, context, fallbackPlan) -> Optional.empty();
+        ScenarioAiRouteWorkerClient aiRouteWorkerClient() {
+            return new ScenarioAiRouteWorkerClient();
         }
 
         @Bean
@@ -215,6 +240,59 @@ class AiRoutePlannerServiceIntegrationTest {
         @Override
         public Optional<String> findDefaultRideStyle(String subject) {
             return rideStyle;
+        }
+    }
+
+    static class ScenarioAiRouteWorkerClient implements AiRouteWorkerClient {
+
+        private boolean mutatedPlan;
+
+        void returnMutatedPlan() {
+            mutatedPlan = true;
+        }
+
+        @Override
+        public String provider() {
+            return "SYNTHETIC_AI_WORKER";
+        }
+
+        @Override
+        public Optional<AiRoutePlanResponse> plan(
+                AiRoutePlanRequest request,
+                AiRouteConditionContext context,
+                AiRoutePlanResponse fallbackPlan
+        ) {
+            if (!mutatedPlan) {
+                return Optional.empty();
+            }
+            mutatedPlan = false;
+            return Optional.of(new AiRoutePlanResponse(
+                    "worker-owned-plan-id",
+                    "WORKER_STATUS",
+                    "worker narrative only",
+                    "worker-confidence",
+                    null,
+                    null,
+                    List.of(new AiRoutePointResponse(BigDecimal.ZERO, BigDecimal.ZERO, "worker coordinate")),
+                    List.of(),
+                    List.of("worker action"),
+                    1,
+                    fallbackPlan.scoreBreakdown(),
+                    new RecommendationExplanationResponse(
+                            "worker explanation",
+                            "worker reason",
+                            "worker caution",
+                            "worker next action"
+                    ),
+                    List.of(),
+                    true,
+                    null,
+                    null,
+                    null,
+                    "worker preference",
+                    "WORKER_ELEVATION",
+                    "WORKER_SCENERY"
+            ));
         }
     }
 }

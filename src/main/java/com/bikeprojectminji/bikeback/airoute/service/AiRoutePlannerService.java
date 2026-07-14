@@ -59,7 +59,7 @@ public class AiRoutePlannerService {
         AiRoutePlanResponse basePlan = composeRouteCandidatePlan(resolvedRequest, context)
                 .orElseGet(() -> aiRoutePlanComposer.composeFallback(resolvedRequest, context));
         return aiRouteWorkerClient.plan(resolvedRequest, context, basePlan)
-                .map(this::withWorkerSuccessMetadata)
+                .map(workerPlan -> mergeWorkerNarrative(basePlan, workerPlan))
                 .orElseGet(() -> withWorkerFallbackMetadata(basePlan));
     }
 
@@ -138,12 +138,39 @@ public class AiRoutePlannerService {
         ));
     }
 
-    private AiRoutePlanResponse withWorkerSuccessMetadata(AiRoutePlanResponse plan) {
-        return plan.withAiWorkerMetadata(new AiRouteWorkerMetadataResponse(
-                aiRouteWorkerClient.provider(),
-                false,
-                null
-        ));
+    private AiRoutePlanResponse mergeWorkerNarrative(
+            AiRoutePlanResponse basePlan,
+            AiRoutePlanResponse workerPlan
+    ) {
+        return new AiRoutePlanResponse(
+                basePlan.planId(),
+                basePlan.status(),
+                nonBlankOrFallback(workerPlan.summary(), basePlan.summary()),
+                basePlan.confidence(),
+                basePlan.weather(),
+                basePlan.wind(),
+                basePlan.routePoints(),
+                basePlan.risks(),
+                basePlan.actions(),
+                basePlan.recommendationScore(),
+                basePlan.scoreBreakdown(),
+                workerPlan.explanation() != null ? workerPlan.explanation() : basePlan.explanation(),
+                basePlan.evidenceBadges(),
+                true,
+                basePlan.elevationSummary(),
+                basePlan.routingMetadata(),
+                new AiRouteWorkerMetadataResponse(aiRouteWorkerClient.provider(), false, null),
+                basePlan.preferenceSummary(),
+                basePlan.elevationStatus(),
+                basePlan.sceneryEvidenceStatus()
+        );
+    }
+
+    private String nonBlankOrFallback(String value, String fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        return value;
     }
 
     private AiRoutePlanResponse withWorkerFallbackMetadata(AiRoutePlanResponse plan) {
