@@ -1,6 +1,6 @@
 {
   "testId" : "ai-route-deterministic-golden-v1",
-  "commit" : "47360c877c35b2cd9bfeb438fba883346e05ca10",
+  "commit" : "0aeda0b537830305e24ecbbe3086c026f0299284",
   "fixtureNotice" : "deterministic fake provider; not live inventory or real-user route quality",
   "caseCount" : 13,
   "results" : [ {
@@ -22,9 +22,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : true,
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
-    "httpStatus" : 200,
+    "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 183855,
+    "latencyMicros" : 213855,
     "note" : "implemented text normalization"
   }, {
     "testId" : "AI-02",
@@ -45,9 +45,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : true,
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
-    "httpStatus" : 200,
+    "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 389,
+    "latencyMicros" : 281,
     "note" : "implemented structured preference"
   }, {
     "testId" : "AI-03",
@@ -68,9 +68,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : true,
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
-    "httpStatus" : 200,
+    "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 569,
+    "latencyMicros" : 433,
     "note" : "unsupported: normalized to TEXT_BALANCED"
   }, {
     "testId" : "AI-04",
@@ -91,9 +91,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : true,
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
-    "httpStatus" : 200,
+    "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 303,
+    "latencyMicros" : 340,
     "note" : "unsupported: target distance not normalized"
   }, {
     "testId" : "AI-05",
@@ -114,9 +114,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : true,
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
-    "httpStatus" : 200,
+    "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 173,
+    "latencyMicros" : 239,
     "note" : "unsupported: target distance not normalized"
   }, {
     "testId" : "AI-06",
@@ -137,9 +137,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : true,
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
-    "httpStatus" : 200,
+    "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 134,
+    "latencyMicros" : 280,
     "note" : "destination supplied"
   }, {
     "testId" : "AI-07",
@@ -160,9 +160,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : true,
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
-    "httpStatus" : 200,
+    "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 128,
+    "latencyMicros" : 227,
     "note" : "default destination calculated"
   }, {
     "testId" : "AI-08",
@@ -183,7 +183,7 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : true,
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
-    "httpStatus" : 200,
+    "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
     "latencyMicros" : 152,
     "note" : "elevation remains UNAVAILABLE"
@@ -206,9 +206,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : true,
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
-    "httpStatus" : 200,
+    "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 182,
+    "latencyMicros" : 188,
     "note" : "scenery evidence is PARTIAL, not user quality proof"
   }, {
     "testId" : "AI-10",
@@ -229,9 +229,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : true,
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
-    "httpStatus" : 200,
+    "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 151,
+    "latencyMicros" : 187,
     "note" : "backend plan returned with worker fallback metadata"
   }, {
     "testId" : "AI-11",
@@ -252,9 +252,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : false,
     "fallbackReason" : null,
-    "httpStatus" : 400,
+    "expectedHttpStatus" : 400,
     "resultStatus" : "BAD_REQUEST",
-    "latencyMicros" : 111,
+    "latencyMicros" : 145,
     "note" : "routing failure is 400; no fabricated coordinates"
   }, {
     "testId" : "AI-12",
@@ -275,9 +275,9 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : false,
     "fallbackReason" : null,
-    "httpStatus" : 400,
+    "expectedHttpStatus" : 400,
     "resultStatus" : "BAD_REQUEST",
-    "latencyMicros" : 39,
+    "latencyMicros" : 72,
     "note" : "empty candidate is 400; no fabricated coordinates"
   }, {
     "testId" : "AI-13",
@@ -298,7 +298,7 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : false,
     "fallbackReason" : null,
-    "httpStatus" : 429,
+    "expectedHttpStatus" : 429,
     "resultStatus" : "TOO_MANY_REQUESTS",
     "latencyMicros" : 0,
     "note" : "third request exceeds deterministic per-minute limit of two"

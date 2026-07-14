@@ -1,7 +1,7 @@
 {
   "testId" : "postgis-contract-v1",
-  "commit" : "47360c877c35b2cd9bfeb438fba883346e05ca10",
-  "executedAt" : "2026-07-14T02:04:39.589376075Z",
+  "commit" : "0aeda0b537830305e24ecbbe3086c026f0299284",
+  "executedAt" : "2026-07-14T02:25:20.282889966Z",
   "environment" : "postgis/postgis:16-3.4",
   "command" : "./gradlew postgisTest",
   "migrationCount" : 35,

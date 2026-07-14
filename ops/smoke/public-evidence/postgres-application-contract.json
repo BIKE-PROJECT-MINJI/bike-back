@@ -1,14 +1,18 @@
 {
   "testId" : "postgres-application-contract-v1",
-  "commit" : "47360c877c35b2cd9bfeb438fba883346e05ca10",
-  "executedAt" : "2026-07-14T02:06:08.152166643Z",
+  "commit" : "0aeda0b537830305e24ecbbe3086c026f0299284",
+  "executedAt" : "2026-07-14T02:26:55.273674580Z",
   "environment" : "postgis/postgis:16-3.4; Redis lock forced unavailable",
   "concurrentRequests" : 10,
   "rideRecordRows" : 1,
   "routePointRows" : 3,
   "finalizationJobRows" : 1,
   "gpxImportWithGeometryPassed" : true,
-  "invalidGpxRollbackPassed" : true,
+  "invalidGpxRejectedWithoutRows" : true,
+  "gpxMidWriteRollbackPassed" : true,
   "crossOwnerAccessDenied" : true,
+  "aiCandidateConcurrentPromotePassed" : true,
+  "aiCandidateRollbackPassed" : true,
+  "ridePolicyApiPostgisPassed" : true,
   "limitation" : "synthetic fixtures only; no real rider coordinates or credentials"
 }
