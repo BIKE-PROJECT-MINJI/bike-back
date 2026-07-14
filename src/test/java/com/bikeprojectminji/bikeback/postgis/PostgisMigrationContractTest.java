@@ -2,10 +2,12 @@ package com.bikeprojectminji.bikeback.postgis;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.math.BigDecimal;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.InputStream;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -15,6 +17,7 @@ import java.sql.Statement;
 import java.util.Map;
 import java.util.Set;
 import java.time.Instant;
+import java.util.HexFormat;
 import org.junit.jupiter.api.AfterAll;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -29,6 +32,8 @@ import org.testcontainers.utility.DockerImageName;
 @Tag("postgis")
 @Testcontainers
 class PostgisMigrationContractTest {
+
+    private static final String PUBLISHED_V16_SHA256 = "22e6221d1f07e89f8bd8c40a54b891e2962b6d0760dd5a6cb1fdbf8aad61005e";
 
     private static final DockerImageName POSTGIS_IMAGE = DockerImageName
             .parse("postgis/postgis:16-3.4")
@@ -45,6 +50,8 @@ class PostgisMigrationContractTest {
     private static boolean geometryContractPassed;
     private static boolean gistContractPassed;
     private static boolean routeLineContractPassed;
+    private static boolean historicalV16UpgradePassed;
+    private static Integer historicalV16FlywayChecksum;
 
     @BeforeAll
     static void migrateEmptyDatabase() {
@@ -66,9 +73,16 @@ class PostgisMigrationContractTest {
                 Instant.now().toString(),
                 "postgis/postgis:16-3.4",
                 "./gradlew postgisTest",
-                migrationContractPassed && geometryContractPassed && gistContractPassed && routeLineContractPassed ? "PASS" : "FAIL",
+                migrationContractPassed
+                        && geometryContractPassed
+                        && gistContractPassed
+                        && routeLineContractPassed
+                        && historicalV16UpgradePassed ? "PASS" : "FAIL",
                 appliedMigrationCount,
                 migrationContractPassed,
+                PUBLISHED_V16_SHA256,
+                historicalV16FlywayChecksum,
+                historicalV16UpgradePassed,
                 geometryContractPassed ? 5 : 0,
                 gistContractPassed ? 5 : 0,
                 routeLineContractPassed ? 4326 : null,
@@ -97,6 +111,50 @@ class PostgisMigrationContractTest {
             assertThat(result.getBoolean("all_succeeded")).isTrue();
             migrationContractPassed = true;
         }
+    }
+
+    @Test
+    @DisplayName("배포된 V16 원본 checksum을 유지하고 기존 V16 이력에서 V35까지 repair 없이 upgrade한다")
+    void validatesAndUpgradesPublishedV16History() throws Exception {
+        assertThat(publishedV16Sha256()).isEqualTo(PUBLISHED_V16_SHA256);
+
+        String schema = "historical_v16_upgrade";
+        Flyway historical = flywayForSchema(schema, "16");
+        assertThat(historical.migrate().migrationsExecuted).isEqualTo(16);
+
+        try (Connection connection = connection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     select checksum
+                     from historical_v16_upgrade.flyway_schema_history
+                     where version = '16' and success = true
+                     """)) {
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                historicalV16FlywayChecksum = result.getInt("checksum");
+                assertThat(result.wasNull()).isFalse();
+            }
+        }
+
+        flywayForSchema(schema, null, true).validate();
+        Flyway current = flywayForSchema(schema, null);
+        assertThat(current.migrate().migrationsExecuted).isEqualTo(19);
+        current.validate();
+
+        try (Connection connection = connection();
+             Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("""
+                     select count(*) as migration_count,
+                            max(version::integer) as latest_version,
+                            bool_and(success) as all_succeeded
+                     from historical_v16_upgrade.flyway_schema_history
+                     where type = 'SQL'
+                     """)) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getInt("migration_count")).isEqualTo(35);
+            assertThat(result.getInt("latest_version")).isEqualTo(35);
+            assertThat(result.getBoolean("all_succeeded")).isTrue();
+        }
+        historicalV16UpgradePassed = true;
     }
 
     @Test
@@ -203,6 +261,34 @@ class PostgisMigrationContractTest {
         return DriverManager.getConnection(POSTGIS.getJdbcUrl(), POSTGIS.getUsername(), POSTGIS.getPassword());
     }
 
+    private static Flyway flywayForSchema(String schema, String targetVersion) {
+        return flywayForSchema(schema, targetVersion, false);
+    }
+
+    private static Flyway flywayForSchema(String schema, String targetVersion, boolean ignorePending) {
+        org.flywaydb.core.api.configuration.FluentConfiguration configuration = Flyway.configure()
+                .dataSource(POSTGIS.getJdbcUrl(), POSTGIS.getUsername(), POSTGIS.getPassword())
+                .locations("classpath:db/migration")
+                .schemas(schema)
+                .defaultSchema(schema);
+        if (targetVersion != null) {
+            configuration.target(targetVersion);
+        }
+        if (ignorePending) {
+            configuration.ignoreMigrationPatterns("*:pending");
+        }
+        return configuration.load();
+    }
+
+    private static String publishedV16Sha256() throws Exception {
+        try (InputStream input = PostgisMigrationContractTest.class.getResourceAsStream(
+                "/db/migration/V16__release_defect_fix_constraints.sql"
+        )) {
+            assertThat(input).isNotNull();
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(input.readAllBytes()));
+        }
+    }
+
     private static String querySingleString(Connection connection, String sql) throws SQLException {
         try (Statement statement = connection.createStatement();
              ResultSet result = statement.executeQuery(sql)) {
@@ -271,6 +357,9 @@ class PostgisMigrationContractTest {
             String result,
             int migrationCount,
             boolean migrationPassed,
+            String publishedV16Sha256,
+            Integer historicalV16FlywayChecksum,
+            boolean historicalV16UpgradePassed,
             int geometryColumnsVerified,
             int gistIndexesVerified,
             Integer routeLineSrid,

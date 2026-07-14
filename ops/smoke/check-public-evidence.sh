@@ -57,6 +57,10 @@ postgis = documents["postgis-contract.json"]
 if postgis.get("migrationPassed") is not True or postgis.get("geometryColumnsVerified", 0) < 1 \
         or postgis.get("gistIndexesVerified", 0) < 1 or postgis.get("routeLinePointCount", 0) < 2:
     raise SystemExit("evidence integrity failed: PostGIS contract PASS fields missing")
+if postgis.get("publishedV16Sha256") != "22e6221d1f07e89f8bd8c40a54b891e2962b6d0760dd5a6cb1fdbf8aad61005e" \
+        or postgis.get("historicalV16UpgradePassed") is not True \
+        or not isinstance(postgis.get("historicalV16FlywayChecksum"), int):
+    raise SystemExit("evidence integrity failed: published V16 upgrade contract missing")
 
 application = documents["postgres-application-contract.json"]
 required_true = (
