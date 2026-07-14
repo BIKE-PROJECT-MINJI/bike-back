@@ -1,7 +1,7 @@
 {
   "testId" : "route-policy-synthetic-replay-v1",
-  "commit" : "a01e8fd939b687f5a2029c8504f26266cb2235b1",
-  "executedAt" : "2026-07-14T04:05:44.405404735Z",
+  "commit" : "8e6408c81b358b564b0a070ca195d4b447314682",
+  "executedAt" : "2026-07-14T04:19:19.351424900Z",
   "environment" : "JVM unit test; fixed clock; synthetic route and trace",
   "command" : "./gradlew test --tests '*RidePolicyTraceReplayTest'",
   "result" : "PASS",
@@ -17,7 +17,7 @@
     "completionStatus" : "IN_PROGRESS",
     "completionReasonCode" : "COVERAGE_BELOW_THRESHOLD",
     "coveragePercent" : 0,
-    "latencyMicros" : 83135
+    "latencyMicros" : 91583
   }, {
     "testId" : "RP-02",
     "overallState" : "ACTIVE_OFF_ROUTE_CANDIDATE",
@@ -28,7 +28,7 @@
     "completionStatus" : "IN_PROGRESS",
     "completionReasonCode" : "COVERAGE_BELOW_THRESHOLD",
     "coveragePercent" : 0,
-    "latencyMicros" : 1731
+    "latencyMicros" : 2406
   }, {
     "testId" : "RP-03",
     "overallState" : "ACTIVE_WARNING",
@@ -39,7 +39,7 @@
     "completionStatus" : "IN_PROGRESS",
     "completionReasonCode" : "COVERAGE_BELOW_THRESHOLD",
     "coveragePercent" : 0,
-    "latencyMicros" : 1127
+    "latencyMicros" : 1632
   }, {
     "testId" : "RP-04",
     "overallState" : "ACTIVE_ON_ROUTE",
@@ -50,7 +50,7 @@
     "completionStatus" : "IN_PROGRESS",
     "completionReasonCode" : "COVERAGE_BELOW_THRESHOLD",
     "coveragePercent" : 0,
-    "latencyMicros" : 1712
+    "latencyMicros" : 2329
   }, {
     "testId" : "RP-05",
     "overallState" : "ACTIVE_UNDETERMINED",
@@ -61,7 +61,7 @@
     "completionStatus" : "UNDETERMINED",
     "completionReasonCode" : "LOCATION_LOW_ACCURACY",
     "coveragePercent" : null,
-    "latencyMicros" : 3265
+    "latencyMicros" : 2525
   }, {
     "testId" : "RP-06",
     "overallState" : "ACTIVE_UNDETERMINED",
@@ -72,7 +72,7 @@
     "completionStatus" : "UNDETERMINED",
     "completionReasonCode" : "LOCATION_STALE",
     "coveragePercent" : null,
-    "latencyMicros" : 1017
+    "latencyMicros" : 811
   }, {
     "testId" : "RP-07",
     "overallState" : "ACTIVE_ON_ROUTE",
@@ -83,7 +83,7 @@
     "completionStatus" : "IN_PROGRESS",
     "completionReasonCode" : "COVERAGE_BELOW_THRESHOLD",
     "coveragePercent" : 79,
-    "latencyMicros" : 15613
+    "latencyMicros" : 15946
   }, {
     "testId" : "RP-08",
     "overallState" : "ACTIVE_COMPLETION_READY",
@@ -94,7 +94,7 @@
     "completionStatus" : "ELIGIBLE",
     "completionReasonCode" : "NON_LOOP_COMPLETION_READY",
     "coveragePercent" : 86,
-    "latencyMicros" : 1740
+    "latencyMicros" : 1608
   }, {
     "testId" : "RP-09",
     "overallState" : "ACTIVE_COMPLETION_READY",
@@ -105,6 +105,6 @@
     "completionStatus" : "ELIGIBLE",
     "completionReasonCode" : "LOOP_COMPLETION_READY",
     "coveragePercent" : 100,
-    "latencyMicros" : 702
+    "latencyMicros" : 637
   } ]
 }
