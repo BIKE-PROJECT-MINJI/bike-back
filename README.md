@@ -125,7 +125,7 @@ Swagger UI는 서버 실행 후 `http://127.0.0.1:8080/swagger-ui.html`에서 �
 - synthetic fixture에서 공간 컬럼·인덱스·경로 geometry 계약
 - 실제 PostgreSQL 경합에서 주행 저장 중복 수렴
 - synthetic trace 경계의 상태 전이 일관성
-- deterministic fake provider에서 AI 책임 경계와 fallback metadata
+- deterministic fake GraphHopper와 disabled AI worker 조건에서 AI 책임 경계와 fallback metadata
 
 아직 증명하지 않은 범위:
 
