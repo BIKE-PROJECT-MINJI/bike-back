@@ -6,6 +6,8 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteTextPlanRequest;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.exception.RouteNotFoundException;
+import com.bikeprojectminji.bikeback.global.exception.RoutingProviderUnavailableException;
 import com.bikeprojectminji.bikeback.global.exception.TooManyRequestsException;
 import com.bikeprojectminji.bikeback.global.ratelimit.InMemoryFixedWindowRateLimiter;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteCandidate;
@@ -73,9 +75,9 @@ class AiRouteGoldenSetTest {
                 new BigDecimal("37.5100000"), new BigDecimal("127.0100000"),
                 "BALANCED", null, null), "backend plan returned with worker fallback metadata"));
         results.add(planFailure("AI-11", "GraphHopper down", BicycleRoutingProviderResult.providerFailure("GRAPHHOPPER"),
-                "routing failure is 400; no fabricated coordinates"));
+                "provider failure is retryable 503; no fabricated coordinates"));
         results.add(planFailure("AI-12", "no candidate", BicycleRoutingProviderResult.success("GRAPHHOPPER", List.of()),
-                "empty candidate is 400; no fabricated coordinates"));
+                "empty candidate is non-retryable 422; no fabricated coordinates"));
         results.add(quotaFailure());
 
         assertThat(results).hasSize(13);
@@ -89,9 +91,10 @@ class AiRouteGoldenSetTest {
         assertThat(result(results, "AI-08").elevationStatus()).isEqualTo("UNAVAILABLE");
         assertThat(result(results, "AI-09").sceneryEvidenceStatus()).isEqualTo("PARTIAL");
         assertThat(result(results, "AI-10").aiWorkerFallbackUsed()).isTrue();
-        assertThat(result(results, "AI-11").resultStatus()).isEqualTo("BAD_REQUEST");
-        assertThat(result(results, "AI-11").expectedHttpStatus()).isEqualTo(400);
-        assertThat(result(results, "AI-12").resultStatus()).isEqualTo("BAD_REQUEST");
+        assertThat(result(results, "AI-11").resultStatus()).isEqualTo("SERVICE_UNAVAILABLE");
+        assertThat(result(results, "AI-11").expectedHttpStatus()).isEqualTo(503);
+        assertThat(result(results, "AI-12").resultStatus()).isEqualTo("UNPROCESSABLE_ENTITY");
+        assertThat(result(results, "AI-12").expectedHttpStatus()).isEqualTo(422);
         assertThat(result(results, "AI-12").routePointCount()).isZero();
         assertThat(result(results, "AI-13").resultStatus()).isEqualTo("TOO_MANY_REQUESTS");
         assertThat(result(results, "AI-13").expectedHttpStatus()).isEqualTo(429);
@@ -183,19 +186,27 @@ class AiRouteGoldenSetTest {
         routingClient.next(providerResult);
         long startedNanos = System.nanoTime();
         String resultStatus = "UNEXPECTED_SUCCESS";
+        int expectedHttpStatus = 200;
         try {
             plannerService.plan("synthetic-user", request(
                     new BigDecimal("37.5100000"), new BigDecimal("127.0100000"),
                     "BALANCED", null, null));
+        } catch (RoutingProviderUnavailableException expected) {
+            resultStatus = "SERVICE_UNAVAILABLE";
+            expectedHttpStatus = 503;
+        } catch (RouteNotFoundException expected) {
+            resultStatus = "UNPROCESSABLE_ENTITY";
+            expectedHttpStatus = 422;
         } catch (BadRequestException expected) {
             resultStatus = "BAD_REQUEST";
+            expectedHttpStatus = 400;
         }
         BicycleRoutePreference preference = routingClient.lastRequest().routePreference();
         return new GoldenResult(
                 testId, rawInput, preference.routePriority(), preference.elevationPreference(), preference.textIntent(),
                 List.of(), preference.graphHopperCustomModelJson(), routingClient.callsForLastScenario(),
                 null, 0, null, null, List.of(), null, null, false, false, null,
-                400, resultStatus, elapsedMicros(startedNanos), note
+                expectedHttpStatus, resultStatus, elapsedMicros(startedNanos), note
         );
     }
 

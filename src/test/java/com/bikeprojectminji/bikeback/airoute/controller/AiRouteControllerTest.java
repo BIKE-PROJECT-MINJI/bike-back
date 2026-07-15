@@ -7,6 +7,8 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
@@ -14,6 +16,10 @@ import com.bikeprojectminji.bikeback.airoute.service.AiRoutePlannerService;
 import com.bikeprojectminji.bikeback.airoute.service.AiRouteQuotaService;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.exception.InvalidRouteRequestException;
+import com.bikeprojectminji.bikeback.global.exception.RetryableTooManyRequestsException;
+import com.bikeprojectminji.bikeback.global.exception.RouteNotFoundException;
+import com.bikeprojectminji.bikeback.global.exception.RoutingProviderUnavailableException;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -164,6 +170,67 @@ class AiRouteControllerTest {
 
         verify(aiRouteQuotaService).checkAuthenticatedAllowed("1");
         verify(aiRoutePlannerService).planFromText(eq("1"), any());
+    }
+
+    @Test
+    @DisplayName("AI 경로 REST는 입력 오류를 400 INVALID_ROUTE_REQUEST로 구분한다")
+    void planMapsInvalidRequestContract() throws Exception {
+        given(aiRoutePlannerService.plan(eq("1"), any()))
+                .willThrow(new InvalidRouteRequestException("현재 위치 lat가 유효하지 않습니다."));
+
+        mockMvc.perform(post("/api/v1/ai-routes/plan")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestJson()))
+                .andExpect(status().isBadRequest())
+                .andExpect(header().doesNotExist("Retry-After"))
+                .andExpect(jsonPath("$.data.errorCode").value("INVALID_ROUTE_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("AI 경로 REST는 후보 없음을 422 ROUTE_NOT_FOUND로 구분한다")
+    void planMapsRouteNotFoundContract() throws Exception {
+        given(aiRoutePlannerService.plan(eq("1"), any()))
+                .willThrow(new RouteNotFoundException("조건을 충족하는 경로가 없습니다."));
+
+        mockMvc.perform(post("/api/v1/ai-routes/plan")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestJson()))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(header().doesNotExist("Retry-After"))
+                .andExpect(jsonPath("$.data.errorCode").value("ROUTE_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("AI 경로 REST는 provider quota를 retryable 429로 구분한다")
+    void planMapsRoutingQuotaContract() throws Exception {
+        given(aiRoutePlannerService.plan(eq("1"), any()))
+                .willThrow(new RetryableTooManyRequestsException(
+                        "라우팅 요청 한도에 도달했습니다.", "ROUTING_QUOTA_EXCEEDED", 9));
+
+        mockMvc.perform(post("/api/v1/ai-routes/plan")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestJson()))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "9"))
+                .andExpect(jsonPath("$.data.errorCode").value("ROUTING_QUOTA_EXCEEDED"));
+    }
+
+    @Test
+    @DisplayName("AI 경로 REST는 모든 provider 장애를 retryable 503으로 구분한다")
+    void planMapsRoutingProviderUnavailableContract() throws Exception {
+        given(aiRoutePlannerService.plan(eq("1"), any()))
+                .willThrow(new RoutingProviderUnavailableException("라우팅 provider가 일시적으로 불안정합니다.", 3));
+
+        mockMvc.perform(post("/api/v1/ai-routes/plan")
+                        .with(jwt().jwt(jwt -> jwt.subject("1")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestJson()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Retry-After", "3"))
+                .andExpect(jsonPath("$.data.errorCode").value("ROUTING_PROVIDER_UNAVAILABLE"));
     }
 
     private String validRequestJson() {

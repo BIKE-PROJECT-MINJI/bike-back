@@ -4,7 +4,7 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteTextPlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteWorkerMetadataResponse;
-import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.exception.InvalidRouteRequestException;
 import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePlan;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteRequest;
@@ -127,9 +127,6 @@ public class AiRoutePlannerService {
                 request.elevationPreference(),
                 request.textIntent()
         ));
-        if (routePlan.candidates().isEmpty()) {
-            throw new BadRequestException("GraphHopper 자전거 경로를 생성할 수 없습니다. self-host 또는 hosted GraphHopper 설정을 확인하세요.");
-        }
         return Optional.of(aiRoutePlanComposer.composeWithRouteCandidate(
                 request,
                 context,
@@ -183,7 +180,7 @@ public class AiRoutePlannerService {
 
     private void validate(AiRoutePlanRequest request) {
         if (request == null) {
-            throw new BadRequestException("AI 경로 요청이 필요합니다.");
+            throw new InvalidRouteRequestException("AI 경로 요청이 필요합니다.");
         }
         validateCoordinate(request.lat(), request.lon(), "현재 위치");
         if (request.destinationLat() != null || request.destinationLon() != null) {
@@ -193,23 +190,23 @@ public class AiRoutePlannerService {
 
     private void validateTextRequest(AiRouteTextPlanRequest request) {
         if (request == null) {
-            throw new BadRequestException("텍스트 기반 AI 경로 요청이 필요합니다.");
+            throw new InvalidRouteRequestException("텍스트 기반 AI 경로 요청이 필요합니다.");
         }
         validateCoordinate(request.lat(), request.lon(), "현재 위치");
         if (request.text() == null || request.text().isBlank()) {
-            throw new BadRequestException("코스 생성 텍스트는 비어 있을 수 없습니다.");
+            throw new InvalidRouteRequestException("코스 생성 텍스트는 비어 있을 수 없습니다.");
         }
     }
 
     private void validateCoordinate(BigDecimal lat, BigDecimal lon, String label) {
         if (lat == null || lon == null) {
-            throw new BadRequestException(label + " lat/lon이 필요합니다.");
+            throw new InvalidRouteRequestException(label + " lat/lon이 필요합니다.");
         }
         if (lat.compareTo(BigDecimal.valueOf(-90)) < 0 || lat.compareTo(BigDecimal.valueOf(90)) > 0) {
-            throw new BadRequestException(label + " lat는 -90 이상 90 이하여야 합니다.");
+            throw new InvalidRouteRequestException(label + " lat는 -90 이상 90 이하여야 합니다.");
         }
         if (lon.compareTo(BigDecimal.valueOf(-180)) < 0 || lon.compareTo(BigDecimal.valueOf(180)) > 0) {
-            throw new BadRequestException(label + " lon은 -180 이상 180 이하여야 합니다.");
+            throw new InvalidRouteRequestException(label + " lon은 -180 이상 180 이하여야 합니다.");
         }
     }
 }

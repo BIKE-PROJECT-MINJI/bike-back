@@ -116,8 +116,8 @@ if any(result.get("resultStatus") == "UNEXPECTED_SUCCESS" for result in results)
     raise SystemExit("evidence integrity failed: AI golden set contains UNEXPECTED_SUCCESS")
 golden_expected = {
     **{f"AI-{index:02d}": ("READY", 200, 1) for index in range(1, 11)},
-    "AI-11": ("BAD_REQUEST", 400, 1),
-    "AI-12": ("BAD_REQUEST", 400, 1),
+    "AI-11": ("SERVICE_UNAVAILABLE", 503, 1),
+    "AI-12": ("UNPROCESSABLE_ENTITY", 422, 1),
     "AI-13": ("TOO_MANY_REQUESTS", 429, 0),
 }
 golden_actual = {

@@ -26,6 +26,26 @@ public class GlobalExceptionHandler {
                 .body(new ApiResponse<>(400, exception.getMessage(), null));
     }
 
+    @ExceptionHandler(InvalidRouteRequestException.class)
+    public ResponseEntity<ApiResponse<ErrorCodeResponse>> handleInvalidRouteRequest(
+            InvalidRouteRequestException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("invalid_route_request request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new ApiResponse<>(400, exception.getMessage(), new ErrorCodeResponse(InvalidRouteRequestException.ERROR_CODE)));
+    }
+
+    @ExceptionHandler(RouteNotFoundException.class)
+    public ResponseEntity<ApiResponse<ErrorCodeResponse>> handleRouteNotFound(
+            RouteNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("route_not_found request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ApiResponse<>(422, exception.getMessage(), new ErrorCodeResponse(RouteNotFoundException.ERROR_CODE)));
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> handleUnreadableMessage(HttpMessageNotReadableException exception, HttpServletRequest request) {
         log.warn("unreadable_message request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
@@ -66,6 +86,29 @@ public class GlobalExceptionHandler {
         log.warn("too_many_requests request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(new ApiResponse<>(429, exception.getMessage(), null));
+    }
+
+    @ExceptionHandler(RetryableTooManyRequestsException.class)
+    public ResponseEntity<ApiResponse<RetryableErrorResponse>> handleRetryableTooManyRequests(
+            RetryableTooManyRequestsException exception,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "retryable_too_many_requests request_id={} method={} path={} error_code={} retry_after_seconds={} message={}",
+                RequestLogContext.currentRequestId(),
+                request.getMethod(),
+                request.getRequestURI(),
+                exception.getErrorCode(),
+                exception.getRetryAfterSeconds(),
+                exception.getMessage()
+        );
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(exception.getRetryAfterSeconds()))
+                .body(new ApiResponse<>(
+                        429,
+                        exception.getMessage(),
+                        new RetryableErrorResponse(exception.getErrorCode(), exception.getRetryAfterSeconds())
+                ));
     }
 
     @ExceptionHandler(ServiceUnavailableException.class)

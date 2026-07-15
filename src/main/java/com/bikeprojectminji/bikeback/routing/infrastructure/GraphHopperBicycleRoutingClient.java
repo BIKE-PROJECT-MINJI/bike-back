@@ -4,10 +4,12 @@ import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteCandidate;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteRequest;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutingClient;
+import com.bikeprojectminji.bikeback.routing.service.BicycleRoutingFailureCause;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutingProviderResult;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.LinkedHashSet;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,23 +75,41 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
             return providerFailure("missing_base_url");
         }
         BicycleRoutingProviderResult lastResult = BicycleRoutingProviderResult.providerFailure(PROVIDER);
+        EnumSet<BicycleRoutingFailureCause> failureCauses = EnumSet.noneOf(BicycleRoutingFailureCause.class);
+        int providerRetryAfterSeconds = 0;
+        int quotaRetryAfterSeconds = 0;
         for (int baseUrlIndex = 0; baseUrlIndex < baseUrls.size(); baseUrlIndex++) {
             String baseUrl = baseUrls.get(baseUrlIndex);
-            for (int attempt = 0; attempt < retryMaxAttempts; attempt++) {
+            int attemptsForEndpoint = baseUrls.size() > 1 ? 1 : retryMaxAttempts;
+            for (int attempt = 0; attempt < attemptsForEndpoint; attempt++) {
                 lastResult = routeOnce(baseUrl, request);
                 if ("SUCCESS".equals(lastResult.status())) {
                     if (baseUrlIndex > 0) {
                         return BicycleRoutingProviderResult.successWithFallback(
                                 PROVIDER,
                                 lastResult.candidates(),
-                                "self-host 실패 후 hosted GraphHopper 사용"
+                                fallbackReason(failureCauses)
                         );
                     }
                     return lastResult;
                 }
+                if (lastResult.failureCause() != null) {
+                    failureCauses.add(lastResult.failureCause());
+                }
+                if (lastResult.retryAfterSeconds() != null) {
+                    if (lastResult.failureCause() == BicycleRoutingFailureCause.PROVIDER_UNAVAILABLE) {
+                        providerRetryAfterSeconds = Math.max(providerRetryAfterSeconds, lastResult.retryAfterSeconds());
+                    }
+                    if (lastResult.failureCause() == BicycleRoutingFailureCause.QUOTA_EXCEEDED) {
+                        quotaRetryAfterSeconds = Math.max(quotaRetryAfterSeconds, lastResult.retryAfterSeconds());
+                    }
+                }
+                if (!lastResult.sameEndpointRetryable()) {
+                    break;
+                }
             }
         }
-        return lastResult;
+        return aggregateFailure(failureCauses, providerRetryAfterSeconds, quotaRetryAfterSeconds, lastResult);
     }
 
     private BicycleRoutingProviderResult routeOnce(String baseUrl, BicycleRouteRequest request) {
@@ -124,7 +144,7 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
                     .body(GraphHopperRouteResponse.class);
             if (response == null || response.paths() == null || response.paths().isEmpty()) {
                 outcome = "empty_response";
-                return providerFailure("empty_response");
+                return noRoute("empty_response");
             }
             List<BicycleRouteCandidate> candidates = response.paths().stream()
                     .limit(3)
@@ -138,10 +158,13 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
             return BicycleRoutingProviderResult.success(PROVIDER, candidates);
         } catch (HttpStatusCodeException exception) {
             outcome = reasonForStatus(exception.getStatusCode().value());
-            return providerFailure(outcome);
-        } catch (RestClientException | IllegalArgumentException exception) {
-            outcome = exception instanceof IllegalArgumentException ? "illegal_argument" : "rest_client_exception";
-            return providerFailure(outcome);
+            return failureForHttpStatus(exception, outcome);
+        } catch (RestClientException exception) {
+            outcome = "rest_client_exception";
+            return retryableProviderFailure(outcome, 3);
+        } catch (IllegalArgumentException exception) {
+            outcome = "illegal_argument";
+            return providerContractFailure(outcome);
         } finally {
             if (bikeMetricsRecorder != null) {
                 bikeMetricsRecorder.recordProviderCall(
@@ -169,10 +192,46 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
     }
 
     private BicycleRoutingProviderResult providerFailure(String reason) {
+        recordFailure(reason);
+        return BicycleRoutingProviderResult.providerFailure(PROVIDER);
+    }
+
+    private BicycleRoutingProviderResult retryableProviderFailure(String reason, int retryAfterSeconds) {
+        recordFailure(reason);
+        return BicycleRoutingProviderResult.providerFailure(PROVIDER, retryAfterSeconds);
+    }
+
+    private BicycleRoutingProviderResult noRoute(String reason) {
+        return BicycleRoutingProviderResult.noRoute(PROVIDER);
+    }
+
+    private BicycleRoutingProviderResult quotaExceeded(String reason, int retryAfterSeconds) {
+        recordFailure(reason);
+        return BicycleRoutingProviderResult.quotaExceeded(PROVIDER, retryAfterSeconds);
+    }
+
+    private BicycleRoutingProviderResult failureForHttpStatus(HttpStatusCodeException exception, String reason) {
+        int statusCode = exception.getStatusCode().value();
+        if (statusCode == 429) {
+            return quotaExceeded(reason, ProviderRetryAfterParser.secondsOrDefault(exception.getResponseHeaders(), 60));
+        }
+        if (statusCode == 502 || statusCode == 503 || statusCode == 504) {
+            return retryableProviderFailure(
+                    reason,
+                    ProviderRetryAfterParser.secondsOrDefault(exception.getResponseHeaders(), 3)
+            );
+        }
+        return providerContractFailure(reason);
+    }
+
+    private BicycleRoutingProviderResult providerContractFailure(String reason) {
+        return providerFailure("provider_contract_" + reason);
+    }
+
+    private void recordFailure(String reason) {
         if (bikeMetricsRecorder != null) {
             bikeMetricsRecorder.recordRoutingProviderFailure(PROVIDER, reason);
         }
-        return BicycleRoutingProviderResult.providerFailure(PROVIDER);
     }
 
     private String reasonForStatus(int statusCode) {
@@ -183,6 +242,42 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
             return "http_5xx";
         }
         return "http_4xx";
+    }
+
+    private BicycleRoutingProviderResult aggregateFailure(
+            EnumSet<BicycleRoutingFailureCause> causes,
+            int providerRetryAfterSeconds,
+            int quotaRetryAfterSeconds,
+            BicycleRoutingProviderResult lastResult
+    ) {
+        if (causes.contains(BicycleRoutingFailureCause.NO_ROUTE)) {
+            return BicycleRoutingProviderResult.noRoute(PROVIDER);
+        }
+        if (causes.contains(BicycleRoutingFailureCause.PROVIDER_UNAVAILABLE)) {
+            return providerRetryAfterSeconds > 0
+                    ? BicycleRoutingProviderResult.providerFailure(PROVIDER, providerRetryAfterSeconds)
+                    : BicycleRoutingProviderResult.providerFailure(PROVIDER);
+        }
+        if (causes.contains(BicycleRoutingFailureCause.QUOTA_EXCEEDED)) {
+            return BicycleRoutingProviderResult.quotaExceeded(
+                    PROVIDER,
+                    quotaRetryAfterSeconds > 0 ? quotaRetryAfterSeconds : 60
+            );
+        }
+        return lastResult;
+    }
+
+    private String fallbackReason(EnumSet<BicycleRoutingFailureCause> causes) {
+        if (causes.contains(BicycleRoutingFailureCause.NO_ROUTE)) {
+            return "self-host 경로 없음 후 hosted GraphHopper 사용";
+        }
+        if (causes.contains(BicycleRoutingFailureCause.PROVIDER_UNAVAILABLE)) {
+            return "self-host provider 장애 후 hosted GraphHopper 사용";
+        }
+        if (causes.contains(BicycleRoutingFailureCause.QUOTA_EXCEEDED)) {
+            return "self-host quota 제한 후 hosted GraphHopper 사용";
+        }
+        return "self-host 경로 품질 기준 탈락 후 hosted GraphHopper 사용";
     }
 
     private String coordinate(BigDecimal lat, BigDecimal lon) {

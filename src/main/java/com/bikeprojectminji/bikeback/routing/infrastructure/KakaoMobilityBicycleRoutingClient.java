@@ -72,7 +72,7 @@ public class KakaoMobilityBicycleRoutingClient implements BicycleRoutingClient {
                     .body(KakaoBicycleDirectionsResponse.class);
             if (response == null || response.routes() == null || response.routes().isEmpty()) {
                 outcome = "empty_response";
-                return providerFailure("empty_response");
+                return noRoute("empty_response");
             }
             return BicycleRoutingProviderResult.success(PROVIDER, response.routes().stream()
                     .limit(3)
@@ -80,7 +80,7 @@ public class KakaoMobilityBicycleRoutingClient implements BicycleRoutingClient {
                     .toList());
         } catch (HttpStatusCodeException exception) {
             outcome = reasonForStatus(exception.getStatusCode());
-            return providerFailure(outcome);
+            return failureForHttpStatus(exception, outcome);
         } catch (RestClientException exception) {
             outcome = "rest_client_exception";
             return providerFailure("rest_client_exception");
@@ -97,10 +97,46 @@ public class KakaoMobilityBicycleRoutingClient implements BicycleRoutingClient {
     }
 
     private BicycleRoutingProviderResult providerFailure(String reason) {
+        recordFailure(reason);
+        return BicycleRoutingProviderResult.providerFailure(PROVIDER);
+    }
+
+    private BicycleRoutingProviderResult retryableProviderFailure(String reason, int retryAfterSeconds) {
+        recordFailure(reason);
+        return BicycleRoutingProviderResult.providerFailure(PROVIDER, retryAfterSeconds);
+    }
+
+    private BicycleRoutingProviderResult noRoute(String reason) {
+        return BicycleRoutingProviderResult.noRoute(PROVIDER);
+    }
+
+    private BicycleRoutingProviderResult quotaExceeded(String reason, int retryAfterSeconds) {
+        recordFailure(reason);
+        return BicycleRoutingProviderResult.quotaExceeded(PROVIDER, retryAfterSeconds);
+    }
+
+    private BicycleRoutingProviderResult failureForHttpStatus(HttpStatusCodeException exception, String reason) {
+        int statusCode = exception.getStatusCode().value();
+        if (statusCode == 429) {
+            return quotaExceeded(reason, ProviderRetryAfterParser.secondsOrDefault(exception.getResponseHeaders(), 60));
+        }
+        if (statusCode == 502 || statusCode == 503 || statusCode == 504) {
+            return retryableProviderFailure(
+                    reason,
+                    ProviderRetryAfterParser.secondsOrDefault(exception.getResponseHeaders(), 3)
+            );
+        }
+        return providerContractFailure(reason);
+    }
+
+    private BicycleRoutingProviderResult providerContractFailure(String reason) {
+        return providerFailure("provider_contract_" + reason);
+    }
+
+    private void recordFailure(String reason) {
         if (bikeMetricsRecorder != null) {
             bikeMetricsRecorder.recordRoutingProviderFailure(PROVIDER, reason);
         }
-        return BicycleRoutingProviderResult.providerFailure(PROVIDER);
     }
 
     private String coordinate(BigDecimal lon, BigDecimal lat) {
