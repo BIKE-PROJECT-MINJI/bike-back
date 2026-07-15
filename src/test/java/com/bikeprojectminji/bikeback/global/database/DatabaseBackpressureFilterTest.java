@@ -2,6 +2,9 @@ package com.bikeprojectminji.bikeback.global.database;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -9,12 +12,30 @@ import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 class DatabaseBackpressureFilterTest {
+
+    private final Logger logger = (Logger) LoggerFactory.getLogger(DatabaseBackpressureFilter.class);
+    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
+
+    @BeforeEach
+    void attachLogAppender() {
+        appender.start();
+        logger.addAppender(appender);
+    }
+
+    @AfterEach
+    void detachLogAppender() {
+        logger.detachAppender(appender);
+        appender.stop();
+    }
 
     @Test
     @DisplayName("DB pool이 꽉 찬 API 요청은 chain 실행 없이 503으로 빠르게 거절한다")
@@ -27,7 +48,11 @@ class DatabaseBackpressureFilterTest {
                 new ObjectMapper()
         );
         AtomicBoolean chainCalled = new AtomicBoolean(false);
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/courses");
+        String rawClientRideId = "android-ride-private-001";
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/api/v1/ride-records/by-client-ride-id/" + rawClientRideId
+        );
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         filter.doFilter(request, response, (servletRequest, servletResponse) -> chainCalled.set(true));
@@ -39,6 +64,10 @@ class DatabaseBackpressureFilterTest {
                 .tag("reason", "pool_exhausted")
                 .counter()
                 .count()).isEqualTo(1.0);
+        assertThat(appender.list).hasSize(1);
+        assertThat(appender.list.get(0).getFormattedMessage())
+                .contains("path=/api/v1/ride-records/by-client-ride-id/{clientRideId}")
+                .doesNotContain(rawClientRideId);
     }
 
     @Test

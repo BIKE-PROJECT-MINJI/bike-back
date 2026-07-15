@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.global.exception;
 
 import com.bikeprojectminji.bikeback.global.logging.RequestLogContext;
+import com.bikeprojectminji.bikeback.global.logging.RequestPathSanitizer;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -21,7 +22,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<ApiResponse<Void>> handleBadRequest(BadRequestException exception, HttpServletRequest request) {
-        log.warn("bad_request request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        log.warn("bad_request request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(new ApiResponse<>(400, exception.getMessage(), null));
     }
@@ -31,7 +32,7 @@ public class GlobalExceptionHandler {
             InvalidRouteRequestException exception,
             HttpServletRequest request
     ) {
-        log.warn("invalid_route_request request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        log.warn("invalid_route_request request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(new ApiResponse<>(400, exception.getMessage(), new ErrorCodeResponse(InvalidRouteRequestException.ERROR_CODE)));
     }
@@ -41,49 +42,49 @@ public class GlobalExceptionHandler {
             RouteNotFoundException exception,
             HttpServletRequest request
     ) {
-        log.warn("route_not_found request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        log.warn("route_not_found request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception.getMessage());
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
                 .body(new ApiResponse<>(422, exception.getMessage(), new ErrorCodeResponse(RouteNotFoundException.ERROR_CODE)));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> handleUnreadableMessage(HttpMessageNotReadableException exception, HttpServletRequest request) {
-        log.warn("unreadable_message request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        log.warn("unreadable_message request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(new ApiResponse<>(400, "요청 본문이 필요합니다.", null));
     }
 
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleNotFound(NotFoundException exception, HttpServletRequest request) {
-        log.warn("not_found request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        log.warn("not_found request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(new ApiResponse<>(404, exception.getMessage(), null));
     }
 
     @ExceptionHandler(UnauthorizedException.class)
     public ResponseEntity<ApiResponse<Void>> handleUnauthorized(UnauthorizedException exception, HttpServletRequest request) {
-        log.warn("unauthorized request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        log.warn("unauthorized request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception.getMessage());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(new ApiResponse<>(401, exception.getMessage(), null));
     }
 
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<ApiResponse<Void>> handleForbidden(ForbiddenException exception, HttpServletRequest request) {
-        log.warn("forbidden request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        log.warn("forbidden request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception.getMessage());
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(new ApiResponse<>(403, exception.getMessage(), null));
     }
 
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiResponse<Void>> handleConflict(ConflictException exception, HttpServletRequest request) {
-        log.warn("conflict request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        log.warn("conflict request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception.getMessage());
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ApiResponse<>(409, exception.getMessage(), null));
     }
 
     @ExceptionHandler(TooManyRequestsException.class)
     public ResponseEntity<ApiResponse<Void>> handleTooManyRequests(TooManyRequestsException exception, HttpServletRequest request) {
-        log.warn("too_many_requests request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        log.warn("too_many_requests request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception.getMessage());
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(new ApiResponse<>(429, exception.getMessage(), null));
     }
@@ -97,7 +98,7 @@ public class GlobalExceptionHandler {
                 "retryable_too_many_requests request_id={} method={} path={} error_code={} retry_after_seconds={} message={}",
                 RequestLogContext.currentRequestId(),
                 request.getMethod(),
-                request.getRequestURI(),
+                requestPath(request),
                 exception.getErrorCode(),
                 exception.getRetryAfterSeconds(),
                 exception.getMessage()
@@ -113,7 +114,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ServiceUnavailableException.class)
     public ResponseEntity<ApiResponse<Void>> handleServiceUnavailable(ServiceUnavailableException exception, HttpServletRequest request) {
-        log.warn("service_unavailable request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception.getMessage());
+        log.warn("service_unavailable request_id={} method={} path={} message={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception.getMessage());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(new ApiResponse<>(503, exception.getMessage(), null));
     }
@@ -127,7 +128,7 @@ public class GlobalExceptionHandler {
                 "retryable_service_unavailable request_id={} method={} path={} error_code={} retry_after_seconds={} message={}",
                 RequestLogContext.currentRequestId(),
                 request.getMethod(),
-                request.getRequestURI(),
+                requestPath(request),
                 exception.getErrorCode(),
                 exception.getRetryAfterSeconds(),
                 exception.getMessage()
@@ -148,7 +149,7 @@ public class GlobalExceptionHandler {
                 "database_unavailable request_id={} method={} path={} exception={} root_cause={} message={}",
                 RequestLogContext.currentRequestId(),
                 request.getMethod(),
-                request.getRequestURI(),
+                requestPath(request),
                 exception.getClass().getSimpleName(),
                 rootCause.getClass().getSimpleName(),
                 rootCause.getMessage()
@@ -159,7 +160,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception exception, HttpServletRequest request) {
-        log.error("unexpected_error request_id={} method={} path={}", RequestLogContext.currentRequestId(), request.getMethod(), request.getRequestURI(), exception);
+        log.error("unexpected_error request_id={} method={} path={}", RequestLogContext.currentRequestId(), request.getMethod(), requestPath(request), exception);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new ApiResponse<>(500, "서버 내부 오류가 발생했습니다.", null));
     }
@@ -170,5 +171,9 @@ public class GlobalExceptionHandler {
             current = current.getCause();
         }
         return current;
+    }
+
+    private String requestPath(HttpServletRequest request) {
+        return RequestPathSanitizer.sanitize(request.getRequestURI());
     }
 }

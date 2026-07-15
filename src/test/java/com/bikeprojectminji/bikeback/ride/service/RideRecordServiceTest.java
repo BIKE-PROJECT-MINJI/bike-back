@@ -8,12 +8,15 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
+import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
+import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.global.idempotency.IdempotencyLockService;
 import com.bikeprojectminji.bikeback.global.exception.RetryableServiceUnavailableException;
 import com.bikeprojectminji.bikeback.location.service.RecentLocationCacheService;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordSummaryRequest;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordTraceRequest;
+import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordPointRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordSummaryRequest;
@@ -51,6 +54,9 @@ class RideRecordServiceTest {
 
     @Mock
     private AuthService authService;
+
+    @Mock
+    private CourseRepository courseRepository;
 
     @Mock
     private RideRecordRepository rideRecordRepository;
@@ -450,6 +456,70 @@ class RideRecordServiceTest {
         assertThatThrownBy(() -> rideRecordService.getRideRecordStatus("1", 999L))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("자유 주행 기록을 찾을 수 없습니다.");
+    }
+
+    @Test
+    @DisplayName("clientRideId 영수증 조회는 내 기록의 후처리 상태와 연결 코스를 반환한다")
+    void getRideRecordStatusByClientRideIdReturnsOwnedReceipt() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity rideRecord = new RideRecordEntity(
+                1L,
+                "android-ride-recovery-001",
+                OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                18250,
+                3600
+        );
+        ReflectionTestUtils.setField(rideRecord, "id", 1001L);
+        CourseEntity linkedCourse = org.mockito.Mockito.mock(CourseEntity.class);
+
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByOwnerUserIdAndClientRideId(1L, "android-ride-recovery-001"))
+                .willReturn(Optional.of(rideRecord));
+        given(rideRecordFinalizationService.getStatus(rideRecord))
+                .willReturn(new RideRecordFinalizationStatusResponse(1001L, "READY", 4, 4, 1, null));
+        given(courseRepository.findTopByOwnerUserIdAndSourceRideRecordIdOrderByIdDesc(1L, 1001L))
+                .willReturn(Optional.of(linkedCourse));
+        given(linkedCourse.getId()).willReturn(2001L);
+
+        RideRecordFinalizationStatusResponse response = rideRecordService
+                .getRideRecordStatusByClientRideId("1", " android-ride-recovery-001 ");
+
+        assertThat(response.rideRecordId()).isEqualTo(1001L);
+        assertThat(response.status()).isEqualTo("READY");
+        assertThat(response.linkedCourseId()).isEqualTo(2001L);
+        verify(rideRecordRepository)
+                .findByOwnerUserIdAndClientRideId(1L, "android-ride-recovery-001");
+    }
+
+    @Test
+    @DisplayName("clientRideId 영수증 조회는 미존재와 타 사용자 기록을 같은 404로 숨긴다")
+    void getRideRecordStatusByClientRideIdHidesMissingAndOtherOwners() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByOwnerUserIdAndClientRideId(1L, "other-owner-ride"))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> rideRecordService.getRideRecordStatusByClientRideId("1", "other-owner-ride"))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("자유 주행 기록을 찾을 수 없습니다.");
+
+        verify(rideRecordRepository).findByOwnerUserIdAndClientRideId(1L, "other-owner-ride");
+    }
+
+    @Test
+    @DisplayName("clientRideId 영수증 조회는 공백과 80자 초과 입력을 DB 조회 전에 거절한다")
+    void getRideRecordStatusByClientRideIdRejectsInvalidInputBeforeLookup() {
+        assertThatThrownBy(() -> rideRecordService.getRideRecordStatusByClientRideId("1", "   "))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("clientRideId는 비어 있을 수 없습니다.");
+        assertThatThrownBy(() -> rideRecordService.getRideRecordStatusByClientRideId("1", "r".repeat(81)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("clientRideId는 80자 이하여야 합니다.");
+
+        verifyNoInteractions(authService, rideRecordRepository);
     }
 
     @Test

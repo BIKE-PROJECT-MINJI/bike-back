@@ -42,6 +42,7 @@ import org.springframework.transaction.support.TransactionOperations;
 public class RideRecordService {
 
     private static final Logger log = LoggerFactory.getLogger(RideRecordService.class);
+    private static final int CLIENT_RIDE_ID_MAX_LENGTH = 80;
 
     private final AuthService authService;
     private final CourseRepository courseRepository;
@@ -225,6 +226,20 @@ public class RideRecordService {
         return toRideRecordFinalizationStatusResponse(user.getId(), rideRecord);
     }
 
+    @MeasuredOperation("ride.record.status_by_client_ride_id")
+    @Transactional(readOnly = true)
+    public RideRecordFinalizationStatusResponse getRideRecordStatusByClientRideId(
+            String subject,
+            String clientRideId
+    ) {
+        String normalizedClientRideId = validateRecoveryClientRideId(clientRideId);
+        UserEntity user = authService.findUserBySubject(subject);
+        RideRecordEntity rideRecord = rideRecordRepository
+                .findByOwnerUserIdAndClientRideId(user.getId(), normalizedClientRideId)
+                .orElseThrow(() -> new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
+        return toRideRecordFinalizationStatusResponse(user.getId(), rideRecord);
+    }
+
     @MeasuredOperation("ride.record.regenerate")
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public RideRecordFinalizationStatusResponse regenerateRideRecord(String subject, Long rideRecordId) {
@@ -323,6 +338,17 @@ public class RideRecordService {
             return null;
         }
         return clientRideId.trim();
+    }
+
+    private String validateRecoveryClientRideId(String clientRideId) {
+        if (clientRideId == null || clientRideId.isBlank()) {
+            throw new BadRequestException("clientRideId는 비어 있을 수 없습니다.");
+        }
+        String normalizedClientRideId = clientRideId.trim();
+        if (normalizedClientRideId.length() > CLIENT_RIDE_ID_MAX_LENGTH) {
+            throw new BadRequestException("clientRideId는 80자 이하여야 합니다.");
+        }
+        return normalizedClientRideId;
     }
 
     private Optional<RideRecordResponse> findExistingRideRecordResponse(Long ownerUserId, String clientRideId) {

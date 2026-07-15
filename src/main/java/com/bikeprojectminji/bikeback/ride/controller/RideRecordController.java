@@ -70,6 +70,16 @@ public class RideRecordController {
         return ApiResponse.success(rideRecordService.getRideRecordStatus(jwt.getSubject(), rideRecordId));
     }
 
+    @GetMapping("/by-client-ride-id/{clientRideId}")
+    public ApiResponse<RideRecordFinalizationStatusResponse> getRideRecordStatusByClientRideId(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable String clientRideId
+    ) {
+        return ApiResponse.success(
+                rideRecordService.getRideRecordStatusByClientRideId(jwt.getSubject(), clientRideId)
+        );
+    }
+
     @PostMapping("/{rideRecordId}/regenerate")
     public ApiResponse<RideRecordFinalizationStatusResponse> regenerateRideRecord(
             @AuthenticationPrincipal Jwt jwt,
