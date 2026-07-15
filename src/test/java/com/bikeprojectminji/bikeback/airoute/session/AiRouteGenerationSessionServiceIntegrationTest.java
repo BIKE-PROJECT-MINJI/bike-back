@@ -11,6 +11,9 @@ import static org.mockito.Mockito.verify;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePointResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRouteRoutingMetadataResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.ProviderEvidenceBadgeResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.RecommendationScoreResponse;
 import com.bikeprojectminji.bikeback.airoute.session.dto.AiRouteGenerationSessionCreateRequest;
 import com.bikeprojectminji.bikeback.airoute.session.dto.AiRouteGenerationSessionResponse;
 import com.bikeprojectminji.bikeback.airoute.session.dto.PromoteAiRouteCandidateRequest;
@@ -23,6 +26,7 @@ import com.bikeprojectminji.bikeback.course.repository.CourseRoutePointRepositor
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.global.exception.RouteNotFoundException;
 import com.bikeprojectminji.bikeback.global.exception.RoutingProviderUnavailableException;
+import com.bikeprojectminji.bikeback.routing.service.ProviderCallBudget;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -83,7 +87,7 @@ class AiRouteGenerationSessionServiceIntegrationTest {
     @Test
     @DisplayName("AI worker가 실패해도 backend fallback 후보를 세션에 저장한다")
     void createSessionStoresFallbackCandidateWhenAiWorkerFailed() {
-        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class)))
+        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class), any(ProviderCallBudget.class)))
                 .willReturn(plan(false, 0), plan(false, 1), plan(false, 2));
 
         AiRouteGenerationSessionResponse response = sessionService.createSession("1", createRequest());
@@ -100,7 +104,7 @@ class AiRouteGenerationSessionServiceIntegrationTest {
     @Test
     @DisplayName("정상 세션은 서로 다른 후보 세 개와 고유 candidate id를 저장한다")
     void createSessionStoresThreeDistinctCandidates() {
-        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class)))
+        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class), any(ProviderCallBudget.class)))
                 .willReturn(plan(true, 0), plan(true, 1), plan(true, 2));
 
         AiRouteGenerationSessionResponse response = sessionService.createSession("1", createRequest());
@@ -110,13 +114,21 @@ class AiRouteGenerationSessionServiceIntegrationTest {
         assertThat(response.candidates()).extracting(candidate -> candidate.candidateId()).doesNotHaveDuplicates();
         assertThat(response.candidates()).extracting(candidate -> candidate.routePoints().get(1).lat())
                 .doesNotHaveDuplicates();
-        verify(aiRoutePlannerService, times(3)).plan(eq("1"), any(AiRoutePlanRequest.class));
+        assertThat(response.candidates().get(0).scoreBreakdown().total()).isEqualTo(84);
+        assertThat(response.candidates().get(0).evidenceBadges())
+                .extracting(ProviderEvidenceBadgeResponse::source)
+                .containsExactly("graphhopper.road_class");
+        assertThat(response.candidates().get(0).routingMetadata().provider()).isEqualTo("GRAPHHOPPER");
+        assertThat(response.candidates().get(0).elevationStatus()).isEqualTo("FULL");
+        assertThat(response.candidates().get(0).sceneryEvidenceStatus()).isEqualTo("PARTIAL");
+        verify(aiRoutePlannerService, times(3))
+                .plan(eq("1"), any(AiRoutePlanRequest.class), any(ProviderCallBudget.class));
     }
 
     @Test
     @DisplayName("후보 두 개 뒤 경로 없음은 저장된 두 후보와 PARTIAL metadata로 응답한다")
     void createSessionStoresPartialCandidatesWhenOneAttemptHasNoRoute() {
-        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class)))
+        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class), any(ProviderCallBudget.class)))
                 .willReturn(plan(true, 0), plan(true, 1))
                 .willThrow(new RouteNotFoundException("no route"));
 
@@ -132,7 +144,7 @@ class AiRouteGenerationSessionServiceIntegrationTest {
     @Test
     @DisplayName("세 시도 모두 경로 없음이면 session을 남기지 않고 422 원인 예외를 던진다")
     void createSessionThrowsRouteNotFoundWithoutPartialRows() {
-        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class)))
+        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class), any(ProviderCallBudget.class)))
                 .willThrow(new RouteNotFoundException("no route"));
 
         assertThatThrownBy(() -> sessionService.createSession("1", createRequest()))
@@ -144,7 +156,7 @@ class AiRouteGenerationSessionServiceIntegrationTest {
     @Test
     @DisplayName("세 시도 모두 provider 장애면 session을 남기지 않고 retry 가능한 503 원인을 던진다")
     void createSessionThrowsProviderUnavailableWithoutPartialRows() {
-        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class)))
+        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class), any(ProviderCallBudget.class)))
                 .willThrow(new RoutingProviderUnavailableException("down", 9));
 
         assertThatThrownBy(() -> sessionService.createSession("1", createRequest()))
@@ -159,7 +171,7 @@ class AiRouteGenerationSessionServiceIntegrationTest {
     void createSessionCallsPlannerOutsideTransaction() {
         AtomicBoolean plannerCalledInTransaction = new AtomicBoolean(true);
         AtomicInteger offset = new AtomicInteger();
-        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class)))
+        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class), any(ProviderCallBudget.class)))
                 .willAnswer(invocation -> {
                     plannerCalledInTransaction.set(TransactionSynchronizationManager.isActualTransactionActive());
                     return plan(true, offset.getAndIncrement());
@@ -173,7 +185,7 @@ class AiRouteGenerationSessionServiceIntegrationTest {
     @Test
     @DisplayName("AI 코스 후보를 승격하면 실제 Course와 route point 복사본을 만든다")
     void promoteCandidateCreatesCourseAndRoutePoints() {
-        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class)))
+        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class), any(ProviderCallBudget.class)))
                 .willReturn(plan(true, 0), plan(true, 1), plan(true, 2));
         AiRouteGenerationSessionResponse session = sessionService.createSession("1", createRequest());
         Long candidateId = session.candidates().get(0).candidateId();
@@ -196,7 +208,7 @@ class AiRouteGenerationSessionServiceIntegrationTest {
     @Test
     @DisplayName("다른 사용자의 AI 코스 생성 세션은 조회할 수 없다")
     void getSessionRejectsOtherOwner() {
-        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class)))
+        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class), any(ProviderCallBudget.class)))
                 .willReturn(plan(true, 0), plan(true, 1), plan(true, 2));
         AiRouteGenerationSessionResponse session = sessionService.createSession("1", createRequest());
 
@@ -208,7 +220,7 @@ class AiRouteGenerationSessionServiceIntegrationTest {
     @Test
     @DisplayName("이미 승격된 AI 코스 후보는 기존 courseId로 멱등 수렴한다")
     void promoteCandidateReturnsExistingCourseForRepeatedRequest() {
-        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class)))
+        given(aiRoutePlannerService.plan(eq("1"), any(AiRoutePlanRequest.class), any(ProviderCallBudget.class)))
                 .willReturn(plan(true, 0), plan(true, 1), plan(true, 2));
         AiRouteGenerationSessionResponse session = sessionService.createSession("1", createRequest());
         Long candidateId = session.candidates().get(0).candidateId();
@@ -256,10 +268,30 @@ class AiRouteGenerationSessionServiceIntegrationTest {
                 List.of(),
                 List.of(),
                 84,
+                new RecommendationScoreResponse(84, 20, 20, 15, 10, 5, 14, 0, 0),
                 null,
+                List.of(new ProviderEvidenceBadgeResponse(
+                        "graphhopper.road_class",
+                        "자전거도로 근거",
+                        "VERIFIED",
+                        "INFO",
+                        "cycleway detail",
+                        null
+                )),
+                aiGenerated,
                 null,
-                List.of(),
-                aiGenerated
+                new AiRouteRoutingMetadataResponse(
+                        "SUCCESS",
+                        "GRAPHHOPPER",
+                        false,
+                        null,
+                        "ACCEPTED",
+                        "품질 기준 통과"
+                ),
+                null,
+                "풍경 우선, 오르막 선호",
+                "FULL",
+                "PARTIAL"
         );
     }
 }

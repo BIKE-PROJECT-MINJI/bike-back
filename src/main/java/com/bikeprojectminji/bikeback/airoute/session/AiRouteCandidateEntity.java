@@ -38,6 +38,24 @@ public class AiRouteCandidateEntity {
     @Column(name = "elevation_summary_json", columnDefinition = "TEXT")
     private String elevationSummaryJson;
 
+    @Column(name = "score_breakdown_json", columnDefinition = "TEXT")
+    private String scoreBreakdownJson;
+
+    @Column(name = "evidence_badges_json", columnDefinition = "TEXT")
+    private String evidenceBadgesJson;
+
+    @Column(name = "routing_metadata_json", columnDefinition = "TEXT")
+    private String routingMetadataJson;
+
+    @Column(name = "preference_summary", length = 500)
+    private String preferenceSummary;
+
+    @Column(name = "elevation_status", length = 32)
+    private String elevationStatus;
+
+    @Column(name = "scenery_evidence_status", length = 32)
+    private String sceneryEvidenceStatus;
+
     @Column(name = "route_point_count", nullable = false)
     private Integer routePointCount;
 
@@ -61,6 +79,12 @@ public class AiRouteCandidateEntity {
             Integer estimatedDurationMin,
             Integer recommendationScore,
             String elevationSummaryJson,
+            String scoreBreakdownJson,
+            String evidenceBadgesJson,
+            String routingMetadataJson,
+            String preferenceSummary,
+            String elevationStatus,
+            String sceneryEvidenceStatus,
             Integer routePointCount,
             String routePointsJson
     ) {
@@ -71,6 +95,12 @@ public class AiRouteCandidateEntity {
         this.estimatedDurationMin = estimatedDurationMin;
         this.recommendationScore = recommendationScore;
         this.elevationSummaryJson = elevationSummaryJson;
+        this.scoreBreakdownJson = scoreBreakdownJson;
+        this.evidenceBadgesJson = evidenceBadgesJson;
+        this.routingMetadataJson = routingMetadataJson;
+        this.preferenceSummary = preferenceSummary;
+        this.elevationStatus = elevationStatus;
+        this.sceneryEvidenceStatus = sceneryEvidenceStatus;
         this.routePointCount = routePointCount;
         this.routePointsJson = routePointsJson;
     }
@@ -109,6 +139,30 @@ public class AiRouteCandidateEntity {
 
     public String getElevationSummaryJson() {
         return elevationSummaryJson;
+    }
+
+    public String getScoreBreakdownJson() {
+        return scoreBreakdownJson;
+    }
+
+    public String getEvidenceBadgesJson() {
+        return evidenceBadgesJson;
+    }
+
+    public String getRoutingMetadataJson() {
+        return routingMetadataJson;
+    }
+
+    public String getPreferenceSummary() {
+        return preferenceSummary;
+    }
+
+    public String getElevationStatus() {
+        return elevationStatus;
+    }
+
+    public String getSceneryEvidenceStatus() {
+        return sceneryEvidenceStatus;
     }
 
     public Integer getRoutePointCount() {

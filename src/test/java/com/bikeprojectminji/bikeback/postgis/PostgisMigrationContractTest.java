@@ -94,7 +94,7 @@ class PostgisMigrationContractTest {
     @Test
     @DisplayName("빈 PostGIS 데이터베이스에 운영 Flyway migration 전체가 적용된다")
     void appliesAllProductionMigrationsToEmptyPostgis() throws SQLException {
-        assertThat(appliedMigrationCount).isEqualTo(35);
+        assertThat(appliedMigrationCount).isEqualTo(36);
 
         try (Connection connection = connection();
              Statement statement = connection.createStatement();
@@ -106,15 +106,15 @@ class PostgisMigrationContractTest {
                      where type = 'SQL'
                      """)) {
             assertThat(result.next()).isTrue();
-            assertThat(result.getInt("migration_count")).isEqualTo(35);
-            assertThat(result.getInt("latest_version")).isEqualTo(35);
+            assertThat(result.getInt("migration_count")).isEqualTo(36);
+            assertThat(result.getInt("latest_version")).isEqualTo(36);
             assertThat(result.getBoolean("all_succeeded")).isTrue();
             migrationContractPassed = true;
         }
     }
 
     @Test
-    @DisplayName("배포된 V16 원본 checksum을 유지하고 기존 V16 이력에서 V35까지 repair 없이 upgrade한다")
+    @DisplayName("배포된 V16 원본 checksum을 유지하고 기존 V16 이력에서 V36까지 repair 없이 upgrade한다")
     void validatesAndUpgradesPublishedV16History() throws Exception {
         assertThat(publishedV16Sha256()).isEqualTo(PUBLISHED_V16_SHA256);
 
@@ -137,7 +137,7 @@ class PostgisMigrationContractTest {
 
         flywayForSchema(schema, null, true).validate();
         Flyway current = flywayForSchema(schema, null);
-        assertThat(current.migrate().migrationsExecuted).isEqualTo(19);
+        assertThat(current.migrate().migrationsExecuted).isEqualTo(20);
         current.validate();
 
         try (Connection connection = connection();
@@ -150,8 +150,8 @@ class PostgisMigrationContractTest {
                      where type = 'SQL'
                      """)) {
             assertThat(result.next()).isTrue();
-            assertThat(result.getInt("migration_count")).isEqualTo(35);
-            assertThat(result.getInt("latest_version")).isEqualTo(35);
+            assertThat(result.getInt("migration_count")).isEqualTo(36);
+            assertThat(result.getInt("latest_version")).isEqualTo(36);
             assertThat(result.getBoolean("all_succeeded")).isTrue();
         }
         historicalV16UpgradePassed = true;

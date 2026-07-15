@@ -4,6 +4,9 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePointResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteElevationSummaryResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRouteRoutingMetadataResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.ProviderEvidenceBadgeResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.RecommendationScoreResponse;
 import com.bikeprojectminji.bikeback.airoute.session.dto.AiRouteCandidateResponse;
 import com.bikeprojectminji.bikeback.airoute.session.dto.AiRouteGenerationSessionCreateRequest;
 import com.bikeprojectminji.bikeback.airoute.session.dto.AiRouteGenerationSessionResponse;
@@ -179,7 +182,7 @@ public class AiRouteGenerationSessionService {
     }
 
     private AiRoutePlanRequest toPlanRequest(AiRouteGenerationSessionCreateRequest request) {
-        return new AiRoutePlanRequest(
+        return AiRouteSessionPreferenceNormalizer.normalize(new AiRoutePlanRequest(
                 request.lat(),
                 request.lon(),
                 request.destinationLat(),
@@ -188,7 +191,7 @@ public class AiRouteGenerationSessionService {
                 request.rideStyle(),
                 request.elevationPreference(),
                 request.textIntent()
-        );
+        ));
     }
 
     private AiRouteCandidateDraft toCandidateDraft(AiRoutePlanResponse plan) {
@@ -201,6 +204,12 @@ public class AiRouteGenerationSessionService {
                 estimateDurationMin(distanceKm),
                 plan.recommendationScore(),
                 writeNullable(plan.elevationSummary()),
+                writeNullable(plan.scoreBreakdown()),
+                writeNullable(plan.evidenceBadges()),
+                writeNullable(plan.routingMetadata()),
+                plan.preferenceSummary(),
+                plan.elevationStatus(),
+                plan.sceneryEvidenceStatus(),
                 routePoints.size(),
                 writeRoutePoints(routePoints)
         );
@@ -247,7 +256,14 @@ public class AiRouteGenerationSessionService {
                         candidate.getDistanceKm(),
                         candidate.getEstimatedDurationMin(),
                         candidate.getRecommendationScore(),
+                        readNullable(candidate.getScoreBreakdownJson(), RecommendationScoreResponse.class),
+                        readNullableList(candidate.getEvidenceBadgesJson(), new TypeReference<>() {
+                        }),
                         readNullable(candidate.getElevationSummaryJson(), AiRouteElevationSummaryResponse.class),
+                        readNullable(candidate.getRoutingMetadataJson(), AiRouteRoutingMetadataResponse.class),
+                        candidate.getPreferenceSummary(),
+                        candidate.getElevationStatus(),
+                        candidate.getSceneryEvidenceStatus(),
                         parseRoutePoints(candidate),
                         candidate.getRoutePointCount(),
                         candidate.getPromotedCourseId()
@@ -296,6 +312,17 @@ public class AiRouteGenerationSessionService {
             return objectMapper.readValue(json, type);
         } catch (JsonProcessingException exception) {
             throw new BadRequestException("AI 코스 후보 정보를 읽을 수 없습니다.");
+        }
+    }
+
+    private <T> T readNullableList(String json, TypeReference<T> type) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, type);
+        } catch (JsonProcessingException exception) {
+            throw new BadRequestException("AI 코스 후보 근거를 읽을 수 없습니다.");
         }
     }
 
@@ -412,6 +439,12 @@ public class AiRouteGenerationSessionService {
             Integer estimatedDurationMin,
             Integer recommendationScore,
             String elevationSummaryJson,
+            String scoreBreakdownJson,
+            String evidenceBadgesJson,
+            String routingMetadataJson,
+            String preferenceSummary,
+            String elevationStatus,
+            String sceneryEvidenceStatus,
             Integer routePointCount,
             String routePointsJson
     ) {
@@ -425,6 +458,12 @@ public class AiRouteGenerationSessionService {
                     estimatedDurationMin,
                     recommendationScore,
                     elevationSummaryJson,
+                    scoreBreakdownJson,
+                    evidenceBadgesJson,
+                    routingMetadataJson,
+                    preferenceSummary,
+                    elevationStatus,
+                    sceneryEvidenceStatus,
                     routePointCount,
                     routePointsJson
             );
