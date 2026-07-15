@@ -1,5 +1,7 @@
 package com.bikeprojectminji.bikeback.party.service;
 
+import com.bikeprojectminji.bikeback.course.entity.CourseVisibility;
+import com.bikeprojectminji.bikeback.course.repository.CourseRepository;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberStatus;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyStatus;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyMemberRepository;
@@ -12,13 +14,16 @@ public class RidePartyLocationAccessService {
 
     private final RidePartyRepository partyRepository;
     private final RidePartyMemberRepository memberRepository;
+    private final CourseRepository courseRepository;
 
     public RidePartyLocationAccessService(
             RidePartyRepository partyRepository,
-            RidePartyMemberRepository memberRepository
+            RidePartyMemberRepository memberRepository,
+            CourseRepository courseRepository
     ) {
         this.partyRepository = partyRepository;
         this.memberRepository = memberRepository;
+        this.courseRepository = courseRepository;
     }
 
     @Transactional(readOnly = true)
@@ -26,10 +31,14 @@ public class RidePartyLocationAccessService {
         if (partyId == null || userId == null) {
             return false;
         }
-        boolean activeParty = partyRepository.findById(partyId)
-                .map(party -> party.getStatus() == RidePartyStatus.OPEN || party.getStatus() == RidePartyStatus.RIDING)
+        var party = partyRepository.findById(partyId).orElse(null);
+        if (party == null || party.getStatus() != RidePartyStatus.RIDING) {
+            return false;
+        }
+        boolean shareableCourse = courseRepository.findById(party.getCourseId())
+                .map(course -> course.getVisibility() == CourseVisibility.PUBLIC && !course.isReportHidden())
                 .orElse(false);
-        if (!activeParty) {
+        if (!shareableCourse) {
             return false;
         }
         return memberRepository.findByPartyIdAndUserId(partyId, userId)
