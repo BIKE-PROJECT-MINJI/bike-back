@@ -1,7 +1,7 @@
 {
   "testId" : "ai-route-deterministic-golden-v1",
-  "commit" : "b718709d31ee2658cf28d38b23d4789d79803e72",
-  "executedAt" : "2026-07-14T06:00:09.791635498Z",
+  "commit" : "d5213d1ad1733f57c52d832f6022e2a3c2cdd3f2",
+  "executedAt" : "2026-07-15T10:17:10.117485653Z",
   "environment" : "JVM unit test; deterministic fake GraphHopper; AI worker disabled",
   "command" : "./gradlew test --tests '*AiRouteGoldenSetTest'",
   "result" : "PASS",
@@ -28,7 +28,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 176594,
+    "latencyMicros" : 276133,
     "note" : "implemented text normalization"
   }, {
     "testId" : "AI-02",
@@ -74,7 +74,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 322,
+    "latencyMicros" : 393,
     "note" : "unsupported: normalized to TEXT_BALANCED"
   }, {
     "testId" : "AI-04",
@@ -97,7 +97,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 194,
+    "latencyMicros" : 208,
     "note" : "unsupported: target distance not normalized"
   }, {
     "testId" : "AI-05",
@@ -120,7 +120,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 133,
+    "latencyMicros" : 209,
     "note" : "unsupported: target distance not normalized"
   }, {
     "testId" : "AI-06",
@@ -143,7 +143,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 145,
+    "latencyMicros" : 1468,
     "note" : "destination supplied"
   }, {
     "testId" : "AI-07",
@@ -166,7 +166,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 126,
+    "latencyMicros" : 333,
     "note" : "default destination calculated"
   }, {
     "testId" : "AI-08",
@@ -189,7 +189,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 187,
+    "latencyMicros" : 314,
     "note" : "elevation remains UNAVAILABLE"
   }, {
     "testId" : "AI-09",
@@ -212,7 +212,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 207,
+    "latencyMicros" : 458,
     "note" : "scenery evidence is PARTIAL, not user quality proof"
   }, {
     "testId" : "AI-10",
@@ -235,7 +235,7 @@
     "fallbackReason" : "AI_WORKER_UNAVAILABLE",
     "expectedHttpStatus" : 200,
     "resultStatus" : "READY",
-    "latencyMicros" : 144,
+    "latencyMicros" : 278,
     "note" : "backend plan returned with worker fallback metadata"
   }, {
     "testId" : "AI-11",
@@ -256,10 +256,10 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : false,
     "fallbackReason" : null,
-    "expectedHttpStatus" : 400,
-    "resultStatus" : "BAD_REQUEST",
-    "latencyMicros" : 123,
-    "note" : "routing failure is 400; no fabricated coordinates"
+    "expectedHttpStatus" : 503,
+    "resultStatus" : "SERVICE_UNAVAILABLE",
+    "latencyMicros" : 198,
+    "note" : "provider failure is retryable 503; no fabricated coordinates"
   }, {
     "testId" : "AI-12",
     "rawInput" : "no candidate",
@@ -279,10 +279,10 @@
     "routingFallbackUsed" : false,
     "aiWorkerFallbackUsed" : false,
     "fallbackReason" : null,
-    "expectedHttpStatus" : 400,
-    "resultStatus" : "BAD_REQUEST",
-    "latencyMicros" : 71,
-    "note" : "empty candidate is 400; no fabricated coordinates"
+    "expectedHttpStatus" : 422,
+    "resultStatus" : "UNPROCESSABLE_ENTITY",
+    "latencyMicros" : 130,
+    "note" : "empty candidate is non-retryable 422; no fabricated coordinates"
   }, {
     "testId" : "AI-13",
     "rawInput" : "quota/rate limit",
