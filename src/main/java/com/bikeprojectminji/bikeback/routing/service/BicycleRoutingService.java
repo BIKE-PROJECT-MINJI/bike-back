@@ -73,11 +73,12 @@ public class BicycleRoutingService {
             int providerRetryAfterSeconds,
             int quotaRetryAfterSeconds
     ) {
-        if (causes.contains(BicycleRoutingFailureCause.NO_ROUTE)) {
-            return new RouteNotFoundException("요청 조건을 충족하는 자전거 경로를 찾지 못했습니다. 조건을 완화해 주세요.");
-        }
-        if (causes.contains(BicycleRoutingFailureCause.QUALITY_REJECTED)) {
-            return new RouteNotFoundException("경로 후보가 안전·품질 기준을 충족하지 못했습니다. 조건을 완화해 주세요.");
+        if (causes.contains(BicycleRoutingFailureCause.QUOTA_EXCEEDED)) {
+            return new RetryableTooManyRequestsException(
+                    "라우팅 provider 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.",
+                    "ROUTING_QUOTA_EXCEEDED",
+                    quotaRetryAfterSeconds > 0 ? quotaRetryAfterSeconds : 60
+            );
         }
         if (causes.contains(BicycleRoutingFailureCause.PROVIDER_UNAVAILABLE)) {
             return new RoutingProviderUnavailableException(
@@ -85,12 +86,11 @@ public class BicycleRoutingService {
                     providerRetryAfterSeconds > 0 ? providerRetryAfterSeconds : 3
             );
         }
-        if (causes.contains(BicycleRoutingFailureCause.QUOTA_EXCEEDED)) {
-            return new RetryableTooManyRequestsException(
-                    "라우팅 provider 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.",
-                    "ROUTING_QUOTA_EXCEEDED",
-                    quotaRetryAfterSeconds > 0 ? quotaRetryAfterSeconds : 60
-            );
+        if (causes.contains(BicycleRoutingFailureCause.NO_ROUTE)) {
+            return new RouteNotFoundException("요청 조건을 충족하는 자전거 경로를 찾지 못했습니다. 조건을 완화해 주세요.");
+        }
+        if (causes.contains(BicycleRoutingFailureCause.QUALITY_REJECTED)) {
+            return new RouteNotFoundException("경로 후보가 안전·품질 기준을 충족하지 못했습니다. 조건을 완화해 주세요.");
         }
         return new RoutingProviderUnavailableException(
                 "자전거 경로 provider가 일시적으로 불안정합니다. 잠시 후 다시 시도해 주세요.",

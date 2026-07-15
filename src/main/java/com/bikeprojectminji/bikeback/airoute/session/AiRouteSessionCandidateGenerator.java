@@ -5,12 +5,13 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePointResponse;
 import com.bikeprojectminji.bikeback.airoute.service.AiRoutePlannerService;
 import com.bikeprojectminji.bikeback.global.exception.RouteNotFoundException;
+import com.bikeprojectminji.bikeback.global.exception.RetryableTooManyRequestsException;
 import com.bikeprojectminji.bikeback.global.exception.RoutingProviderUnavailableException;
+import com.bikeprojectminji.bikeback.routing.service.ProviderCallBudget;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -34,13 +35,16 @@ class AiRouteSessionCandidateGenerator {
         Set<String> signatures = new LinkedHashSet<>();
         int noRouteCount = 0;
         int providerUnavailableCount = 0;
+        int quotaExceededCount = 0;
         int duplicateCount = 0;
         int retryAfterSeconds = 0;
+        int quotaRetryAfterSeconds = 0;
+        ProviderCallBudget providerCallBudget = new ProviderCallBudget(MAX_CANDIDATES);
 
         List<AiRoutePlanRequest> attempts = candidateRequests(request);
         for (AiRoutePlanRequest attempt : attempts) {
             try {
-                AiRoutePlanResponse plan = plannerService.plan(subject, attempt);
+                AiRoutePlanResponse plan = plannerService.plan(subject, attempt, providerCallBudget);
                 if (plan.routePoints() == null || plan.routePoints().isEmpty()) {
                     noRouteCount++;
                     continue;
@@ -55,11 +59,21 @@ class AiRouteSessionCandidateGenerator {
             } catch (RoutingProviderUnavailableException exception) {
                 providerUnavailableCount++;
                 retryAfterSeconds = Math.max(retryAfterSeconds, exception.getRetryAfterSeconds());
+            } catch (RetryableTooManyRequestsException exception) {
+                quotaExceededCount++;
+                quotaRetryAfterSeconds = Math.max(quotaRetryAfterSeconds, exception.getRetryAfterSeconds());
             }
         }
 
         if (plans.isEmpty()) {
-            if (providerUnavailableCount == attempts.size()) {
+            if (quotaExceededCount > 0) {
+                throw new RetryableTooManyRequestsException(
+                        "라우팅 provider 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.",
+                        "ROUTING_QUOTA_EXCEEDED",
+                        quotaRetryAfterSeconds > 0 ? quotaRetryAfterSeconds : 60
+                );
+            }
+            if (providerUnavailableCount > 0) {
                 throw new RoutingProviderUnavailableException(
                         "자전거 경로 provider가 일시적으로 불안정합니다. 잠시 후 다시 시도해 주세요.",
                         retryAfterSeconds > 0 ? retryAfterSeconds : 3
@@ -73,6 +87,7 @@ class AiRouteSessionCandidateGenerator {
                 attempts.size(),
                 noRouteCount,
                 providerUnavailableCount,
+                quotaExceededCount,
                 duplicateCount
         );
     }
@@ -105,20 +120,19 @@ class AiRouteSessionCandidateGenerator {
     }
 
     private String signature(AiRoutePlanResponse plan) {
-        return routeSignature(plan.routePoints())
-                + '|' + plan.recommendationScore()
-                + '|' + normalize(plan.summary())
-                + '|' + String.valueOf(plan.actions());
+        return routeSignature(plan.routePoints());
     }
 
     private String routeSignature(List<AiRoutePointResponse> routePoints) {
-        return routePoints.stream()
-                .map(point -> point.lat().stripTrailingZeros().toPlainString()
-                        + ',' + point.lon().stripTrailingZeros().toPlainString())
-                .collect(Collectors.joining(";"));
-    }
-
-    private String normalize(String value) {
-        return value == null ? "" : value.trim();
+        StringBuilder signature = new StringBuilder();
+        for (AiRoutePointResponse point : routePoints) {
+            if (!signature.isEmpty()) {
+                signature.append(';');
+            }
+            signature.append(point.lat().stripTrailingZeros().toPlainString())
+                    .append(',')
+                    .append(point.lon().stripTrailingZeros().toPlainString());
+        }
+        return signature.toString();
     }
 }

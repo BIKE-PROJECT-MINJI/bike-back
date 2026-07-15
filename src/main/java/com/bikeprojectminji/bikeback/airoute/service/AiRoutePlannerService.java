@@ -9,6 +9,7 @@ import com.bikeprojectminji.bikeback.global.metrics.MeasuredOperation;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePlan;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteRequest;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutingService;
+import com.bikeprojectminji.bikeback.routing.service.ProviderCallBudget;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
@@ -49,6 +50,14 @@ public class AiRoutePlannerService {
 
     @MeasuredOperation("ai_route.plan")
     public AiRoutePlanResponse plan(String subject, AiRoutePlanRequest request) {
+        return plan(subject, request, null);
+    }
+
+    public AiRoutePlanResponse plan(
+            String subject,
+            AiRoutePlanRequest request,
+            ProviderCallBudget providerCallBudget
+    ) {
         validate(request);
         AiRoutePlanRequest resolvedRequest = applyDefaultDestination(applyDefaultRideStyle(subject, request));
         AiRouteConditionContext context = new AiRouteConditionContext(
@@ -56,7 +65,7 @@ public class AiRoutePlannerService {
                 "공사/통제 데이터 provider가 아직 연결되지 않아 안전 우선으로 표시합니다.",
                 "OSM surface/smoothness 태그와 외부 노면 provider 연동 전까지는 미확인으로 표시합니다."
         );
-        AiRoutePlanResponse basePlan = composeRouteCandidatePlan(resolvedRequest, context)
+        AiRoutePlanResponse basePlan = composeRouteCandidatePlan(resolvedRequest, context, providerCallBudget)
                 .orElseGet(() -> aiRoutePlanComposer.composeFallback(resolvedRequest, context));
         return aiRouteWorkerClient.plan(resolvedRequest, context, basePlan)
                 .map(workerPlan -> mergeWorkerNarrative(basePlan, workerPlan))
@@ -113,7 +122,8 @@ public class AiRoutePlannerService {
 
     private Optional<AiRoutePlanResponse> composeRouteCandidatePlan(
             AiRoutePlanRequest request,
-            AiRouteConditionContext context
+            AiRouteConditionContext context,
+            ProviderCallBudget providerCallBudget
     ) {
         if (request.destinationLat() == null || request.destinationLon() == null) {
             return Optional.empty();
@@ -125,7 +135,8 @@ public class AiRoutePlannerService {
                 request.destinationLon(),
                 request.rideStyle(),
                 request.elevationPreference(),
-                request.textIntent()
+                request.textIntent(),
+                providerCallBudget
         ));
         return Optional.of(aiRoutePlanComposer.composeWithRouteCandidate(
                 request,

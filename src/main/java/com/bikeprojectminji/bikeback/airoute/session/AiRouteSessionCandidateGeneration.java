@@ -8,6 +8,7 @@ record AiRouteSessionCandidateGeneration(
         int attemptCount,
         int noRouteCount,
         int providerUnavailableCount,
+        int quotaExceededCount,
         int duplicateCount
 ) {
 
@@ -21,6 +22,7 @@ record AiRouteSessionCandidateGeneration(
         }
         return "PARTIAL_CANDIDATES;NO_ROUTE=" + noRouteCount
                 + ";PROVIDER_UNAVAILABLE=" + providerUnavailableCount
+                + ";QUOTA_EXCEEDED=" + quotaExceededCount
                 + ";DUPLICATE=" + duplicateCount;
     }
 }

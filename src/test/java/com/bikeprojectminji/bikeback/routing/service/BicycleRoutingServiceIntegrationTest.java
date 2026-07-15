@@ -122,7 +122,7 @@ class BicycleRoutingServiceIntegrationTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("mixedFailurePrecedenceCases")
-    @DisplayName("혼합 routing 실패는 경로 없음/품질 탈락, provider 장애, quota 순으로 우선한다")
+    @DisplayName("혼합 routing 실패는 quota, provider 장애, 경로 없음/품질 탈락 순으로 우선한다")
     void routeAppliesMixedFailurePrecedence(
             String description,
             BicycleRoutingProviderResult primaryResult,
@@ -215,11 +215,11 @@ class BicycleRoutingServiceIntegrationTest {
         BicycleRoutingProviderResult noRoute = BicycleRoutingProviderResult.noRoute("PRIMARY");
         BicycleRoutingProviderResult quality = BicycleRoutingProviderResult.success("PRIMARY", List.of(qualityRejected));
         return Stream.of(
-                Arguments.of("provider 장애 > quota", unavailable, quota, RoutingProviderUnavailableException.class),
-                Arguments.of("경로 없음 > provider 장애", unavailable, noRoute, RouteNotFoundException.class),
-                Arguments.of("품질 탈락 > provider 장애", unavailable, quality, RouteNotFoundException.class),
-                Arguments.of("경로 없음 > quota", quota, noRoute, RouteNotFoundException.class),
-                Arguments.of("품질 탈락 > quota", quota, quality, RouteNotFoundException.class),
+                Arguments.of("quota > provider 장애", unavailable, quota, RetryableTooManyRequestsException.class),
+                Arguments.of("provider 장애 > 경로 없음", unavailable, noRoute, RoutingProviderUnavailableException.class),
+                Arguments.of("provider 장애 > 품질 탈락", unavailable, quality, RoutingProviderUnavailableException.class),
+                Arguments.of("quota > 경로 없음", quota, noRoute, RetryableTooManyRequestsException.class),
+                Arguments.of("quota > 품질 탈락", quota, quality, RetryableTooManyRequestsException.class),
                 Arguments.of("경로 없음과 품질 탈락은 422", noRoute, quality, RouteNotFoundException.class)
         );
     }

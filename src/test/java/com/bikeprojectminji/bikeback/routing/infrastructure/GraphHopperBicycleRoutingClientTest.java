@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteRequest;
+import com.bikeprojectminji.bikeback.routing.service.ProviderCallBudget;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutingFailureCause;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutingProviderResult;
 import com.sun.net.httpserver.HttpServer;
@@ -101,6 +102,28 @@ class GraphHopperBicycleRoutingClientTest {
         assertThat(result.candidates().get(0).evidenceBadges())
                 .extracting("status")
                 .contains("VERIFIED", "WARNING", "UNKNOWN");
+    }
+
+    @Test
+    @DisplayName("GraphHopper는 공유 호출 예산을 초과하여 fallback HTTP 호출을 실행하지 않는다")
+    void routeDoesNotExceedSharedProviderCallBudget() throws IOException {
+        AtomicInteger primaryHits = new AtomicInteger();
+        AtomicInteger fallbackHits = new AtomicInteger();
+        HttpServer primary = startServer(503, "{\"message\":\"down\"}", primaryHits);
+        HttpServer fallback = startServer(200, minimalSuccessBody(), fallbackHits);
+        GraphHopperBicycleRoutingClient client = new GraphHopperBicycleRoutingClient(
+                List.of(baseUrl(primary), baseUrl(fallback)),
+                "",
+                2,
+                null
+        );
+        BicycleRouteRequest request = request().withProviderCallBudget(new ProviderCallBudget(1));
+
+        BicycleRoutingProviderResult result = client.route(request);
+
+        assertThat(result.status()).isEqualTo("PROVIDER_FAILURE");
+        assertThat(primaryHits).hasValue(1);
+        assertThat(fallbackHits).hasValue(0);
     }
 
     @Test
@@ -353,8 +376,8 @@ class GraphHopperBicycleRoutingClientTest {
     }
 
     @Test
-    @DisplayName("GraphHopper self-host와 hosted 혼합 실패도 provider 장애가 quota보다 우선한다")
-    void routeAggregatesProviderFailureBeforeQuotaAcrossBaseUrls() throws IOException {
+    @DisplayName("GraphHopper self-host와 hosted 혼합 실패는 quota를 우선한다")
+    void routeAggregatesQuotaBeforeProviderFailureAcrossBaseUrls() throws IOException {
         HttpServer selfHostedServer = startServer(503, """
                 {"message":"self-host unavailable"}
                 """, Map.of("Retry-After", "11"));
@@ -367,13 +390,13 @@ class GraphHopperBicycleRoutingClientTest {
 
         BicycleRoutingProviderResult result = client.route(request());
 
-        assertThat(result.failureCause()).isEqualTo(BicycleRoutingFailureCause.PROVIDER_UNAVAILABLE);
-        assertThat(result.retryAfterSeconds()).isEqualTo(11);
+        assertThat(result.failureCause()).isEqualTo(BicycleRoutingFailureCause.QUOTA_EXCEEDED);
+        assertThat(result.retryAfterSeconds()).isEqualTo(17);
     }
 
     @Test
-    @DisplayName("GraphHopper 체인에서 정상 provider의 빈 경로는 다른 endpoint 장애보다 우선한다")
-    void routeAggregatesNoRouteBeforeProviderFailureAcrossBaseUrls() throws IOException {
+    @DisplayName("GraphHopper 체인에서 endpoint 장애는 다른 endpoint의 빈 경로보다 우선한다")
+    void routeAggregatesProviderFailureBeforeNoRouteAcrossBaseUrls() throws IOException {
         HttpServer selfHostedServer = startServer(503, """
                 {"message":"self-host unavailable"}
                 """);
@@ -386,8 +409,7 @@ class GraphHopperBicycleRoutingClientTest {
 
         BicycleRoutingProviderResult result = client.route(request());
 
-        assertThat(result.failureCause()).isEqualTo(BicycleRoutingFailureCause.NO_ROUTE);
-        assertThat(result.retryAfterSeconds()).isNull();
+        assertThat(result.failureCause()).isEqualTo(BicycleRoutingFailureCause.PROVIDER_UNAVAILABLE);
     }
 
     @Test

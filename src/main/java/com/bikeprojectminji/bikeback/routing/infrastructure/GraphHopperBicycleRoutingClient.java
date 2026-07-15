@@ -78,10 +78,17 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
         EnumSet<BicycleRoutingFailureCause> failureCauses = EnumSet.noneOf(BicycleRoutingFailureCause.class);
         int providerRetryAfterSeconds = 0;
         int quotaRetryAfterSeconds = 0;
+        providerEndpoints:
         for (int baseUrlIndex = 0; baseUrlIndex < baseUrls.size(); baseUrlIndex++) {
             String baseUrl = baseUrls.get(baseUrlIndex);
             int attemptsForEndpoint = baseUrls.size() > 1 ? 1 : retryMaxAttempts;
             for (int attempt = 0; attempt < attemptsForEndpoint; attempt++) {
+                if (!acquireCallBudget(request)) {
+                    failureCauses.add(BicycleRoutingFailureCause.PROVIDER_UNAVAILABLE);
+                    providerRetryAfterSeconds = Math.max(providerRetryAfterSeconds, 3);
+                    recordFailure("call_budget_exhausted");
+                    break providerEndpoints;
+                }
                 lastResult = routeOnce(baseUrl, request);
                 if ("SUCCESS".equals(lastResult.status())) {
                     if (baseUrlIndex > 0) {
@@ -110,6 +117,10 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
             }
         }
         return aggregateFailure(failureCauses, providerRetryAfterSeconds, quotaRetryAfterSeconds, lastResult);
+    }
+
+    private boolean acquireCallBudget(BicycleRouteRequest request) {
+        return request.providerCallBudget() == null || request.providerCallBudget().tryAcquire();
     }
 
     private BicycleRoutingProviderResult routeOnce(String baseUrl, BicycleRouteRequest request) {
@@ -250,19 +261,19 @@ public class GraphHopperBicycleRoutingClient implements BicycleRoutingClient {
             int quotaRetryAfterSeconds,
             BicycleRoutingProviderResult lastResult
     ) {
-        if (causes.contains(BicycleRoutingFailureCause.NO_ROUTE)) {
-            return BicycleRoutingProviderResult.noRoute(PROVIDER);
+        if (causes.contains(BicycleRoutingFailureCause.QUOTA_EXCEEDED)) {
+            return BicycleRoutingProviderResult.quotaExceeded(
+                    PROVIDER,
+                    quotaRetryAfterSeconds > 0 ? quotaRetryAfterSeconds : 60
+            );
         }
         if (causes.contains(BicycleRoutingFailureCause.PROVIDER_UNAVAILABLE)) {
             return providerRetryAfterSeconds > 0
                     ? BicycleRoutingProviderResult.providerFailure(PROVIDER, providerRetryAfterSeconds)
                     : BicycleRoutingProviderResult.providerFailure(PROVIDER);
         }
-        if (causes.contains(BicycleRoutingFailureCause.QUOTA_EXCEEDED)) {
-            return BicycleRoutingProviderResult.quotaExceeded(
-                    PROVIDER,
-                    quotaRetryAfterSeconds > 0 ? quotaRetryAfterSeconds : 60
-            );
+        if (causes.contains(BicycleRoutingFailureCause.NO_ROUTE)) {
+            return BicycleRoutingProviderResult.noRoute(PROVIDER);
         }
         return lastResult;
     }
