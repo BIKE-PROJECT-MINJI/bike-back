@@ -8,8 +8,8 @@ import org.junit.jupiter.api.Test;
 class RequestPathSanitizerTest {
 
     @Test
-    @DisplayName("clientRideId 영수증 조회 경로는 식별자 구간만 템플릿으로 치환한다")
-    void masksClientRideIdPathSegment() {
+    @DisplayName("제거된 URL 기반 영수증 경로가 유입돼도 clientRideId를 마스킹한다")
+    void masksLegacyClientRideIdPathSegment() {
         String rawClientRideId = "android-ride-private-001";
 
         String sanitized = RequestPathSanitizer.sanitize(
@@ -19,6 +19,13 @@ class RequestPathSanitizerTest {
         assertThat(sanitized)
                 .isEqualTo("/api/v1/ride-records/by-client-ride-id/{clientRideId}")
                 .doesNotContain(rawClientRideId);
+    }
+
+    @Test
+    @DisplayName("현재 body 기반 영수증 조회 경로에는 clientRideId가 포함되지 않는다")
+    void preservesCurrentReceiptPathWithoutIdentifier() {
+        assertThat(RequestPathSanitizer.sanitize("/api/v1/ride-records/receipt"))
+                .isEqualTo("/api/v1/ride-records/receipt");
     }
 
     @Test

@@ -90,6 +90,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/events", "/api/v1/events/batch").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/ride-records").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/ride-records/summary").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ride-records/receipt").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/ride-records").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/ride-records/*").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/ride-records/*/trace").authenticated()

@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.ride.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -339,7 +340,9 @@ class RideRecordServiceTest {
         assertThat(response.finalizationStatus()).isEqualTo("FINALIZING");
         verify(idempotencyLockService).executeOrWait(
                 eq("ride_record_save_full"),
-                eq("ride-record:1:android-ride-race-001"),
+                argThat(key -> key.startsWith("ride-record:1:")
+                        && !key.contains("android-ride-race-001")
+                        && key.length() == "ride-record:1:".length() + 64),
                 any(),
                 any()
         );

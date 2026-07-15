@@ -28,6 +28,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Objects;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -371,7 +375,16 @@ public class RideRecordService {
         if (ownerUserId == null || clientRideId == null) {
             return null;
         }
-        return "ride-record:" + ownerUserId + ":" + clientRideId;
+        return "ride-record:" + ownerUserId + ":" + sha256(clientRideId);
+    }
+
+    private String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     private String rideRecordRegenerateIdempotencyKey(Long ownerUserId, Long rideRecordId) {

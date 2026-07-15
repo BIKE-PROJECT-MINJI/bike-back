@@ -39,6 +39,7 @@ import com.bikeprojectminji.bikeback.ride.policy.dto.RideLocationRequest;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationRequest;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordDeletionService;
+import com.bikeprojectminji.bikeback.routing.service.ProviderCallBudget;
 import java.math.BigDecimal;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
@@ -482,7 +483,11 @@ class RideRecordPostgresConcurrencyTest {
     }
 
     private AiRouteGenerationSessionResponse createAiRouteSession() {
-        given(aiRoutePlannerService.plan(org.mockito.ArgumentMatchers.eq(SUBJECT), org.mockito.ArgumentMatchers.any(AiRoutePlanRequest.class)))
+        given(aiRoutePlannerService.plan(
+                org.mockito.ArgumentMatchers.eq(SUBJECT),
+                org.mockito.ArgumentMatchers.any(AiRoutePlanRequest.class),
+                org.mockito.ArgumentMatchers.any(ProviderCallBudget.class)
+        ))
                 .willReturn(new AiRoutePlanResponse(
                         "synthetic-plan",
                         "READY",

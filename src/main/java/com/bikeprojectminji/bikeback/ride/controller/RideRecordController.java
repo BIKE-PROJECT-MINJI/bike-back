@@ -1,11 +1,13 @@
 package com.bikeprojectminji.bikeback.ride.controller;
 
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
+import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordRequest;
 import com.bikeprojectminji.bikeback.ride.dto.CreateRideRecordSummaryRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordListResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordResponse;
+import com.bikeprojectminji.bikeback.ride.dto.RideRecordReceiptRequest;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordTraceRequest;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordDeletionService;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
@@ -70,13 +72,16 @@ public class RideRecordController {
         return ApiResponse.success(rideRecordService.getRideRecordStatus(jwt.getSubject(), rideRecordId));
     }
 
-    @GetMapping("/by-client-ride-id/{clientRideId}")
+    @PostMapping("/receipt")
     public ApiResponse<RideRecordFinalizationStatusResponse> getRideRecordStatusByClientRideId(
             @AuthenticationPrincipal Jwt jwt,
-            @PathVariable String clientRideId
+            @RequestBody RideRecordReceiptRequest request
     ) {
+        if (request == null) {
+            throw new BadRequestException("요청 본문이 필요합니다.");
+        }
         return ApiResponse.success(
-                rideRecordService.getRideRecordStatusByClientRideId(jwt.getSubject(), clientRideId)
+                rideRecordService.getRideRecordStatusByClientRideId(jwt.getSubject(), request.clientRideId())
         );
     }
 

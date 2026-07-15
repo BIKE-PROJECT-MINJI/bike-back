@@ -9,6 +9,9 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.bikeprojectminji.bikeback.global.exception.ServiceUnavailableException;
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -17,13 +20,31 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.RedisScript;
+import org.slf4j.LoggerFactory;
 
 @SuppressWarnings({"rawtypes", "unchecked"})
 class IdempotencyLockServiceTest {
+
+    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
+
+    @BeforeEach
+    void attachLogAppender() {
+        appender.start();
+        ((Logger) LoggerFactory.getLogger(IdempotencyLockService.class)).addAppender(appender);
+    }
+
+    @AfterEach
+    void detachLogAppender() {
+        ((Logger) LoggerFactory.getLogger(IdempotencyLockService.class)).detachAppender(appender);
+        appender.stop();
+        appender.list.clear();
+    }
 
     @Test
     @DisplayName("idempotency lock은 기존 리소스가 있으면 Redis를 호출하지 않고 반환한다")
@@ -118,12 +139,36 @@ class IdempotencyLockServiceTest {
 
         String result = service.executeOrWait(
                 "course_from_ride",
-                "course-from-ride:1:1001",
+                "ride-record:1:private-client-id\\nforged",
                 Optional::<String>empty,
                 () -> "created-course"
         );
 
         assertThat(result).isEqualTo("created-course");
+        assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                .allMatch(message -> !message.contains("private-client-id") && !message.contains("\\nforged"));
+    }
+
+    @Test
+    @DisplayName("idempotency lock 해제 실패 로그는 lock key 원문을 남기지 않는다")
+    void releaseFailureLogDoesNotExposeRawKey() {
+        StringRedisTemplate redisTemplate = org.mockito.Mockito.mock(StringRedisTemplate.class);
+        ValueOperations<String, String> valueOperations = org.mockito.Mockito.mock(ValueOperations.class);
+        given(redisTemplate.opsForValue()).willReturn(valueOperations);
+        given(valueOperations.setIfAbsent(anyString(), anyString(), eq(Duration.ofSeconds(10)))).willReturn(true);
+        given(redisTemplate.execute(any(RedisScript.class), any(List.class), anyString()))
+                .willThrow(new IllegalStateException("redis release down"));
+        IdempotencyLockService service = service(redisTemplate);
+
+        service.executeOrWait(
+                "ride_record_save_full",
+                "ride-record:1:private-client-id\\nforged",
+                Optional::<String>empty,
+                () -> "created"
+        );
+
+        assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                .allMatch(message -> !message.contains("private-client-id") && !message.contains("forged"));
     }
 
     @Test
