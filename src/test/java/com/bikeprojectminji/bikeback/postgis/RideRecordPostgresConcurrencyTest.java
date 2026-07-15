@@ -56,7 +56,6 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterAll;
@@ -348,20 +347,14 @@ class RideRecordPostgresConcurrencyTest {
                     () -> promoteAfterBarrier(session, candidateId, request, startBarrier)
             );
             List<Future<Object>> futures = executor.invokeAll(calls, 20, TimeUnit.SECONDS);
-            int successCount = 0;
-            int failureCount = 0;
+            List<Long> promotedCourseIds = new ArrayList<>();
             for (Future<Object> future : futures) {
                 assertThat(future.isCancelled()).isFalse();
-                try {
-                    assertThat(future.get(5, TimeUnit.SECONDS)).isInstanceOf(AiRoutePromotedCourseResponse.class);
-                    successCount++;
-                } catch (ExecutionException expectedConcurrentLoser) {
-                    failureCount++;
-                }
+                AiRoutePromotedCourseResponse promoted = (AiRoutePromotedCourseResponse) future.get(5, TimeUnit.SECONDS);
+                promotedCourseIds.add(promoted.courseId());
             }
 
-            assertThat(successCount).isEqualTo(1);
-            assertThat(failureCount).isEqualTo(1);
+            assertThat(promotedCourseIds).hasSize(2).containsOnly(promotedCourseIds.get(0));
             assertThat(count("select count(*) from courses where source_ai_route_candidate_id = ?", candidateId))
                     .isEqualTo(1);
             assertThat(count("""
