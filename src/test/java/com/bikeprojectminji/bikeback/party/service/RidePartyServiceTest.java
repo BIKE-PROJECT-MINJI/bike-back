@@ -23,6 +23,7 @@ import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberStatus;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyStatus;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyMemberRepository;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyRepository;
+import com.bikeprojectminji.bikeback.party.websocket.RidePartySocketSessionRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -30,6 +31,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -54,6 +56,9 @@ class RidePartyServiceTest {
 
     @Mock
     private RidePartySocketTokenService socketTokenService;
+
+    @Mock
+    private RidePartySocketSessionRegistry socketSessionRegistry;
 
     private final Clock clock = Clock.fixed(Instant.parse("2026-06-26T00:00:00Z"), ZoneOffset.UTC);
 
@@ -133,6 +138,50 @@ class RidePartyServiceTest {
     }
 
     @Test
+    @DisplayName("전체 파티 목록은 현재 공개 코스의 활성 파티만 반환한다")
+    void listAllFiltersPartiesWhoseCourseIsNoLongerPublic() {
+        RidePartyService service = createService();
+        RidePartyEntity visibleParty = party(20L, 10L, 1L);
+        RidePartyEntity hiddenParty = party(21L, 11L, 3L);
+        given(authService.findUserBySubject("2")).willReturn(user(2L));
+        given(partyRepository.findByStatusInOrderByCreatedAtDescIdDesc(
+                any(), any(Pageable.class)
+        )).willReturn(List.of(visibleParty, hiddenParty));
+        given(courseRepository.findAllById(any())).willReturn(List.of(
+                course(10L, CourseVisibility.PUBLIC),
+                course(11L, CourseVisibility.PRIVATE)
+        ));
+        given(memberRepository.findByPartyIdInAndStatus(any(), any())).willReturn(List.of(
+                member(20L, 1L, RidePartyMemberRole.HOST)
+        ));
+
+        RidePartyResponse response = service.listAll("2").items().get(0);
+
+        assertThat(response.id()).isEqualTo(20L);
+    }
+
+    @Test
+    @DisplayName("내 파티 목록은 현재 JOINED 상태인 활성 파티만 반환한다")
+    void listMineReturnsOnlyJoinedParties() {
+        RidePartyService service = createService();
+        RidePartyEntity party = party(20L, 10L, 1L);
+        given(authService.findUserBySubject("2")).willReturn(user(2L));
+        given(partyRepository.findJoinedByUserIdAndStatuses(
+                org.mockito.ArgumentMatchers.eq(2L), any(), any(Pageable.class)
+        )).willReturn(List.of(party));
+        given(courseRepository.findAllById(any())).willReturn(List.of(course(10L, CourseVisibility.PUBLIC)));
+        given(memberRepository.findByPartyIdInAndStatus(any(), any())).willReturn(List.of(
+                member(20L, 1L, RidePartyMemberRole.HOST),
+                member(20L, 2L, RidePartyMemberRole.MEMBER)
+        ));
+
+        RidePartyResponse response = service.listMine("2").items().get(0);
+
+        assertThat(response.currentUserMember()).isTrue();
+        assertThat(response.currentUserHost()).isFalse();
+    }
+
+    @Test
     @DisplayName("파티 socket token은 현재 참여자에게만 발급한다")
     void issueSocketTokenRequiresJoinedMember() {
         RidePartyService service = createService();
@@ -153,8 +202,84 @@ class RidePartyServiceTest {
         assertThat(response.expiresAt()).isEqualTo(expiresAt);
     }
 
+    @Test
+    @DisplayName("파티를 나간 멤버의 기존 위치 WebSocket을 즉시 닫는다")
+    void leaveClosesMemberSocketSessions() {
+        RidePartyService service = createService();
+        UserEntity user = user(2L);
+        RidePartyEntity party = new RidePartyEntity(10L, 1L, "공개 파티", OffsetDateTime.now(clock), 4);
+        ReflectionTestUtils.setField(party, "id", 20L);
+        RidePartyMemberEntity member = member(20L, 2L, RidePartyMemberRole.MEMBER);
+        given(authService.findUserBySubject("2")).willReturn(user);
+        given(partyRepository.findById(20L)).willReturn(Optional.of(party));
+        given(memberRepository.findByPartyIdAndUserId(20L, 2L)).willReturn(Optional.of(member));
+        given(memberRepository.countByPartyIdAndStatus(20L, RidePartyMemberStatus.JOINED)).willReturn(1);
+
+        service.leave("2", 20L);
+
+        verify(socketSessionRegistry).closeMember(20L, 2L);
+        assertThat(member.getStatus()).isEqualTo(RidePartyMemberStatus.LEFT);
+    }
+
+    @Test
+    @DisplayName("호스트만 OPEN 파티를 RIDING으로 시작한다")
+    void startTransitionsOpenPartyForHost() {
+        RidePartyService service = createService();
+        UserEntity host = user(1L);
+        RidePartyEntity party = new RidePartyEntity(10L, 1L, "공개 파티", OffsetDateTime.now(clock), 4);
+        ReflectionTestUtils.setField(party, "id", 20L);
+        given(authService.findUserBySubject("1")).willReturn(host);
+        given(partyRepository.findByIdForUpdate(20L)).willReturn(Optional.of(party));
+        given(courseRepository.findById(10L)).willReturn(Optional.of(course(10L, CourseVisibility.PUBLIC)));
+        given(memberRepository.countByPartyIdAndStatus(20L, RidePartyMemberStatus.JOINED)).willReturn(2);
+
+        RidePartyResponse response = service.start("1", 20L);
+
+        assertThat(response.status()).isEqualTo("RIDING");
+        assertThat(party.getStatus()).isEqualTo(RidePartyStatus.RIDING);
+    }
+
+    @Test
+    @DisplayName("일반 멤버는 파티 시작 상태를 변경할 수 없다")
+    void startRejectsNonHost() {
+        RidePartyService service = createService();
+        UserEntity member = user(2L);
+        RidePartyEntity party = new RidePartyEntity(10L, 1L, "공개 파티", OffsetDateTime.now(clock), 4);
+        ReflectionTestUtils.setField(party, "id", 20L);
+        given(authService.findUserBySubject("2")).willReturn(member);
+        given(partyRepository.findByIdForUpdate(20L)).willReturn(Optional.of(party));
+
+        assertThatThrownBy(() -> service.start("2", 20L))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("호스트만 파티 주행을 시작할 수 있습니다.");
+    }
+
+    @Test
+    @DisplayName("파티 시작은 신고 숨김 또는 비공개로 바뀐 코스를 다시 거부한다")
+    void startRejectsCourseThatIsNoLongerPublic() {
+        RidePartyService service = createService();
+        UserEntity host = user(1L);
+        RidePartyEntity party = new RidePartyEntity(10L, 1L, "공개 파티", OffsetDateTime.now(clock), 4);
+        ReflectionTestUtils.setField(party, "id", 20L);
+        given(authService.findUserBySubject("1")).willReturn(host);
+        given(partyRepository.findByIdForUpdate(20L)).willReturn(Optional.of(party));
+        given(courseRepository.findById(10L)).willReturn(Optional.of(course(10L, CourseVisibility.PRIVATE)));
+
+        assertThatThrownBy(() -> service.start("1", 20L))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("공개 코스만 파티를 만들거나 참여할 수 있습니다.");
+    }
+
     private RidePartyService createService() {
-        return new RidePartyService(partyRepository, memberRepository, courseRepository, authService, socketTokenService, clock);
+        return new RidePartyService(
+                partyRepository,
+                memberRepository,
+                courseRepository,
+                authService,
+                socketTokenService,
+                socketSessionRegistry,
+                clock
+        );
     }
 
     private UserEntity user(Long id) {
@@ -183,5 +308,11 @@ class RidePartyServiceTest {
 
     private RidePartyMemberEntity member(Long partyId, Long userId, RidePartyMemberRole role) {
         return new RidePartyMemberEntity(partyId, userId, role, clock);
+    }
+
+    private RidePartyEntity party(Long id, Long courseId, Long hostUserId) {
+        RidePartyEntity party = new RidePartyEntity(courseId, hostUserId, "공개 파티", OffsetDateTime.now(clock), 4);
+        ReflectionTestUtils.setField(party, "id", id);
+        return party;
     }
 }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
@@ -15,6 +16,7 @@ import com.bikeprojectminji.bikeback.party.entity.RidePartyReportReason;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyStatus;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyReportRepository;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyRepository;
+import com.bikeprojectminji.bikeback.party.websocket.RidePartySocketSessionRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -39,6 +41,9 @@ class RidePartyReportServiceTest {
     @Mock
     private AuthService authService;
 
+    @Mock
+    private RidePartySocketSessionRegistry socketSessionRegistry;
+
     private final Clock clock = Clock.fixed(Instant.parse("2026-06-26T00:00:00Z"), ZoneOffset.UTC);
 
     @Test
@@ -57,6 +62,7 @@ class RidePartyReportServiceTest {
 
         assertThat(response.reportCount()).isEqualTo(1);
         assertThat(response.status()).isEqualTo(RidePartyStatus.CANCELED.name());
+        verify(socketSessionRegistry).closeParty(20L);
     }
 
     @Test
@@ -75,7 +81,7 @@ class RidePartyReportServiceTest {
     }
 
     private RidePartyReportService createService() {
-        return new RidePartyReportService(partyRepository, reportRepository, authService, clock);
+        return new RidePartyReportService(partyRepository, reportRepository, authService, socketSessionRegistry, clock);
     }
 
     private UserEntity user(Long id) {

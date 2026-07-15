@@ -3,6 +3,7 @@ package com.bikeprojectminji.bikeback.party.websocket;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.validation.CoordinateValidator;
 import com.bikeprojectminji.bikeback.party.service.RidePartyLocationService;
+import com.bikeprojectminji.bikeback.party.service.RidePartyLocationAccessService;
 import com.bikeprojectminji.bikeback.party.service.RidePartySocketTokenPayload;
 import com.bikeprojectminji.bikeback.party.service.RidePartySocketTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,8 +14,6 @@ import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -30,16 +29,21 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final RidePartySocketTokenService socketTokenService;
     private final RidePartyLocationService locationService;
-    private final Map<Long, Set<WebSocketSession>> sessionsByPartyId = new ConcurrentHashMap<>();
+    private final RidePartyLocationAccessService locationAccessService;
+    private final RidePartySocketSessionRegistry sessionRegistry;
 
     public RidePartyLocationWebSocketHandler(
             ObjectMapper objectMapper,
             RidePartySocketTokenService socketTokenService,
-            RidePartyLocationService locationService
+            RidePartyLocationService locationService,
+            RidePartyLocationAccessService locationAccessService,
+            RidePartySocketSessionRegistry sessionRegistry
     ) {
         this.objectMapper = objectMapper;
         this.socketTokenService = socketTokenService;
         this.locationService = locationService;
+        this.locationAccessService = locationAccessService;
+        this.sessionRegistry = sessionRegistry;
     }
 
     @Override
@@ -50,9 +54,13 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
             session.close(CloseStatus.POLICY_VIOLATION.withReason("invalid party socket token"));
             return;
         }
+        if (!locationAccessService.canShare(partyId, token.get().userId())) {
+            session.close(CloseStatus.POLICY_VIOLATION.withReason("party location access denied"));
+            return;
+        }
         session.getAttributes().put(PARTY_ID_ATTRIBUTE, partyId);
         session.getAttributes().put(USER_ID_ATTRIBUTE, token.get().userId());
-        sessionsByPartyId.computeIfAbsent(partyId, ignored -> ConcurrentHashMap.newKeySet()).add(session);
+        sessionRegistry.register(partyId, token.get().userId(), session);
         session.sendMessage(toMessage(Map.of("type", "connected", "partyId", partyId)));
     }
 
@@ -60,8 +68,9 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         Long partyId = attribute(session, PARTY_ID_ATTRIBUTE);
         Long userId = attribute(session, USER_ID_ATTRIBUTE);
-        if (partyId == null || userId == null) {
+        if (partyId == null || userId == null || !locationAccessService.canShare(partyId, userId)) {
             session.close(CloseStatus.POLICY_VIOLATION);
+            sessionRegistry.unregister(session);
             return;
         }
         try {
@@ -90,24 +99,17 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        Long partyId = attribute(session, PARTY_ID_ATTRIBUTE);
-        if (partyId == null) {
-            return;
-        }
-        Set<WebSocketSession> sessions = sessionsByPartyId.get(partyId);
-        if (sessions != null) {
-            sessions.remove(session);
-            if (sessions.isEmpty()) {
-                sessionsByPartyId.remove(partyId);
-            }
-        }
+        sessionRegistry.unregister(session);
     }
 
     private void broadcast(Long partyId, Object payload) throws Exception {
         TextMessage message = toMessage(payload);
-        Set<WebSocketSession> sessions = sessionsByPartyId.getOrDefault(partyId, Set.of());
-        for (WebSocketSession session : sessions) {
-            if (session.isOpen()) {
+        for (RidePartySocketSessionRegistry.PartySocketSession entry : sessionRegistry.sessionsForParty(partyId)) {
+            WebSocketSession session = entry.session();
+            if (!locationAccessService.canShare(entry.partyId(), entry.userId())) {
+                session.close(CloseStatus.POLICY_VIOLATION);
+                sessionRegistry.unregister(session);
+            } else if (session.isOpen()) {
                 session.sendMessage(message);
             }
         }
