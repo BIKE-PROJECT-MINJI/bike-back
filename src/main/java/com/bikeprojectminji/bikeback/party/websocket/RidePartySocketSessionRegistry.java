@@ -26,24 +26,33 @@ public class RidePartySocketSessionRegistry {
     }
 
     public void closeMember(Long partyId, Long userId) {
-        closeMatching(entry -> entry.partyId().equals(partyId) && entry.userId().equals(userId));
+        closeMatching(
+                entry -> entry.partyId().equals(partyId) && entry.userId().equals(userId),
+                CloseStatus.POLICY_VIOLATION.withReason("member-left")
+        );
     }
 
     public void closeParty(Long partyId) {
-        closeMatching(entry -> entry.partyId().equals(partyId));
+        closeMatching(
+                entry -> entry.partyId().equals(partyId),
+                CloseStatus.POLICY_VIOLATION.withReason("party-canceled")
+        );
     }
 
-    private void closeMatching(java.util.function.Predicate<PartySocketSession> predicate) {
+    private void closeMatching(
+            java.util.function.Predicate<PartySocketSession> predicate,
+            CloseStatus closeStatus
+    ) {
         for (PartySocketSession entry : sessions.stream().filter(predicate).toList()) {
-            close(entry.session());
+            close(entry.session(), closeStatus);
             sessions.remove(entry);
         }
     }
 
-    private void close(WebSocketSession session) {
+    private void close(WebSocketSession session, CloseStatus closeStatus) {
         try {
             if (session.isOpen()) {
-                session.close(CloseStatus.POLICY_VIOLATION.withReason("party location access revoked"));
+                session.close(closeStatus);
             }
         } catch (IOException ignored) {
             // The registry still removes the revoked session even if the transport is already broken.

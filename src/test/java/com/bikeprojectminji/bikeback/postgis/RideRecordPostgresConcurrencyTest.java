@@ -23,7 +23,9 @@ import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.auth.repository.UserRepository;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import com.bikeprojectminji.bikeback.course.dto.CourseWriteResponse;
+import com.bikeprojectminji.bikeback.course.dto.CourseRoutePointRequest;
 import com.bikeprojectminji.bikeback.course.dto.ImportGpxCourseRequest;
+import com.bikeprojectminji.bikeback.course.dto.UpdateCourseRequest;
 import com.bikeprojectminji.bikeback.course.service.CourseService;
 import com.bikeprojectminji.bikeback.course.repository.CourseRouteGeometryRepository;
 import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
@@ -39,6 +41,7 @@ import com.bikeprojectminji.bikeback.ride.policy.dto.RideLocationRequest;
 import com.bikeprojectminji.bikeback.ride.policy.dto.RidePolicyEvaluationRequest;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordDeletionService;
+import com.bikeprojectminji.bikeback.ride.service.RideRecordFinalizationWriter;
 import com.bikeprojectminji.bikeback.routing.service.ProviderCallBudget;
 import java.math.BigDecimal;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -152,6 +155,9 @@ class RideRecordPostgresConcurrencyTest {
     private RideRecordService rideRecordService;
 
     @Autowired
+    private RideRecordFinalizationWriter rideRecordFinalizationWriter;
+
+    @Autowired
     private CourseService courseService;
 
     @Autowired
@@ -260,6 +266,57 @@ class RideRecordPostgresConcurrencyTest {
     }
 
     @Test
+    @DisplayName("실제 PostgreSQL에서 raw는 보존하고 저품질 구간을 제외한 processed 경로와 서버 거리를 저장한다")
+    void finalizesQualityTraceWithoutDeletingRawPoints() {
+        OffsetDateTime startedAt = OffsetDateTime.parse("2026-01-15T02:00:00Z");
+        RideRecordResponse response = rideRecordService.saveRideRecord(SUBJECT, new CreateRideRecordRequest(
+                "synthetic-quality-finalization-001",
+                startedAt,
+                startedAt.plusMinutes(1),
+                new RideRecordSummaryRequest(999_999, 60),
+                List.of(
+                        point(1, "37.5010000", "127.0010000", startedAt),
+                        point(2, "37.5011000", "127.0011000", startedAt.plusSeconds(5)),
+                        new RideRecordPointRequest(
+                                3,
+                                new BigDecimal("37.9000000"),
+                                new BigDecimal("127.4000000"),
+                                startedAt.plusSeconds(10),
+                                new BigDecimal("80.0"),
+                                null,
+                                null,
+                                null,
+                                null,
+                                null
+                        ),
+                        point(4, "37.5020000", "127.0020000", startedAt.plusSeconds(20)),
+                        point(5, "37.5021000", "127.0021000", startedAt.plusSeconds(25)),
+                        point(6, "37.5022000", "127.0022000", startedAt.plusSeconds(30))
+                )
+        ));
+
+        rideRecordFinalizationWriter.replaceProcessedPoints(response.rideRecordId());
+
+        assertThat(count("select count(*) from ride_record_points where ride_record_id = ?", response.rideRecordId()))
+                .isEqualTo(6);
+        assertThat(count("select count(*) from ride_record_processed_points where ride_record_id = ?", response.rideRecordId()))
+                .isEqualTo(2);
+        assertThat(count("""
+                select count(*) from ride_record_processed_points
+                where ride_record_id = ?
+                  and (latitude >= 37.9 or longitude >= 127.4)
+                """, response.rideRecordId())).isZero();
+        assertThat(count("""
+                select count(*) from ride_records
+                where id = ?
+                  and finalization_status = 'READY'
+                  and quality_status = 'PARTIAL'
+                  and distance_m > 0
+                  and distance_m < 1000
+                """, response.rideRecordId())).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("정상 GPX import는 course, route point, SRID 4326 LineString을 한 트랜잭션에 저장한다")
     void importsGpxIntoPostgisGeometry() throws IOException {
         CourseWriteResponse response = courseService.importGpxCourse(SUBJECT, new ImportGpxCourseRequest(
@@ -282,6 +339,43 @@ class RideRecordPostgresConcurrencyTest {
                   and ST_NPoints(route_line_geom) = 3
                 """, response.courseId())).isEqualTo(1);
         gpxImportPassed = true;
+    }
+
+    @Test
+    @DisplayName("실제 PostgreSQL에서 코스 route point 교체는 unique constraint 없이 새 점만 남긴다")
+    void replacesCourseRoutePointsInPostgres() throws IOException {
+        CourseWriteResponse course = courseService.importGpxCourse(SUBJECT, new ImportGpxCourseRequest(
+                "synthetic-route-replacement",
+                "non-user fixture",
+                "PRIVATE",
+                fixture("synthetic-normal.gpx")
+        ));
+
+        courseService.updateCourse(SUBJECT, course.courseId(), new UpdateCourseRequest(
+                "synthetic-route-replacement-updated",
+                "non-user fixture",
+                "PRIVATE",
+                List.of(
+                        new CourseRoutePointRequest(1, new BigDecimal("37.5100000"), new BigDecimal("127.0100000")),
+                        new CourseRoutePointRequest(2, new BigDecimal("37.5200000"), new BigDecimal("127.0200000"))
+                )
+        ));
+
+        assertThat(count("select count(*) from course_route_points where course_id = ?", course.courseId()))
+                .isEqualTo(2);
+        assertThat(count("""
+                select count(*) from course_route_points
+                where course_id = ?
+                  and point_order = 1
+                  and latitude = 37.5100000
+                  and longitude = 127.0100000
+                """, course.courseId())).isEqualTo(1);
+        assertThat(count("""
+                select count(*) from courses
+                where id = ?
+                  and route_line_geom is not null
+                  and ST_NPoints(route_line_geom) = 2
+                """, course.courseId())).isEqualTo(1);
     }
 
     @Test

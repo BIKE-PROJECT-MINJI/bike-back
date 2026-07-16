@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.BDDMockito.given;
 
-import com.bikeprojectminji.bikeback.ride.dto.RideRecordPointRequest;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordPointEntity;
@@ -61,8 +60,8 @@ class RideRecordFinalizationFailureIntegrationTest {
         ));
         Long rideRecordId = rideRecord.getId();
         rideRecordPointRepository.saveAllAndFlush(List.of(
-                rawPoint(rideRecordId, 1, "37.4812", "126.9527"),
-                rawPoint(rideRecordId, 2, "37.4824", "126.9553")
+                rawPoint(rideRecordId, 1, "37.48120", "126.95270"),
+                rawPoint(rideRecordId, 2, "37.48125", "126.95275")
         ));
         rideRecordProcessedPointRepository.saveAllAndFlush(List.of(
                 new RideRecordProcessedPointEntity(rideRecordId, 1, new BigDecimal("37.4800"), new BigDecimal("126.9500")),
@@ -71,10 +70,8 @@ class RideRecordFinalizationFailureIntegrationTest {
         rideRecord.markReady(OffsetDateTime.parse("2026-04-21T11:01:00+09:00"));
         rideRecord.markFinalizing(OffsetDateTime.parse("2026-04-21T11:02:00+09:00"));
         rideRecordRepository.saveAndFlush(rideRecord);
-        given(rideRouteCanonicalizer.canonicalize(anyList())).willReturn(List.of(
-                new RideRecordPointRequest(1, new BigDecimal("37.4900"), new BigDecimal("126.9600")),
-                new RideRecordPointRequest(1, new BigDecimal("37.4910"), new BigDecimal("126.9610"))
-        ));
+        given(rideRouteCanonicalizer.canonicalize(anyList()))
+                .willThrow(new IllegalStateException("synthetic canonicalization failure"));
 
         rideRecordFinalizationProcessor.finalizeRideRecord(rideRecordId);
 
@@ -93,7 +90,7 @@ class RideRecordFinalizationFailureIntegrationTest {
                 new BigDecimal(latitude),
                 new BigDecimal(longitude),
                 OffsetDateTime.parse("2026-04-21T10:00:00+09:00").plusSeconds(pointOrder),
-                null,
+                new BigDecimal("5.0"),
                 null,
                 null,
                 null,

@@ -7,6 +7,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
+import java.util.Arrays;
+import java.util.List;
 
 @Entity
 @Table(name = "ride_records")
@@ -51,6 +53,12 @@ public class RideRecordEntity {
 
     @Column(name = "finalization_error_message")
     private String finalizationErrorMessage;
+
+    @Column(name = "quality_status", length = 16)
+    private String qualityStatus;
+
+    @Column(name = "quality_reasons")
+    private String qualityReasons;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -125,6 +133,17 @@ public class RideRecordEntity {
         return finalizationErrorMessage;
     }
 
+    public RideRouteQualityStatus getQualityStatus() {
+        return qualityStatus == null ? null : RideRouteQualityStatus.valueOf(qualityStatus);
+    }
+
+    public List<String> getQualityReasons() {
+        if (qualityReasons == null || qualityReasons.isBlank()) {
+            return List.of();
+        }
+        return Arrays.asList(qualityReasons.split(","));
+    }
+
     // 주행 기록 후처리는 raw 저장 직후 FINALIZING으로 시작하고,
     // 최종 경로가 준비되면 READY, 실패하면 FAILED로 전이한다.
     public void markFinalizing(OffsetDateTime now) {
@@ -134,13 +153,27 @@ public class RideRecordEntity {
         this.finalizationCompletedAt = null;
         this.finalizationFailedAt = null;
         this.finalizationErrorMessage = null;
+        this.qualityStatus = null;
+        this.qualityReasons = null;
     }
 
     public void markReady(OffsetDateTime now) {
+        markReady(now, this.distanceM, RideRouteQualityStatus.FULL, List.of());
+    }
+
+    public void markReady(
+            OffsetDateTime now,
+            int authoritativeDistanceM,
+            RideRouteQualityStatus routeQualityStatus,
+            List<String> routeQualityReasons
+    ) {
         this.finalizationStatus = RideRecordFinalizationStatus.READY.name();
         this.finalizationCompletedAt = now;
         this.finalizationFailedAt = null;
         this.finalizationErrorMessage = null;
+        this.distanceM = authoritativeDistanceM;
+        this.qualityStatus = routeQualityStatus.name();
+        this.qualityReasons = String.join(",", routeQualityReasons);
     }
 
     public void markFailed(OffsetDateTime now, String errorMessage) {

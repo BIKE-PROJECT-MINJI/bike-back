@@ -21,9 +21,9 @@ import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberEntity;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberRole;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberStatus;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyStatus;
+import com.bikeprojectminji.bikeback.party.event.RidePartyMemberLeftEvent;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyMemberRepository;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyRepository;
-import com.bikeprojectminji.bikeback.party.websocket.RidePartySocketSessionRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -58,7 +59,7 @@ class RidePartyServiceTest {
     private RidePartySocketTokenService socketTokenService;
 
     @Mock
-    private RidePartySocketSessionRegistry socketSessionRegistry;
+    private ApplicationEventPublisher eventPublisher;
 
     private final Clock clock = Clock.fixed(Instant.parse("2026-06-26T00:00:00Z"), ZoneOffset.UTC);
 
@@ -203,8 +204,8 @@ class RidePartyServiceTest {
     }
 
     @Test
-    @DisplayName("파티를 나간 멤버의 기존 위치 WebSocket을 즉시 닫는다")
-    void leaveClosesMemberSocketSessions() {
+    @DisplayName("파티 탈퇴는 커밋 뒤 소켓을 닫기 위한 이벤트를 발행한다")
+    void leavePublishesMemberSocketRevocationEvent() {
         RidePartyService service = createService();
         UserEntity user = user(2L);
         RidePartyEntity party = new RidePartyEntity(10L, 1L, "공개 파티", OffsetDateTime.now(clock), 4);
@@ -217,7 +218,7 @@ class RidePartyServiceTest {
 
         service.leave("2", 20L);
 
-        verify(socketSessionRegistry).closeMember(20L, 2L);
+        verify(eventPublisher).publishEvent(new RidePartyMemberLeftEvent(20L, 2L));
         assertThat(member.getStatus()).isEqualTo(RidePartyMemberStatus.LEFT);
     }
 
@@ -277,7 +278,7 @@ class RidePartyServiceTest {
                 courseRepository,
                 authService,
                 socketTokenService,
-                socketSessionRegistry,
+                eventPublisher,
                 clock
         );
     }

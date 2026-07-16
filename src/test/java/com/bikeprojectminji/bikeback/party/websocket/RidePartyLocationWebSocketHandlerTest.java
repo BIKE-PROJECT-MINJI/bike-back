@@ -108,6 +108,31 @@ class RidePartyLocationWebSocketHandlerTest {
         verify(locationService, never()).saveLocation(eq(20L), eq(2L), org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    @DisplayName("권한이 철회된 수신자는 다른 멤버의 위치를 받지 못하고 연결이 닫힌다")
+    void closesRevokedPassiveRecipientBeforeBroadcast() throws Exception {
+        WebSocketSession sender = session("token-1");
+        WebSocketSession receiver = session("token-2");
+        when(socketTokenService.consume("token-1", 20L))
+                .thenReturn(Optional.of(new RidePartySocketTokenPayload(20L, 2L, OffsetDateTime.now().plusMinutes(1))));
+        when(socketTokenService.consume("token-2", 20L))
+                .thenReturn(Optional.of(new RidePartySocketTokenPayload(20L, 3L, OffsetDateTime.now().plusMinutes(1))));
+        when(locationAccessService.canShare(20L, 2L)).thenReturn(true);
+        when(locationAccessService.canShare(20L, 3L)).thenReturn(true, false);
+
+        handler.afterConnectionEstablished(sender);
+        handler.afterConnectionEstablished(receiver);
+        handler.handleTextMessage(sender, new TextMessage("""
+                {"latitude":37.5,"longitude":127.0,"accuracyM":8.0}
+                """));
+
+        verify(receiver).close(CloseStatus.POLICY_VIOLATION);
+        verify(receiver, never()).sendMessage(org.mockito.ArgumentMatchers.argThat(
+                message -> message instanceof TextMessage textMessage
+                        && textMessage.getPayload().contains("\"type\":\"location\"")
+        ));
+    }
+
     private WebSocketSession session(String token) {
         WebSocketSession session = mock(WebSocketSession.class);
         when(session.getUri()).thenReturn(URI.create("ws://localhost/ws/v1/parties/20/locations?socketToken=" + token));

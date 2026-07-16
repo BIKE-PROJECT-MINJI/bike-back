@@ -130,6 +130,8 @@ CREATE TABLE ride_records (
     finalization_completed_at TIMESTAMP WITH TIME ZONE,
     finalization_failed_at TIMESTAMP WITH TIME ZONE,
     finalization_error_message TEXT,
+    quality_status VARCHAR(16),
+    quality_reasons TEXT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     CONSTRAINT uq_ride_records_owner_client_ride_id UNIQUE (owner_user_id, client_ride_id)
 );

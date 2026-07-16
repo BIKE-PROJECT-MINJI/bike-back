@@ -106,4 +106,24 @@ public class RideRecordPointEntity {
     public BigDecimal getAccuracyM() {
         return accuracyM;
     }
+
+    public BigDecimal getSpeedMps() {
+        return speedMps;
+    }
+
+    public BigDecimal getBearingDeg() {
+        return bearingDeg;
+    }
+
+    public BigDecimal getAltitudeM() {
+        return altitudeM;
+    }
+
+    public BigDecimal getDistanceToRouteM() {
+        return distanceToRouteM;
+    }
+
+    public BigDecimal getRouteProgressPct() {
+        return routeProgressPct;
+    }
 }

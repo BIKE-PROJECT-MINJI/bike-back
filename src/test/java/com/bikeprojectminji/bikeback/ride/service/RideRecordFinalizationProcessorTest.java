@@ -1,5 +1,6 @@
 package com.bikeprojectminji.bikeback.ride.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -12,6 +13,8 @@ import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordPointRequest;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordPointEntity;
+import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
+import com.bikeprojectminji.bikeback.ride.entity.RideRouteQualityStatus;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordProcessedPointRepository;
 import com.bikeprojectminji.bikeback.ride.repository.RideRecordRepository;
@@ -68,12 +71,12 @@ class RideRecordFinalizationProcessorTest {
         RideRecordEntity rideRecord = finalizingRideRecord();
         given(rideRecordRepository.findByIdForUpdate(7L)).willReturn(Optional.of(rideRecord));
         given(rideRecordPointRepository.findByRideRecordIdOrderByPointOrderAsc(7L)).willReturn(List.of(
-                rawPoint(7L, 1, "37.4812", "126.9527"),
-                rawPoint(7L, 2, "37.4824", "126.9553")
+                rawPoint(7L, 1, "37.48120", "126.95270", "5.00"),
+                rawPoint(7L, 2, "37.48125", "126.95275", "5.00")
         ));
         given(rideRouteCanonicalizer.canonicalize(anyList())).willReturn(List.of(
-                new RideRecordPointRequest(1, new BigDecimal("37.4812"), new BigDecimal("126.9527")),
-                new RideRecordPointRequest(2, new BigDecimal("37.4824"), new BigDecimal("126.9553"))
+                new RideRecordPointRequest(1, new BigDecimal("37.48120"), new BigDecimal("126.95270")),
+                new RideRecordPointRequest(2, new BigDecimal("37.48125"), new BigDecimal("126.95275"))
         ));
 
         writer().replaceProcessedPoints(7L);
@@ -84,6 +87,28 @@ class RideRecordFinalizationProcessorTest {
         inOrder.verify(rideRecordProcessedPointRepository).flush();
         inOrder.verify(rideRecordProcessedPointRepository).saveAll(anyList());
         verify(rideRecordRepository).save(rideRecord);
+        assertThat(rideRecord.getDistanceM()).isBetween(6, 8);
+        assertThat(rideRecord.getQualityStatus()).isEqualTo(RideRouteQualityStatus.FULL);
+    }
+
+    @Test
+    @DisplayName("유효 구간이 없는 trace는 raw를 보존하고 processed 없이 REJECTED로 완료한다")
+    void replaceProcessedPointsMarksRejectedWithoutDeletingRawEvidence() {
+        RideRecordEntity rideRecord = finalizingRideRecord();
+        given(rideRecordRepository.findByIdForUpdate(7L)).willReturn(Optional.of(rideRecord));
+        given(rideRecordPointRepository.findByRideRecordIdOrderByPointOrderAsc(7L)).willReturn(List.of(
+                rawPoint(7L, 1, "37.48120", "126.95270", "80.00"),
+                rawPoint(7L, 2, "37.48125", "126.95275", "80.00")
+        ));
+
+        writer().replaceProcessedPoints(7L);
+
+        verify(rideRecordProcessedPointRepository).deleteByRideRecordId(7L);
+        verify(rideRecordProcessedPointRepository, never()).saveAll(anyList());
+        verify(rideRecordPointRepository).findByRideRecordIdOrderByPointOrderAsc(7L);
+        assertThat(rideRecord.getFinalizationStatus()).isEqualTo(RideRecordFinalizationStatus.READY);
+        assertThat(rideRecord.getQualityStatus()).isEqualTo(RideRouteQualityStatus.REJECTED);
+        assertThat(rideRecord.getDistanceM()).isZero();
     }
 
     @Test
@@ -102,7 +127,8 @@ class RideRecordFinalizationProcessorTest {
                 rideRecordRepository,
                 rideRecordPointRepository,
                 rideRecordProcessedPointRepository,
-                rideRouteCanonicalizer
+                rideRouteCanonicalizer,
+                new RideRouteQualityAnalyzer()
         );
     }
 
@@ -132,14 +158,20 @@ class RideRecordFinalizationProcessorTest {
         return rideRecord;
     }
 
-    private RideRecordPointEntity rawPoint(Long rideRecordId, int pointOrder, String latitude, String longitude) {
+    private RideRecordPointEntity rawPoint(
+            Long rideRecordId,
+            int pointOrder,
+            String latitude,
+            String longitude,
+            String accuracyM
+    ) {
         return new RideRecordPointEntity(
                 rideRecordId,
                 pointOrder,
                 new BigDecimal(latitude),
                 new BigDecimal(longitude),
                 OffsetDateTime.parse("2026-04-21T10:00:00+09:00").plusSeconds(pointOrder),
-                null,
+                new BigDecimal(accuracyM),
                 null,
                 null,
                 null,

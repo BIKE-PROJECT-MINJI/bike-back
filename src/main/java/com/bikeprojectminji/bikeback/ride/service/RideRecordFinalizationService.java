@@ -52,7 +52,9 @@ public class RideRecordFinalizationService {
                 rawPointCount,
                 processedPointCount,
                 rideRecord.getFinalizationAttempts(),
-                rideRecord.getFinalizationErrorMessage()
+                rideRecord.getFinalizationErrorMessage(),
+                rideRecord.getQualityStatus() == null ? null : rideRecord.getQualityStatus().name(),
+                rideRecord.getQualityReasons()
         );
     }
 }

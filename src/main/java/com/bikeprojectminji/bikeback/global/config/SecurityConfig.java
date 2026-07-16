@@ -63,7 +63,7 @@ public class SecurityConfig {
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         // /health는 로드밸런서/스모크 테스트용 생존 확인만 공개한다.
                         // DB/Redis 상세가 포함된 /health/monitor는 아래 OPS 권한 규칙에서 보호한다.
-                        .requestMatchers("/health").permitAll()
+                        .requestMatchers("/health", "/ready").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/weather/current").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/ai-routes/plan").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/ai-routes/plan/from-text").permitAll()

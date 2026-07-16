@@ -20,9 +20,9 @@ import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberEntity;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberRole;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyMemberStatus;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyStatus;
+import com.bikeprojectminji.bikeback.party.event.RidePartyMemberLeftEvent;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyMemberRepository;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyRepository;
-import com.bikeprojectminji.bikeback.party.websocket.RidePartySocketSessionRegistry;
 import java.time.Clock;
 import java.util.Collections;
 import java.util.List;
@@ -30,9 +30,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.data.domain.PageRequest;
 
 @Service
 public class RidePartyService {
@@ -48,7 +49,7 @@ public class RidePartyService {
     private final CourseRepository courseRepository;
     private final AuthService authService;
     private final RidePartySocketTokenService socketTokenService;
-    private final RidePartySocketSessionRegistry socketSessionRegistry;
+    private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
     public RidePartyService(
@@ -57,7 +58,7 @@ public class RidePartyService {
             CourseRepository courseRepository,
             AuthService authService,
             RidePartySocketTokenService socketTokenService,
-            RidePartySocketSessionRegistry socketSessionRegistry,
+            ApplicationEventPublisher eventPublisher,
             Clock clock
     ) {
         this.partyRepository = partyRepository;
@@ -65,7 +66,7 @@ public class RidePartyService {
         this.courseRepository = courseRepository;
         this.authService = authService;
         this.socketTokenService = socketTokenService;
-        this.socketSessionRegistry = socketSessionRegistry;
+        this.eventPublisher = eventPublisher;
         this.clock = clock;
     }
 
@@ -187,7 +188,7 @@ public class RidePartyService {
         }
         if (member.getStatus() == RidePartyMemberStatus.JOINED) {
             member.leave(clock);
-            socketSessionRegistry.closeMember(party.getId(), user.getId());
+            eventPublisher.publishEvent(new RidePartyMemberLeftEvent(party.getId(), user.getId()));
         }
         int joinedCount = memberRepository.countByPartyIdAndStatus(party.getId(), RidePartyMemberStatus.JOINED);
         return toResponse(party, joinedCount, false, false);

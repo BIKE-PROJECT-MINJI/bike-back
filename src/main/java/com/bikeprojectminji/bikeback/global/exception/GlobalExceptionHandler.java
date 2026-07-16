@@ -7,6 +7,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -142,6 +145,34 @@ public class GlobalExceptionHandler {
                 ));
     }
 
+    @ExceptionHandler({RedisConnectionFailureException.class, RedisSystemException.class})
+    public ResponseEntity<ApiResponse<RetryableErrorResponse>> handleRedisUnavailable(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        Throwable rootCause = rootCause(exception);
+        log.warn(
+                "redis_unavailable request_id={} method={} path={} exception={} root_cause={}",
+                RequestLogContext.currentRequestId(),
+                request.getMethod(),
+                requestPath(request),
+                exception.getClass().getSimpleName(),
+                rootCause.getClass().getSimpleName()
+        );
+        return redisUnavailableResponse();
+    }
+
+    @ExceptionHandler(QueryTimeoutException.class)
+    public ResponseEntity<? extends ApiResponse<?>> handleDependencyQueryTimeout(
+            QueryTimeoutException exception,
+            HttpServletRequest request
+    ) {
+        if (hasRedisCause(exception)) {
+            return handleRedisUnavailable(exception, request);
+        }
+        return handleDatabaseUnavailable(exception, request);
+    }
+
     @ExceptionHandler({CannotCreateTransactionException.class, DataAccessResourceFailureException.class})
     public ResponseEntity<ApiResponse<Void>> handleDatabaseUnavailable(RuntimeException exception, HttpServletRequest request) {
         Throwable rootCause = rootCause(exception);
@@ -171,6 +202,31 @@ public class GlobalExceptionHandler {
             current = current.getCause();
         }
         return current;
+    }
+
+    private boolean hasRedisCause(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String className = current.getClass().getName();
+            if (className.startsWith("io.lettuce.core.") || className.startsWith("org.springframework.data.redis.")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private ResponseEntity<ApiResponse<RetryableErrorResponse>> redisUnavailableResponse() {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(RedisUnavailableException.RETRY_AFTER_SECONDS))
+                .body(new ApiResponse<>(
+                        503,
+                        RedisUnavailableException.MESSAGE,
+                        new RetryableErrorResponse(
+                                RedisUnavailableException.ERROR_CODE,
+                                RedisUnavailableException.RETRY_AFTER_SECONDS
+                        )
+                ));
     }
 
     private String requestPath(HttpServletRequest request) {

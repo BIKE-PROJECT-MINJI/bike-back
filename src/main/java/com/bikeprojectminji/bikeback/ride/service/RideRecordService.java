@@ -216,7 +216,9 @@ public class RideRecordService {
                         rideRecord.getDistanceM(),
                         rideRecord.getDurationSec(),
                         rideRecord.getFinalizationStatus().name(),
-                        linkedCourseIds.get(rideRecord.getId())
+                        linkedCourseIds.get(rideRecord.getId()),
+                        rideRecord.getQualityStatus() == null ? null : rideRecord.getQualityStatus().name(),
+                        rideRecord.getQualityReasons()
                 ))
                 .toList());
     }
@@ -314,7 +316,9 @@ public class RideRecordService {
                 rideRecord.getEndedAt(),
                 rideRecord.getDistanceM(),
                 rideRecord.getDurationSec(),
-                findLinkedCourseId(ownerUserId, rideRecord.getId())
+                findLinkedCourseId(ownerUserId, rideRecord.getId()),
+                status.qualityStatus(),
+                status.qualityReasons()
         );
     }
 

@@ -14,9 +14,9 @@ import com.bikeprojectminji.bikeback.party.entity.RidePartyEntity;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyReportEntity;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyReportReason;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyStatus;
+import com.bikeprojectminji.bikeback.party.event.RidePartyCanceledEvent;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyReportRepository;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyRepository;
-import com.bikeprojectminji.bikeback.party.websocket.RidePartySocketSessionRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -42,7 +43,7 @@ class RidePartyReportServiceTest {
     private AuthService authService;
 
     @Mock
-    private RidePartySocketSessionRegistry socketSessionRegistry;
+    private ApplicationEventPublisher eventPublisher;
 
     private final Clock clock = Clock.fixed(Instant.parse("2026-06-26T00:00:00Z"), ZoneOffset.UTC);
 
@@ -62,7 +63,7 @@ class RidePartyReportServiceTest {
 
         assertThat(response.reportCount()).isEqualTo(1);
         assertThat(response.status()).isEqualTo(RidePartyStatus.CANCELED.name());
-        verify(socketSessionRegistry).closeParty(20L);
+        verify(eventPublisher).publishEvent(new RidePartyCanceledEvent(20L));
     }
 
     @Test
@@ -81,7 +82,7 @@ class RidePartyReportServiceTest {
     }
 
     private RidePartyReportService createService() {
-        return new RidePartyReportService(partyRepository, reportRepository, authService, socketSessionRegistry, clock);
+        return new RidePartyReportService(partyRepository, reportRepository, authService, eventPublisher, clock);
     }
 
     private UserEntity user(Long id) {

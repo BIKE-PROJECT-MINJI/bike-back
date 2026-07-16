@@ -2,13 +2,12 @@ import http from 'k6/http';
 import { check, group, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 
-http.setResponseCallback(http.expectedStatuses({ min: 200, max: 399 }, 429));
-
 const BASE_URL = (__ENV.BASE_URL || '').replace(/\/$/, '');
 const TEST_ID = __ENV.TEST_ID || `bike-ai-route-${Date.now()}`;
 const SUMMARY_PATH = __ENV.SUMMARY_PATH || `ops/loadtest/results/${TEST_ID}-summary.json`;
 const RUN_DURATION = __ENV.RUN_DURATION || '2m';
 const AI_ROUTE_VUS = numberEnv('AI_ROUTE_VUS', 25);
+const AI_ROUTE_ITERATIONS_PER_VU = numberEnv('AI_ROUTE_ITERATIONS_PER_VU', 3);
 const COURSE_MAP_READ_VUS = numberEnv('COURSE_MAP_READ_VUS', 35);
 const COURSE_FOLLOW_VUS = numberEnv('COURSE_FOLLOW_VUS', 30);
 const FREE_RIDE_VUS = numberEnv('FREE_RIDE_VUS', 10);
@@ -20,9 +19,22 @@ const SETUP_AUTH_POOL_ENABLED = boolEnv('SETUP_AUTH_POOL_ENABLED', true);
 const SETUP_AUTH_EXTRA_TOKENS = numberEnv('SETUP_AUTH_EXTRA_TOKENS', 2);
 const RIDE_FINALIZATION_REQUIRE_READY = boolEnv('RIDE_FINALIZATION_REQUIRE_READY', false);
 const RIDE_FINALIZATION_READY_FAILURE_THRESHOLD = __ENV.RIDE_FINALIZATION_READY_FAILURE_THRESHOLD || '';
+const ERROR_RATE_MAX = __ENV.ERROR_RATE_MAX || '0.01';
+const ALLOW_HIGH_VUS = boolEnv('ALLOW_HIGH_VUS', false);
+const PROVIDER_MODE = __ENV.PROVIDER_MODE || 'unspecified';
+const TOTAL_VUS = AI_ROUTE_VUS
+  + COURSE_MAP_READ_VUS
+  + COURSE_FOLLOW_VUS
+  + FREE_RIDE_VUS
+  + RIDE_FINALIZATION_VUS;
+
+if (TOTAL_VUS > 25 && !ALLOW_HIGH_VUS) {
+  throw new Error(`total VUs ${TOTAL_VUS} exceeds the 25 VU approval gate; set ALLOW_HIGH_VUS=true only after explicit approval`);
+}
 
 const endpointDuration = new Trend('bike_endpoint_duration', true);
 const endpointFailureRate = new Rate('bike_endpoint_failure_rate');
+const aiRouteRateLimitedRate = new Rate('ai_route_rate_limited_rate');
 const endpointDurationByName = {
   'ai-route-session-create': new Trend('bike_endpoint_ai_route_session_create_duration', true),
   'ai-route-session-get': new Trend('bike_endpoint_ai_route_session_get_duration', true),
@@ -53,10 +65,11 @@ if (!BASE_URL) {
 const scenarios = {};
 if (AI_ROUTE_VUS > 0) {
   scenarios.ai_route_generation = {
-    executor: 'constant-vus',
+    executor: 'per-vu-iterations',
     exec: 'aiRouteGeneration',
     vus: AI_ROUTE_VUS,
-    duration: RUN_DURATION,
+    iterations: AI_ROUTE_ITERATIONS_PER_VU,
+    maxDuration: RUN_DURATION,
   };
 }
 if (COURSE_MAP_READ_VUS > 0) {
@@ -106,8 +119,8 @@ export const options = {
 
 function buildThresholds() {
   const thresholds = {
-    http_req_failed: ['rate<0.05'],
-    checks: ['rate>0.95'],
+    http_req_failed: [`rate<${ERROR_RATE_MAX}`],
+    checks: ['rate>0.99'],
     http_req_duration: ['p(95)<30000', 'p(99)<60000'],
     'http_req_duration{flow:ai-route}': ['p(95)<60000', 'p(99)<90000'],
     'http_req_duration{flow:course-map-read}': ['p(95)<5000', 'p(99)<10000'],
@@ -129,10 +142,7 @@ export function setup() {
   }
   return {
     tokens: {
-      ai: createTokenPool('ai', AI_ROUTE_VUS),
-      ride: createTokenPool('ride', FREE_RIDE_VUS),
-      course: createTokenPool('course', COURSE_FOLLOW_VUS),
-      finalize: createTokenPool('finalize', RIDE_FINALIZATION_VUS),
+      shared: createTokenPool('shared', TOTAL_VUS),
     },
   };
 }
@@ -153,10 +163,23 @@ export function aiRouteGeneration(data) {
 
     const sessionId = jsonValue(response, ['data', 'sessionId']);
     const candidateId = jsonValue(response, ['data', 'candidates', 0, 'candidateId']);
+    aiRouteRateLimitedRate.add(response.status === 429, {
+      testid: TEST_ID,
+      flow: 'ai-route',
+      endpoint: 'ai-route-session-create',
+    });
     check(response, {
       'ai route session status is 200 or protected 429': (r) => r.status === 200 || r.status === 429,
       'ai route session has candidate when accepted': (r) => r.status === 429 || routeCandidateCount(r) >= 1,
-      'ai route candidate has elevation summary when accepted': (r) => r.status === 429 || hasJsonPath(r, ['data', 'candidates', 0, 'elevationSummary']),
+      'ai route candidate exposes evidence status when accepted': (r) => {
+        if (r.status === 429) return true;
+        const candidate = jsonValue(r, ['data', 'candidates', 0]);
+        return !!candidate
+          && typeof candidate.elevationStatus === 'string'
+          && typeof candidate.sceneryEvidenceStatus === 'string'
+          && Array.isArray(candidate.evidenceBadges)
+          && candidate.routingMetadata !== null;
+      },
     });
 
     if (response.status === 200 && sessionId) {
@@ -354,11 +377,11 @@ function createTokenPool(prefix, vus) {
 }
 
 function tokenFor(data, prefix) {
-  const tokens = data && data.tokens && data.tokens[prefix];
+  const tokens = data && data.tokens && (data.tokens.shared || data.tokens[prefix]);
   if (!Array.isArray(tokens) || tokens.length === 0) {
     return '';
   }
-  return tokens[(__VU - 1) % tokens.length];
+  return tokens[__VU - 1] || '';
 }
 
 function registerSetupUser(prefix, index) {
@@ -536,9 +559,6 @@ function recordRideSaveBusy(response, tags, metricTags) {
 }
 
 function isEndpointFailure(response, tags) {
-  if (tags && tags.endpoint === 'ai-route-session-create' && response.status === 429) {
-    return false;
-  }
   return response.status === 0 || response.status >= 400;
 }
 
@@ -618,6 +638,21 @@ function boolEnv(name, fallback) {
 }
 
 export function handleSummary(data) {
+  data.bike_metadata = {
+    test_id: TEST_ID,
+    provider_mode: PROVIDER_MODE,
+    total_vus: TOTAL_VUS,
+    high_vus_approved: ALLOW_HIGH_VUS,
+    error_rate_max: ERROR_RATE_MAX,
+    ai_route_iterations_per_vu: AI_ROUTE_ITERATIONS_PER_VU,
+    vus: {
+      ai_route: AI_ROUTE_VUS,
+      course_map_read: COURSE_MAP_READ_VUS,
+      course_follow: COURSE_FOLLOW_VUS,
+      free_ride: FREE_RIDE_VUS,
+      ride_finalization: RIDE_FINALIZATION_VUS,
+    },
+  };
   const sanitizedData = sanitizedSummaryData(data);
   return {
     stdout: summaryText(data),
@@ -638,7 +673,8 @@ function summaryText(data) {
   const failed = data.metrics.http_req_failed && data.metrics.http_req_failed.values;
   return [
     `testid: ${TEST_ID}`,
-    `vus: ${AI_ROUTE_VUS + COURSE_MAP_READ_VUS + COURSE_FOLLOW_VUS + FREE_RIDE_VUS + RIDE_FINALIZATION_VUS}`,
+    `vus: ${TOTAL_VUS}`,
+    `provider_mode: ${PROVIDER_MODE}`,
     `http_req_failed(rate): ${failed ? failed.rate : 'n/a'}`,
     `http_req_duration(p95): ${duration ? duration['p(95)'] : 'n/a'} ms`,
     `http_req_duration(p99): ${duration ? duration['p(99)'] : 'n/a'} ms`,
