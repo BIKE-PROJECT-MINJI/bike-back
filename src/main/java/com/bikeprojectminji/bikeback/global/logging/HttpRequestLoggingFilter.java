@@ -44,16 +44,17 @@ public class HttpRequestLoggingFilter extends OncePerRequestFilter {
         } finally {
             long durationMs = System.currentTimeMillis() - startedAt;
             int status = responseWrapper.getStatus();
+            String requestPath = RequestPathSanitizer.sanitize(request.getRequestURI());
             if (loggingProperties.shouldLogHttpRequest(status, durationMs)) {
                 if (status >= 500) {
                     log.error("http_request outcome=failure request_id={} trace_id={} method={} path={} status={} duration_ms={} remote_addr={}",
-                            requestId, traceId, request.getMethod(), request.getRequestURI(), status, durationMs, request.getRemoteAddr());
+                            requestId, traceId, request.getMethod(), requestPath, status, durationMs, request.getRemoteAddr());
                 } else if (status >= 400) {
                     log.warn("http_request outcome=client_error request_id={} trace_id={} method={} path={} status={} duration_ms={} remote_addr={}",
-                            requestId, traceId, request.getMethod(), request.getRequestURI(), status, durationMs, request.getRemoteAddr());
+                            requestId, traceId, request.getMethod(), requestPath, status, durationMs, request.getRemoteAddr());
                 } else {
                     log.info("http_request outcome=success request_id={} trace_id={} method={} path={} status={} duration_ms={} remote_addr={}",
-                            requestId, traceId, request.getMethod(), request.getRequestURI(), status, durationMs, request.getRemoteAddr());
+                            requestId, traceId, request.getMethod(), requestPath, status, durationMs, request.getRemoteAddr());
                 }
             }
             responseWrapper.copyBodyToResponse();

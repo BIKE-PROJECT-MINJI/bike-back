@@ -13,6 +13,7 @@ import com.bikeprojectminji.bikeback.ride.dto.RideRecordFinalizationStatusRespon
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordListItemResponse;
 import com.bikeprojectminji.bikeback.ride.dto.RideRecordListResponse;
 import com.bikeprojectminji.bikeback.global.config.SecurityConfig;
+import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
 import com.bikeprojectminji.bikeback.global.exception.NotFoundException;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordDeletionService;
 import com.bikeprojectminji.bikeback.ride.service.RideRecordService;
@@ -235,6 +236,91 @@ class RideRecordControllerTest {
         mockMvc.perform(get("/api/v1/ride-records/1001"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    @DisplayName("clientRideId 영수증 조회 API는 인증된 사용자의 후처리 상태를 응답한다")
+    void getRideRecordStatusByClientRideIdReturnsOwnedReceipt() throws Exception {
+        given(rideRecordService.getRideRecordStatusByClientRideId("1", "android-ride-recovery-001"))
+                .willReturn(new RideRecordFinalizationStatusResponse(
+                        1001L, "READY", 4, 4, 1, null,
+                        null, null, null, null, 2001L
+                ));
+
+        mockMvc.perform(post("/api/v1/ride-records/receipt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientRideId\":\"android-ride-recovery-001\"}")
+                        .with(jwt().jwt(jwt -> jwt.subject("1"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rideRecordId").value(1001))
+                .andExpect(jsonPath("$.data.status").value("READY"))
+                .andExpect(jsonPath("$.data.linkedCourseId").value(2001));
+    }
+
+    @Test
+    @DisplayName("clientRideId 영수증 조회 API는 비로그인 요청에 401을 반환한다")
+    void getRideRecordStatusByClientRideIdReturnsUnauthorizedWithoutToken() throws Exception {
+        mockMvc.perform(post("/api/v1/ride-records/receipt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientRideId\":\"android-ride-recovery-001\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    @DisplayName("clientRideId 영수증 조회 API는 미존재와 타 사용자 기록에 같은 404를 반환한다")
+    void getRideRecordStatusByClientRideIdReturnsNotFoundWithoutOwnershipLeak() throws Exception {
+        given(rideRecordService.getRideRecordStatusByClientRideId("1", "hidden-ride"))
+                .willThrow(new NotFoundException("자유 주행 기록을 찾을 수 없습니다."));
+
+        mockMvc.perform(post("/api/v1/ride-records/receipt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientRideId\":\"hidden-ride\"}")
+                        .with(jwt().jwt(jwt -> jwt.subject("1"))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404))
+                .andExpect(jsonPath("$.message").value("자유 주행 기록을 찾을 수 없습니다."));
+    }
+
+    @Test
+    @DisplayName("clientRideId 영수증 조회 API는 공백 입력에 400을 반환한다")
+    void getRideRecordStatusByClientRideIdRejectsBlankInput() throws Exception {
+        given(rideRecordService.getRideRecordStatusByClientRideId("1", " "))
+                .willThrow(new BadRequestException("clientRideId는 비어 있을 수 없습니다."));
+
+        mockMvc.perform(post("/api/v1/ride-records/receipt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientRideId\":\" \"}")
+                        .with(jwt().jwt(jwt -> jwt.subject("1"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    @DisplayName("clientRideId 영수증 조회 API는 JSON null 본문에 400을 반환한다")
+    void getRideRecordStatusByClientRideIdRejectsNullBody() throws Exception {
+        mockMvc.perform(post("/api/v1/ride-records/receipt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("null")
+                        .with(jwt().jwt(jwt -> jwt.subject("1"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("요청 본문이 필요합니다."));
+    }
+
+    @Test
+    @DisplayName("clientRideId 영수증 조회 API는 80자 초과 입력에 400을 반환한다")
+    void getRideRecordStatusByClientRideIdRejectsTooLongInput() throws Exception {
+        String tooLongClientRideId = "r".repeat(81);
+        given(rideRecordService.getRideRecordStatusByClientRideId("1", tooLongClientRideId))
+                .willThrow(new BadRequestException("clientRideId는 80자 이하여야 합니다."));
+
+        mockMvc.perform(post("/api/v1/ride-records/receipt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientRideId\":\"" + tooLongClientRideId + "\"}")
+                        .with(jwt().jwt(jwt -> jwt.subject("1"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
     }
 
     @Test

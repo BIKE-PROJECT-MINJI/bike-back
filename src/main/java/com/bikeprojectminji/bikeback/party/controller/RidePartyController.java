@@ -40,8 +40,21 @@ public class RidePartyController {
     }
 
     @GetMapping
-    public ApiResponse<RidePartyListResponse> list(@AuthenticationPrincipal Jwt jwt, @RequestParam Long courseId) {
-        return ApiResponse.success(ridePartyService.listByCourse(jwt.getSubject(), courseId));
+    public ApiResponse<RidePartyListResponse> list(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(required = false) Long courseId,
+            @RequestParam(defaultValue = "ALL") String scope
+    ) {
+        if (courseId != null) {
+            return ApiResponse.success(ridePartyService.listByCourse(jwt.getSubject(), courseId));
+        }
+        if ("MINE".equalsIgnoreCase(scope)) {
+            return ApiResponse.success(ridePartyService.listMine(jwt.getSubject()));
+        }
+        if ("ALL".equalsIgnoreCase(scope)) {
+            return ApiResponse.success(ridePartyService.listAll(jwt.getSubject()));
+        }
+        throw new BadRequestException("scope는 ALL 또는 MINE이어야 합니다.");
     }
 
     @PostMapping("/{partyId}/join")
@@ -76,6 +89,11 @@ public class RidePartyController {
     @PostMapping("/{partyId}/leave")
     public ApiResponse<RidePartyResponse> leave(@AuthenticationPrincipal Jwt jwt, @PathVariable Long partyId) {
         return ApiResponse.success(ridePartyService.leave(jwt.getSubject(), partyId));
+    }
+
+    @PostMapping("/{partyId}/start")
+    public ApiResponse<RidePartyResponse> start(@AuthenticationPrincipal Jwt jwt, @PathVariable Long partyId) {
+        return ApiResponse.success(ridePartyService.start(jwt.getSubject(), partyId));
     }
 
     private RidePartyReportReason parseReportReason(RidePartyReportRequest request) {

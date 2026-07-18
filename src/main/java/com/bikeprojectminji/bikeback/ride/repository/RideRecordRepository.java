@@ -39,6 +39,7 @@ public interface RideRecordRepository extends JpaRepository<RideRecordEntity, Lo
             from RideRecordEntity r
             where r.ownerUserId = :ownerUserId
               and r.finalizationStatus = :finalizationStatus
+              and r.qualityStatus in ('FULL', 'PARTIAL')
             """)
     RideRecordActivityAggregate findActivityAggregateByOwnerUserIdAndFinalizationStatus(
             Long ownerUserId,

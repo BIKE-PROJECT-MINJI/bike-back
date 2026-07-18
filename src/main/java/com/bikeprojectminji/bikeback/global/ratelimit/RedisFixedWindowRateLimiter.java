@@ -1,6 +1,6 @@
 package com.bikeprojectminji.bikeback.global.ratelimit;
 
-import com.bikeprojectminji.bikeback.global.exception.ServiceUnavailableException;
+import com.bikeprojectminji.bikeback.global.exception.RedisUnavailableException;
 import com.bikeprojectminji.bikeback.global.exception.TooManyRequestsException;
 import java.time.Duration;
 import java.util.List;
@@ -23,8 +23,6 @@ public class RedisFixedWindowRateLimiter implements FixedWindowRateLimiter {
             end
             return current
             """, Long.class);
-    private static final String UNAVAILABLE_MESSAGE = "요청 제한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.";
-
     private final StringRedisTemplate stringRedisTemplate;
 
     public RedisFixedWindowRateLimiter(StringRedisTemplate stringRedisTemplate) {
@@ -51,7 +49,7 @@ public class RedisFixedWindowRateLimiter implements FixedWindowRateLimiter {
             throw exception;
         } catch (RuntimeException exception) {
             log.warn("rate_limit_store_unavailable key={}", key, exception);
-            throw new ServiceUnavailableException(UNAVAILABLE_MESSAGE);
+            throw new RedisUnavailableException();
         }
     }
 

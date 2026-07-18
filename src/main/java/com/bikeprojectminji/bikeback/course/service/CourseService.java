@@ -15,6 +15,7 @@ import com.bikeprojectminji.bikeback.course.entity.CourseRoutePointEntity;
 import com.bikeprojectminji.bikeback.course.entity.CourseVisibility;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
+import com.bikeprojectminji.bikeback.ride.entity.RideRouteQualityStatus;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordPointEntity;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordProcessedPointEntity;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
@@ -119,6 +120,10 @@ public class CourseService {
         if (rideRecord.getFinalizationStatus() != RideRecordFinalizationStatus.READY) {
             throw new BadRequestException("경로 보정이 아직 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
         }
+        if (rideRecord.getQualityStatus() != RideRouteQualityStatus.FULL
+                && rideRecord.getQualityStatus() != RideRouteQualityStatus.PARTIAL) {
+            throw new BadRequestException("GPS 품질 검증이 완료되지 않아 코스를 생성할 수 없습니다. 원본 기록은 보존됩니다.");
+        }
         try {
             return requireTransactionResponse(transactionOperations.execute(status -> createCourseFromRideRecord(user, rideRecord, request)));
         } catch (DataIntegrityViolationException exception) {
@@ -146,10 +151,17 @@ public class CourseService {
         }
 
         CourseVisibility visibility = parseVisibility(request.visibility());
+        long processedDistanceM = distanceMeters(rideRecordPoints.stream()
+                .map(point -> new CourseRoutePointRequest(
+                        point.getPointOrder(),
+                        point.getLatitude(),
+                        point.getLongitude()
+                ))
+                .toList());
         CourseEntity course = new CourseEntity(
                 request.name(),
                 request.description(),
-                toDistanceKm(rideRecord.getDistanceM()),
+                toDistanceKm(processedDistanceM),
                 toDurationMin(rideRecord.getDurationSec()),
                 resolveNextDisplayOrder(),
                 false,
@@ -227,6 +239,7 @@ public class CourseService {
         if (request.routePoints() != null) {
             List<CourseRoutePointRequest> routePoints = normalizeRoutePoints(request.routePoints());
             courseRoutePointRepository.deleteByCourseId(courseId);
+            courseRoutePointRepository.flush();
             courseRoutePointRepository.saveAll(routePoints.stream()
                     .map(point -> new CourseRoutePointEntity(courseId, point.pointOrder(), point.latitude(), point.longitude()))
                     .toList());

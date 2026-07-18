@@ -130,6 +130,8 @@ CREATE TABLE ride_records (
     finalization_completed_at TIMESTAMP WITH TIME ZONE,
     finalization_failed_at TIMESTAMP WITH TIME ZONE,
     finalization_error_message TEXT,
+    quality_status VARCHAR(16),
+    quality_reasons TEXT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     CONSTRAINT uq_ride_records_owner_client_ride_id UNIQUE (owner_user_id, client_ride_id)
 );
@@ -245,6 +247,12 @@ CREATE TABLE ai_route_candidates (
     estimated_duration_min INTEGER NOT NULL,
     recommendation_score INTEGER NOT NULL,
     elevation_summary_json TEXT,
+    score_breakdown_json TEXT,
+    evidence_badges_json TEXT,
+    routing_metadata_json TEXT,
+    preference_summary VARCHAR(500),
+    elevation_status VARCHAR(32),
+    scenery_evidence_status VARCHAR(32),
     route_point_count INTEGER NOT NULL,
     route_points_json TEXT NOT NULL,
     promoted_course_id BIGINT,

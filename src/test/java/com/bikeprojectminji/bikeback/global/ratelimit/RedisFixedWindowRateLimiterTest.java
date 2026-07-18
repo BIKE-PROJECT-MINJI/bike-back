@@ -6,7 +6,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
-import com.bikeprojectminji.bikeback.global.exception.ServiceUnavailableException;
+import com.bikeprojectminji.bikeback.global.exception.RetryableServiceUnavailableException;
+import com.bikeprojectminji.bikeback.global.exception.RedisUnavailableException;
 import com.bikeprojectminji.bikeback.global.exception.TooManyRequestsException;
 import java.time.Duration;
 import java.util.List;
@@ -32,7 +33,7 @@ class RedisFixedWindowRateLimiterTest {
     }
 
     @Test
-    @DisplayName("Redis fixed-window limiter는 저장소 장애를 503 예외로 격리한다")
+    @DisplayName("Redis fixed-window limiter는 저장소 장애를 retry 가능한 503으로 fail-closed 처리한다")
     void checkAllowedFailsClosedWhenRedisUnavailable() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
         given(redisTemplate.execute(any(RedisScript.class), eq(List.of("rate:key")), eq("60000")))
@@ -40,7 +41,11 @@ class RedisFixedWindowRateLimiterTest {
         RedisFixedWindowRateLimiter rateLimiter = new RedisFixedWindowRateLimiter(redisTemplate);
 
         assertThatThrownBy(() -> rateLimiter.checkAllowed("rate:key", 2, Duration.ofMinutes(1), "too many"))
-                .isInstanceOf(ServiceUnavailableException.class)
-                .hasMessage("요청 제한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+                .isInstanceOfSatisfying(RetryableServiceUnavailableException.class, exception -> {
+                    org.assertj.core.api.Assertions.assertThat(exception.getMessage())
+                            .isEqualTo(RedisUnavailableException.MESSAGE);
+                    org.assertj.core.api.Assertions.assertThat(exception.getErrorCode()).isEqualTo("REDIS_UNAVAILABLE");
+                    org.assertj.core.api.Assertions.assertThat(exception.getRetryAfterSeconds()).isEqualTo(1);
+                });
     }
 }

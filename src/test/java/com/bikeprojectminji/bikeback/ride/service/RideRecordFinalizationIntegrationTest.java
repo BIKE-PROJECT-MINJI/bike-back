@@ -96,10 +96,10 @@ class RideRecordFinalizationIntegrationTest {
                 OffsetDateTime.parse("2026-04-21T11:00:00+09:00"),
                 new RideRecordSummaryRequest(18250, 3600),
                 List.of(
-                        new RideRecordPointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
-                        new RideRecordPointRequest(2, BigDecimal.valueOf(37.56655), BigDecimal.valueOf(126.9785)),
-                        new RideRecordPointRequest(3, BigDecimal.valueOf(37.56660), BigDecimal.valueOf(126.9790)),
-                        new RideRecordPointRequest(4, BigDecimal.valueOf(37.56665), BigDecimal.valueOf(126.9795))
+                        validPoint(1, "37.56650", "126.97800", 0),
+                        validPoint(2, "37.56655", "126.97850", 10),
+                        validPoint(3, "37.56660", "126.97900", 20),
+                        validPoint(4, "37.56665", "126.97950", 30)
                 )
         ));
 
@@ -135,7 +135,8 @@ class RideRecordFinalizationIntegrationTest {
         assertThat(listResponse.items().get(0).linkedCourseId()).isEqualTo(courseResponse.courseId());
 
         RideRecordFinalizationStatusResponse detailResponse = rideRecordService.getRideRecordStatus("1", response.rideRecordId());
-        assertThat(detailResponse.distanceM()).isEqualTo(18250);
+        assertThat(detailResponse.distanceM()).isPositive().isLessThan(1_000);
+        assertThat(detailResponse.qualityStatus()).isEqualTo("FULL");
         assertThat(detailResponse.durationSec()).isEqualTo(3600);
         assertThat(detailResponse.linkedCourseId()).isEqualTo(courseResponse.courseId());
     }
@@ -240,11 +241,31 @@ class RideRecordFinalizationIntegrationTest {
                 OffsetDateTime.parse("2026-04-21T11:00:00+09:00"),
                 new RideRecordSummaryRequest(18250, 3600),
                 List.of(
-                        new RideRecordPointRequest(1, BigDecimal.valueOf(37.5665), BigDecimal.valueOf(126.9780)),
-                        new RideRecordPointRequest(2, BigDecimal.valueOf(37.56655), BigDecimal.valueOf(126.9785)),
-                        new RideRecordPointRequest(3, BigDecimal.valueOf(37.56660), BigDecimal.valueOf(126.9790)),
-                        new RideRecordPointRequest(4, BigDecimal.valueOf(37.56665), BigDecimal.valueOf(126.9795))
+                        validPoint(1, "37.56650", "126.97800", 0),
+                        validPoint(2, "37.56655", "126.97850", 10),
+                        validPoint(3, "37.56660", "126.97900", 20),
+                        validPoint(4, "37.56665", "126.97950", 30)
                 )
+        );
+    }
+
+    private RideRecordPointRequest validPoint(
+            int pointOrder,
+            String latitude,
+            String longitude,
+            long elapsedSeconds
+    ) {
+        return new RideRecordPointRequest(
+                pointOrder,
+                new BigDecimal(latitude),
+                new BigDecimal(longitude),
+                OffsetDateTime.parse("2026-04-21T10:00:00+09:00").plusSeconds(elapsedSeconds),
+                new BigDecimal("5.0"),
+                null,
+                null,
+                null,
+                null,
+                null
         );
     }
 }

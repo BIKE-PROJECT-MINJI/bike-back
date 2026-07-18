@@ -10,6 +10,10 @@ import static org.mockito.Mockito.verify;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.service.AiRoutePlannerService;
 import com.bikeprojectminji.bikeback.airoute.service.AiRouteQuotaService;
+import com.bikeprojectminji.bikeback.global.exception.InvalidRouteRequestException;
+import com.bikeprojectminji.bikeback.global.exception.RetryableTooManyRequestsException;
+import com.bikeprojectminji.bikeback.global.exception.RouteNotFoundException;
+import com.bikeprojectminji.bikeback.global.exception.RoutingProviderUnavailableException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.security.Principal;
 import org.mockito.ArgumentCaptor;
@@ -65,6 +69,74 @@ class AiRouteWebSocketHandlerTest {
         assertThat(errorPayload).contains("\"type\":\"error\"");
         assertThat(errorPayload).contains("AI 경로를 생성하지 못했습니다.");
         assertThat(errorPayload).doesNotContain("secret provider dsn");
+        assertThat(errorPayload).contains("\"errorCode\":\"INTERNAL_ERROR\"");
+    }
+
+    @Test
+    @DisplayName("WebSocket AI 경로 생성은 typed 422 errorCode를 보존한다")
+    void handleTextMessagePreservesRouteNotFoundCode() throws Exception {
+        String payload = errorPayload(new RouteNotFoundException("조건을 충족하는 경로가 없습니다."));
+
+        assertThat(payload).contains("\"errorCode\":\"ROUTE_NOT_FOUND\"");
+        assertThat(payload).doesNotContain("retryAfterSeconds");
+    }
+
+    @Test
+    @DisplayName("WebSocket AI 경로 생성은 retryable 429 metadata를 보존한다")
+    void handleTextMessagePreservesRoutingQuotaMetadata() throws Exception {
+        String payload = errorPayload(new RetryableTooManyRequestsException(
+                "라우팅 quota에 도달했습니다.", "ROUTING_QUOTA_EXCEEDED", 7));
+
+        assertThat(payload).contains("\"errorCode\":\"ROUTING_QUOTA_EXCEEDED\"");
+        assertThat(payload).contains("\"retryAfterSeconds\":7");
+    }
+
+    @Test
+    @DisplayName("WebSocket AI 경로 생성은 retryable 503 metadata를 보존한다")
+    void handleTextMessagePreservesProviderUnavailableMetadata() throws Exception {
+        String payload = errorPayload(new RoutingProviderUnavailableException(
+                "라우팅 provider가 일시적으로 불안정합니다.", 9));
+
+        assertThat(payload).contains("\"errorCode\":\"ROUTING_PROVIDER_UNAVAILABLE\"");
+        assertThat(payload).contains("\"retryAfterSeconds\":9");
+    }
+
+    @Test
+    @DisplayName("WebSocket AI 경로 생성은 typed 400 errorCode를 보존한다")
+    void handleTextMessagePreservesInvalidRequestCode() throws Exception {
+        String payload = errorPayload(new InvalidRouteRequestException("현재 위치가 필요합니다."));
+
+        assertThat(payload).contains("\"errorCode\":\"INVALID_ROUTE_REQUEST\"");
+        assertThat(payload).doesNotContain("retryAfterSeconds");
+    }
+
+    @Test
+    @DisplayName("WebSocket AI 경로 생성은 깨진 JSON을 INVALID_ROUTE_REQUEST로 구분한다")
+    void handleTextMessageMapsMalformedJsonToInvalidRequest() throws Exception {
+        WebSocketSession session = mock(WebSocketSession.class);
+
+        handler.handle(session, new TextMessage("{not-json"));
+
+        ArgumentCaptor<TextMessage> messages = ArgumentCaptor.forClass(TextMessage.class);
+        verify(session, org.mockito.Mockito.atLeastOnce()).sendMessage(messages.capture());
+        String payload = messages.getAllValues().get(1).getPayload();
+        assertThat(payload).contains("\"code\":\"INVALID_ROUTE_REQUEST\"");
+        assertThat(payload).contains("\"errorCode\":\"INVALID_ROUTE_REQUEST\"");
+    }
+
+    private String errorPayload(RuntimeException exception) throws Exception {
+        WebSocketSession session = mock(WebSocketSession.class);
+        Principal principal = () -> "42";
+        given(session.getPrincipal()).willReturn(principal);
+        given(plannerService.plan(eq("42"), any())).willThrow(exception);
+
+        handler.handle(session, new TextMessage("""
+                {"lat":37.4812,"lon":126.9527}
+                """));
+
+        ArgumentCaptor<TextMessage> messages = ArgumentCaptor.forClass(TextMessage.class);
+        verify(session, org.mockito.Mockito.atLeastOnce()).sendMessage(messages.capture());
+        return messages.getAllValues().get(1).getPayload();
     }
 
     private AiRoutePlanResponse minimalResponse() {

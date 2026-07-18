@@ -4,7 +4,6 @@ import java.time.OffsetDateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -56,7 +55,7 @@ public class MonitoringService {
                 return new DependencyStatusResponse("fail", "empty redis ping response");
             }
             return new DependencyStatusResponse("ok", pong);
-        } catch (RedisConnectionFailureException exception) {
+        } catch (RuntimeException exception) {
             log.warn("redis monitoring check failed", exception);
             return new DependencyStatusResponse("fail", summarize(exception));
         }

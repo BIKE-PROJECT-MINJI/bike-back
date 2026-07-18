@@ -1,6 +1,7 @@
 package com.bikeprojectminji.bikeback.global.database;
 
 import com.bikeprojectminji.bikeback.global.metrics.BikeMetricsRecorder;
+import com.bikeprojectminji.bikeback.global.logging.RequestPathSanitizer;
 import com.bikeprojectminji.bikeback.global.response.ApiResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
@@ -67,7 +68,7 @@ public class DatabaseBackpressureFilter extends OncePerRequestFilter {
         log.warn(
                 "database_backpressure_rejected method={} path={} reason={} active={} idle={} max={} pending={}",
                 request.getMethod(),
-                request.getRequestURI(),
+                RequestPathSanitizer.sanitize(request.getRequestURI()),
                 reason,
                 snapshot.activeConnections(),
                 snapshot.idleConnections(),

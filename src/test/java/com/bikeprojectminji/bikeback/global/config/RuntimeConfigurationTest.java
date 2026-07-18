@@ -2,6 +2,7 @@ package com.bikeprojectminji.bikeback.global.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,5 +39,14 @@ class RuntimeConfigurationTest {
         assertThat(environment.getProperty("bike.async.core-pool-size", Integer.class)).isEqualTo(4);
         assertThat(environment.getProperty("bike.async.max-pool-size", Integer.class)).isEqualTo(8);
         assertThat(environment.getProperty("bike.async.queue-capacity", Integer.class)).isEqualTo(500);
+    }
+
+    @Test
+    @DisplayName("Redis 연결과 명령은 장애 시 400ms 안에 실패하도록 기본 timeout을 가진다")
+    void redisTimeoutsDefaultToFailFastValues() {
+        assertThat(environment.getProperty("spring.data.redis.connect-timeout", Duration.class))
+                .isEqualTo(Duration.ofMillis(400));
+        assertThat(environment.getProperty("spring.data.redis.timeout", Duration.class))
+                .isEqualTo(Duration.ofMillis(400));
     }
 }

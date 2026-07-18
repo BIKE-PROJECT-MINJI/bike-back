@@ -8,7 +8,9 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePointResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteTextPlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.RecommendationExplanationResponse;
-import com.bikeprojectminji.bikeback.global.exception.BadRequestException;
+import com.bikeprojectminji.bikeback.global.exception.RouteNotFoundException;
+import com.bikeprojectminji.bikeback.global.exception.RoutingProviderUnavailableException;
+import com.bikeprojectminji.bikeback.global.exception.InvalidRouteRequestException;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteCandidate;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRoutePoint;
 import com.bikeprojectminji.bikeback.routing.service.BicycleRouteRequest;
@@ -56,8 +58,33 @@ class AiRoutePlannerServiceIntegrationTest {
         routingClient.nextResult(BicycleRoutingProviderResult.providerFailure("GRAPHHOPPER"));
 
         assertThatThrownBy(() -> aiRoutePlannerService.plan(request()))
-                .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("GraphHopper");
+                .isInstanceOf(RoutingProviderUnavailableException.class)
+                .hasMessageContaining("일시적으로");
+    }
+
+    @Test
+    @DisplayName("목적지가 있는 AI 경로 요청은 정상 provider의 빈 후보를 422로 구분한다")
+    void planReportsNoRouteSeparatelyFromProviderFailure() {
+        routingClient.nextResult(BicycleRoutingProviderResult.noRoute("GRAPHHOPPER"));
+
+        assertThatThrownBy(() -> aiRoutePlannerService.plan(request()))
+                .isInstanceOf(RouteNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("AI 경로 좌표 오류는 stable 400 원인을 보존한다")
+    void planRejectsInvalidCoordinateWithTypedCause() {
+        AiRoutePlanRequest invalid = new AiRoutePlanRequest(
+                BigDecimal.valueOf(91),
+                BigDecimal.valueOf(126.9527),
+                BigDecimal.valueOf(37.5404),
+                BigDecimal.valueOf(127.0692),
+                "건대입구",
+                "SCENERY_FIRST"
+        );
+
+        assertThatThrownBy(() -> aiRoutePlannerService.plan(invalid))
+                .isInstanceOf(InvalidRouteRequestException.class);
     }
 
     @Test

@@ -9,7 +9,8 @@ public record BicycleRouteRequest(
         BigDecimal destinationLon,
         String preference,
         String elevationPreference,
-        String textIntent
+        String textIntent,
+        ProviderCallBudget providerCallBudget
 ) {
 
     public BicycleRouteRequest(
@@ -19,7 +20,7 @@ public record BicycleRouteRequest(
             BigDecimal destinationLon,
             String preference
     ) {
-        this(originLat, originLon, destinationLat, destinationLon, preference, null, null);
+        this(originLat, originLon, destinationLat, destinationLon, preference, null, null, null);
     }
 
     public BicycleRouteRequest(
@@ -30,10 +31,35 @@ public record BicycleRouteRequest(
             String preference,
             String elevationPreference
     ) {
-        this(originLat, originLon, destinationLat, destinationLon, preference, elevationPreference, null);
+        this(originLat, originLon, destinationLat, destinationLon, preference, elevationPreference, null, null);
+    }
+
+    public BicycleRouteRequest(
+            BigDecimal originLat,
+            BigDecimal originLon,
+            BigDecimal destinationLat,
+            BigDecimal destinationLon,
+            String preference,
+            String elevationPreference,
+            String textIntent
+    ) {
+        this(originLat, originLon, destinationLat, destinationLon, preference, elevationPreference, textIntent, null);
     }
 
     public BicycleRoutePreference routePreference() {
         return BicycleRoutePreference.from(preference, elevationPreference, textIntent);
+    }
+
+    public BicycleRouteRequest withProviderCallBudget(ProviderCallBudget budget) {
+        return new BicycleRouteRequest(
+                originLat,
+                originLon,
+                destinationLat,
+                destinationLon,
+                preference,
+                elevationPreference,
+                textIntent,
+                budget
+        );
     }
 }

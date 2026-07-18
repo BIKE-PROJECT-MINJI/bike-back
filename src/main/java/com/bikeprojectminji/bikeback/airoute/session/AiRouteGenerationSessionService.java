@@ -4,11 +4,13 @@ import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanRequest;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePlanResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRoutePointResponse;
 import com.bikeprojectminji.bikeback.airoute.dto.AiRouteElevationSummaryResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.AiRouteRoutingMetadataResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.ProviderEvidenceBadgeResponse;
+import com.bikeprojectminji.bikeback.airoute.dto.RecommendationScoreResponse;
 import com.bikeprojectminji.bikeback.airoute.session.dto.AiRouteCandidateResponse;
 import com.bikeprojectminji.bikeback.airoute.session.dto.AiRouteGenerationSessionCreateRequest;
 import com.bikeprojectminji.bikeback.airoute.session.dto.AiRouteGenerationSessionResponse;
 import com.bikeprojectminji.bikeback.airoute.session.dto.PromoteAiRouteCandidateRequest;
-import com.bikeprojectminji.bikeback.airoute.service.AiRoutePlannerService;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.auth.service.AuthService;
 import com.bikeprojectminji.bikeback.course.entity.CourseEntity;
@@ -38,7 +40,7 @@ public class AiRouteGenerationSessionService {
     private static final String SESSION_NOT_FOUND = "AI 코스 생성 세션을 찾을 수 없습니다.";
 
     private final AuthService authService;
-    private final AiRoutePlannerService aiRoutePlannerService;
+    private final AiRouteSessionCandidateGenerator candidateGenerator;
     private final AiRouteGenerationRateLimiter rateLimiter;
     private final AiRouteGenerationSessionRepository sessionRepository;
     private final AiRouteCandidateRepository candidateRepository;
@@ -51,7 +53,7 @@ public class AiRouteGenerationSessionService {
 
     public AiRouteGenerationSessionService(
             AuthService authService,
-            AiRoutePlannerService aiRoutePlannerService,
+            AiRouteSessionCandidateGenerator candidateGenerator,
             AiRouteGenerationRateLimiter rateLimiter,
             AiRouteGenerationSessionRepository sessionRepository,
             AiRouteCandidateRepository candidateRepository,
@@ -63,7 +65,7 @@ public class AiRouteGenerationSessionService {
             TransactionOperations transactionOperations
     ) {
         this.authService = authService;
-        this.aiRoutePlannerService = aiRoutePlannerService;
+        this.candidateGenerator = candidateGenerator;
         this.rateLimiter = rateLimiter;
         this.sessionRepository = sessionRepository;
         this.candidateRepository = candidateRepository;
@@ -81,33 +83,39 @@ public class AiRouteGenerationSessionService {
         UserEntity user = authService.findUserBySubject(subject);
         rateLimiter.checkAllowed(String.valueOf(user.getId()));
 
-        AiRoutePlanResponse plan = aiRoutePlannerService.plan(subject, toPlanRequest(request));
-        List<AiRoutePointResponse> routePoints = plan.routePoints() == null ? List.of() : plan.routePoints();
-        if (routePoints.isEmpty()) {
-            throw new BadRequestException("생성된 경로 포인트가 비어 있습니다.");
-        }
+        AiRouteSessionCandidateGeneration generation = candidateGenerator.generate(subject, toPlanRequest(request));
+        List<AiRouteCandidateDraft> candidateDrafts = generation.plans().stream()
+                .map(this::toCandidateDraft)
+                .toList();
 
-        return requireSessionResponse(transactionOperations.execute(status -> persistGeneratedSession(user, request, plan, routePoints)));
+        AiRouteGenerationSessionEntity session = requireGeneratedSession(transactionOperations.execute(
+                status -> persistGeneratedSession(user, request, generation, candidateDrafts)
+        ));
+        return toResponse(session);
     }
 
-    private AiRouteGenerationSessionResponse persistGeneratedSession(
+    private AiRouteGenerationSessionEntity persistGeneratedSession(
             UserEntity user,
             AiRouteGenerationSessionCreateRequest request,
-            AiRoutePlanResponse plan,
-            List<AiRoutePointResponse> routePoints
+            AiRouteSessionCandidateGeneration generation,
+            List<AiRouteCandidateDraft> candidateDrafts
     ) {
-        boolean fallbackUsed = !plan.aiGenerated();
+        boolean aiFallbackUsed = generation.plans().stream().anyMatch(plan -> !plan.aiGenerated());
+        boolean fallbackUsed = generation.partial() || aiFallbackUsed;
         AiRouteGenerationSessionEntity session = sessionRepository.save(new AiRouteGenerationSessionEntity(
                 user.getId(),
-                fallbackUsed ? AiRouteGenerationSessionStatus.FALLBACK_READY : AiRouteGenerationSessionStatus.READY,
+                resolveStatus(generation, aiFallbackUsed),
                 fallbackUsed,
-                fallbackUsed ? "backend-fallback" : "gemini",
-                fallbackUsed ? "AI_WORKER_UNAVAILABLE" : null,
+                resolveProvider(generation.plans()),
+                resolveFallbackReason(generation, aiFallbackUsed),
                 request.textIntent()
         ));
 
-        candidateRepository.save(toCandidate(session.getId(), plan, routePoints));
-        return toResponse(session);
+        List<AiRouteCandidateEntity> candidates = candidateDrafts.stream()
+                .map(draft -> draft.toEntity(session.getId()))
+                .toList();
+        candidateRepository.saveAll(candidates);
+        return session;
     }
 
     @MeasuredOperation("ai_route.session.get")
@@ -130,14 +138,18 @@ public class AiRouteGenerationSessionService {
         UserEntity user = authService.findUserBySubject(subject);
         AiRouteGenerationSessionEntity session = findOwnedSession(sessionId, user.getId());
         if (session.getStatus() != AiRouteGenerationSessionStatus.READY
+                && session.getStatus() != AiRouteGenerationSessionStatus.PARTIAL
                 && session.getStatus() != AiRouteGenerationSessionStatus.FALLBACK_READY) {
             throw new BadRequestException("저장 가능한 상태의 AI 코스 후보가 아닙니다.");
         }
 
-        AiRouteCandidateEntity candidate = candidateRepository.findByIdAndSessionId(candidateId, sessionId)
+        AiRouteCandidateEntity candidate = candidateRepository.findForUpdateByIdAndSessionId(candidateId, sessionId)
                 .orElseThrow(() -> new NotFoundException("AI 코스 후보를 찾을 수 없습니다."));
         if (candidate.getPromotedCourseId() != null) {
-            throw new BadRequestException("이미 Course로 저장된 AI 코스 후보입니다.");
+            return new AiRoutePromotedCourseResponse(
+                    candidate.getPromotedCourseId(),
+                    candidate.getRoutePointCount()
+            );
         }
 
         List<AiRoutePointResponse> routePoints = parseRoutePoints(candidate);
@@ -170,7 +182,7 @@ public class AiRouteGenerationSessionService {
     }
 
     private AiRoutePlanRequest toPlanRequest(AiRouteGenerationSessionCreateRequest request) {
-        return new AiRoutePlanRequest(
+        return AiRouteSessionPreferenceNormalizer.normalize(new AiRoutePlanRequest(
                 request.lat(),
                 request.lon(),
                 request.destinationLat(),
@@ -179,22 +191,59 @@ public class AiRouteGenerationSessionService {
                 request.rideStyle(),
                 request.elevationPreference(),
                 request.textIntent()
-        );
+        ));
     }
 
-    private AiRouteCandidateEntity toCandidate(Long sessionId, AiRoutePlanResponse plan, List<AiRoutePointResponse> routePoints) {
+    private AiRouteCandidateDraft toCandidateDraft(AiRoutePlanResponse plan) {
+        List<AiRoutePointResponse> routePoints = plan.routePoints();
         BigDecimal distanceKm = estimateDistanceKm(routePoints);
-        return new AiRouteCandidateEntity(
-                sessionId,
+        return new AiRouteCandidateDraft(
                 defaultTitle(plan.summary()),
                 plan.summary(),
                 distanceKm,
                 estimateDurationMin(distanceKm),
                 plan.recommendationScore(),
                 writeNullable(plan.elevationSummary()),
+                writeNullable(plan.scoreBreakdown()),
+                writeNullable(plan.evidenceBadges()),
+                writeNullable(plan.routingMetadata()),
+                plan.preferenceSummary(),
+                plan.elevationStatus(),
+                plan.sceneryEvidenceStatus(),
                 routePoints.size(),
                 writeRoutePoints(routePoints)
         );
+    }
+
+    private AiRouteGenerationSessionStatus resolveStatus(
+            AiRouteSessionCandidateGeneration generation,
+            boolean aiFallbackUsed
+    ) {
+        if (generation.partial()) {
+            return AiRouteGenerationSessionStatus.PARTIAL;
+        }
+        return aiFallbackUsed
+                ? AiRouteGenerationSessionStatus.FALLBACK_READY
+                : AiRouteGenerationSessionStatus.READY;
+    }
+
+    private String resolveProvider(List<AiRoutePlanResponse> plans) {
+        boolean anyAiGenerated = plans.stream().anyMatch(AiRoutePlanResponse::aiGenerated);
+        boolean anyBackendFallback = plans.stream().anyMatch(plan -> !plan.aiGenerated());
+        if (anyAiGenerated && anyBackendFallback) {
+            return "mixed";
+        }
+        return anyAiGenerated ? "gemini" : "backend-fallback";
+    }
+
+    private String resolveFallbackReason(
+            AiRouteSessionCandidateGeneration generation,
+            boolean aiFallbackUsed
+    ) {
+        if (generation.partial()) {
+            return generation.fallbackReason();
+        }
+        return aiFallbackUsed ? "AI_WORKER_UNAVAILABLE" : null;
     }
 
     private AiRouteGenerationSessionResponse toResponse(AiRouteGenerationSessionEntity session) {
@@ -207,7 +256,14 @@ public class AiRouteGenerationSessionService {
                         candidate.getDistanceKm(),
                         candidate.getEstimatedDurationMin(),
                         candidate.getRecommendationScore(),
+                        readNullable(candidate.getScoreBreakdownJson(), RecommendationScoreResponse.class),
+                        readNullableList(candidate.getEvidenceBadgesJson(), new TypeReference<>() {
+                        }),
                         readNullable(candidate.getElevationSummaryJson(), AiRouteElevationSummaryResponse.class),
+                        readNullable(candidate.getRoutingMetadataJson(), AiRouteRoutingMetadataResponse.class),
+                        candidate.getPreferenceSummary(),
+                        candidate.getElevationStatus(),
+                        candidate.getSceneryEvidenceStatus(),
                         parseRoutePoints(candidate),
                         candidate.getRoutePointCount(),
                         candidate.getPromotedCourseId()
@@ -256,6 +312,17 @@ public class AiRouteGenerationSessionService {
             return objectMapper.readValue(json, type);
         } catch (JsonProcessingException exception) {
             throw new BadRequestException("AI 코스 후보 정보를 읽을 수 없습니다.");
+        }
+    }
+
+    private <T> T readNullableList(String json, TypeReference<T> type) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, type);
+        } catch (JsonProcessingException exception) {
+            throw new BadRequestException("AI 코스 후보 근거를 읽을 수 없습니다.");
         }
     }
 
@@ -340,8 +407,8 @@ public class AiRouteGenerationSessionService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    private AiRouteGenerationSessionResponse requireSessionResponse(AiRouteGenerationSessionResponse response) {
-        return Objects.requireNonNull(response, "AI route generation session transaction response must not be null");
+    private AiRouteGenerationSessionEntity requireGeneratedSession(AiRouteGenerationSessionEntity session) {
+        return Objects.requireNonNull(session, "AI route generation session transaction result must not be null");
     }
 
     private void validateCreateRequest(AiRouteGenerationSessionCreateRequest request) {
@@ -362,6 +429,44 @@ public class AiRouteGenerationSessionService {
         }
         if (request.visibility() == null || request.visibility().isBlank()) {
             throw new BadRequestException("visibility는 비어 있을 수 없습니다.");
+        }
+    }
+
+    private record AiRouteCandidateDraft(
+            String title,
+            String summary,
+            BigDecimal distanceKm,
+            Integer estimatedDurationMin,
+            Integer recommendationScore,
+            String elevationSummaryJson,
+            String scoreBreakdownJson,
+            String evidenceBadgesJson,
+            String routingMetadataJson,
+            String preferenceSummary,
+            String elevationStatus,
+            String sceneryEvidenceStatus,
+            Integer routePointCount,
+            String routePointsJson
+    ) {
+
+        private AiRouteCandidateEntity toEntity(Long sessionId) {
+            return new AiRouteCandidateEntity(
+                    sessionId,
+                    title,
+                    summary,
+                    distanceKm,
+                    estimatedDurationMin,
+                    recommendationScore,
+                    elevationSummaryJson,
+                    scoreBreakdownJson,
+                    evidenceBadgesJson,
+                    routingMetadataJson,
+                    preferenceSummary,
+                    elevationStatus,
+                    sceneryEvidenceStatus,
+                    routePointCount,
+                    routePointsJson
+            );
         }
     }
 }

@@ -8,9 +8,11 @@ import com.bikeprojectminji.bikeback.party.dto.RidePartyReportResponse;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyEntity;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyReportEntity;
 import com.bikeprojectminji.bikeback.party.entity.RidePartyReportReason;
+import com.bikeprojectminji.bikeback.party.event.RidePartyCanceledEvent;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyReportRepository;
 import com.bikeprojectminji.bikeback.party.repository.RidePartyRepository;
 import java.time.Clock;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,16 +25,19 @@ public class RidePartyReportService {
     private final RidePartyReportRepository reportRepository;
     private final AuthService authService;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     public RidePartyReportService(
             RidePartyRepository partyRepository,
             RidePartyReportRepository reportRepository,
             AuthService authService,
+            ApplicationEventPublisher eventPublisher,
             Clock clock
     ) {
         this.partyRepository = partyRepository;
         this.reportRepository = reportRepository;
         this.authService = authService;
+        this.eventPublisher = eventPublisher;
         this.clock = clock;
     }
 
@@ -55,6 +60,7 @@ public class RidePartyReportService {
         long reportCount = reportRepository.countByPartyId(party.getId());
         if (shouldClose(reason, reportCount)) {
             party.cancelByReport();
+            eventPublisher.publishEvent(new RidePartyCanceledEvent(party.getId()));
         }
         RidePartyEntity savedParty = partyRepository.save(party);
         return new RidePartyReportResponse(savedParty.getId(), reportCount, savedParty.getStatus().name());

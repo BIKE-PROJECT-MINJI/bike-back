@@ -27,6 +27,7 @@ class OpenApiRepresentativeContractTest {
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.paths['/api/v1/ride-records'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/ride-records/receipt'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/ride-records'].post.requestBody.content['application/json'].schema['$ref']",
                         containsString("CreateRideRecordRequest")))
                 .andExpect(jsonPath("$.paths['/api/v1/courses/{courseId}/route-points'].get").exists())

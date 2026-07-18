@@ -25,17 +25,20 @@ public class RideRecordFinalizationWriter {
     private final RideRecordPointRepository rideRecordPointRepository;
     private final RideRecordProcessedPointRepository rideRecordProcessedPointRepository;
     private final RideRouteCanonicalizer rideRouteCanonicalizer;
+    private final RideRouteQualityAnalyzer rideRouteQualityAnalyzer;
 
     public RideRecordFinalizationWriter(
             RideRecordRepository rideRecordRepository,
             RideRecordPointRepository rideRecordPointRepository,
             RideRecordProcessedPointRepository rideRecordProcessedPointRepository,
-            RideRouteCanonicalizer rideRouteCanonicalizer
+            RideRouteCanonicalizer rideRouteCanonicalizer,
+            RideRouteQualityAnalyzer rideRouteQualityAnalyzer
     ) {
         this.rideRecordRepository = rideRecordRepository;
         this.rideRecordPointRepository = rideRecordPointRepository;
         this.rideRecordProcessedPointRepository = rideRecordProcessedPointRepository;
         this.rideRouteCanonicalizer = rideRouteCanonicalizer;
+        this.rideRouteQualityAnalyzer = rideRouteQualityAnalyzer;
     }
 
     @Transactional
@@ -48,21 +51,35 @@ public class RideRecordFinalizationWriter {
         }
 
         List<RideRecordPointEntity> rawPoints = rideRecordPointRepository.findByRideRecordIdOrderByPointOrderAsc(rideRecordId);
-        List<RideRecordPointRequest> canonical = rideRouteCanonicalizer.canonicalize(rawPoints.stream()
-                .map(point -> new RideRecordPointRequest(point.getPointOrder(), point.getLatitude(), point.getLongitude()))
+        RideRouteQualityResult quality = rideRouteQualityAnalyzer.analyze(rawPoints.stream()
+                .map(point -> new RideRecordPointRequest(
+                        point.getPointOrder(),
+                        point.getLatitude(),
+                        point.getLongitude(),
+                        point.getCapturedAt(),
+                        point.getAccuracyM(),
+                        point.getSpeedMps(),
+                        point.getBearingDeg(),
+                        point.getAltitudeM(),
+                        point.getDistanceToRouteM(),
+                        point.getRouteProgressPct()
+                ))
                 .toList());
-        if (canonical.isEmpty()) {
-            throw new IllegalStateException("최종 경로 포인트가 비어 있습니다.");
-        }
+        List<RideRecordPointRequest> canonical = quality.selectedSegment().isEmpty()
+                ? List.of()
+                : rideRouteCanonicalizer.canonicalize(quality.selectedSegment());
 
         rideRecordProcessedPointRepository.deleteByRideRecordId(rideRecordId);
         rideRecordProcessedPointRepository.flush();
-        rideRecordProcessedPointRepository.saveAll(canonical.stream()
-                .map(point -> new RideRecordProcessedPointEntity(rideRecordId, point.pointOrder(), point.latitude(), point.longitude()))
-                .toList());
+        if (!canonical.isEmpty()) {
+            rideRecordProcessedPointRepository.saveAll(canonical.stream()
+                    .map(point -> new RideRecordProcessedPointEntity(rideRecordId, point.pointOrder(), point.latitude(), point.longitude()))
+                    .toList());
+        }
 
-        rideRecord.markReady(OffsetDateTime.now());
+        rideRecord.markReady(OffsetDateTime.now(), quality.distanceM(), quality.status(), quality.reasons());
         rideRecordRepository.save(rideRecord);
-        log.info("ride record finalization ready rideRecordId={} processedPointCount={}", rideRecordId, canonical.size());
+        log.info("ride record finalization ready rideRecordId={} processedPointCount={} qualityStatus={} qualityReasons={}",
+                rideRecordId, canonical.size(), quality.status(), quality.reasons());
     }
 }

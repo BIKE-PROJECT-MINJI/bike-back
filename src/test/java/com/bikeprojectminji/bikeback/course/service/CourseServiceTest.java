@@ -22,6 +22,7 @@ import com.bikeprojectminji.bikeback.course.entity.CourseVisibility;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordEntity;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordFinalizationStatus;
 import com.bikeprojectminji.bikeback.ride.entity.RideRecordProcessedPointEntity;
+import com.bikeprojectminji.bikeback.ride.entity.RideRouteQualityStatus;
 import com.bikeprojectminji.bikeback.auth.entity.UserEntity;
 import com.bikeprojectminji.bikeback.global.exception.ForbiddenException;
 import com.bikeprojectminji.bikeback.global.idempotency.IdempotencyLockService;
@@ -156,7 +157,9 @@ class CourseServiceTest {
                 any(),
                 any()
         );
-        InOrder inOrder = inOrder(courseRoutePointRepository, courseRouteGeometryRepository);
+        InOrder inOrder = inOrder(courseRepository, courseRoutePointRepository, courseRouteGeometryRepository);
+        inOrder.verify(courseRepository).save(any(CourseEntity.class));
+        inOrder.verify(courseRepository).flush();
         inOrder.verify(courseRoutePointRepository).saveAll(any());
         inOrder.verify(courseRoutePointRepository).flush();
         inOrder.verify(courseRouteGeometryRepository).refreshRouteLine(2001L);
@@ -317,6 +320,63 @@ class CourseServiceTest {
         ))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("경로 보정이 아직 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+    }
+
+    @Test
+    @DisplayName("GPS 품질이 REJECTED인 기록은 READY여도 코스로 승격하지 않는다")
+    void createCourseFromRideRecordRejectsUnusableGpsQuality() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity rideRecord = new RideRecordEntity(
+                1L,
+                java.time.OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                java.time.OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                18250,
+                3600
+        );
+        ReflectionTestUtils.setField(rideRecord, "id", 1001L);
+        rideRecord.markReady(
+                java.time.OffsetDateTime.parse("2026-03-29T11:01:00+09:00"),
+                0,
+                RideRouteQualityStatus.REJECTED,
+                List.of("NO_USABLE_SEGMENT")
+        );
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(1001L, 1L)).willReturn(Optional.of(rideRecord));
+
+        assertThatThrownBy(() -> courseService.createCourseFromRideRecord(
+                "1",
+                new CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE")
+        ))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("GPS 품질 검증이 완료되지 않아 코스를 생성할 수 없습니다. 원본 기록은 보존됩니다.");
+        verify(rideRecordProcessedPointRepository, never()).findByRideRecordIdOrderByPointOrderAsc(1001L);
+    }
+
+    @Test
+    @DisplayName("품질 미산정 legacy 기록은 READY여도 코스로 승격하지 않는다")
+    void createCourseFromRideRecordRejectsLegacyQuality() {
+        UserEntity user = new UserEntity(null, "bikeoasis@example.com", "encoded-password", "bikeoasis", null);
+        ReflectionTestUtils.setField(user, "id", 1L);
+        RideRecordEntity rideRecord = new RideRecordEntity(
+                1L,
+                java.time.OffsetDateTime.parse("2026-03-29T10:00:00+09:00"),
+                java.time.OffsetDateTime.parse("2026-03-29T11:00:00+09:00"),
+                18250,
+                3600
+        );
+        ReflectionTestUtils.setField(rideRecord, "id", 1001L);
+        ReflectionTestUtils.setField(rideRecord, "finalizationStatus", "READY");
+        given(authService.findUserBySubject("1")).willReturn(user);
+        given(rideRecordRepository.findByIdAndOwnerUserId(1001L, 1L)).willReturn(Optional.of(rideRecord));
+
+        assertThatThrownBy(() -> courseService.createCourseFromRideRecord(
+                "1",
+                new CreateCourseFromRideRecordRequest(1001L, "한강 코스", "설명", "PRIVATE")
+        ))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("GPS 품질 검증이 완료되지 않아 코스를 생성할 수 없습니다. 원본 기록은 보존됩니다.");
+        verify(rideRecordProcessedPointRepository, never()).findByRideRecordIdOrderByPointOrderAsc(1001L);
     }
 
     @Test

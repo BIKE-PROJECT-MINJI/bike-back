@@ -174,7 +174,7 @@ public class IdempotencyLockService {
             record(operation, "contended");
             return false;
         } catch (RuntimeException exception) {
-            log.warn("idempotency_lock_redis_unavailable operation={} key={}", operation, redisKey, exception);
+            log.warn("idempotency_lock_redis_unavailable operation={}", operation, exception);
             record(operation, "redis_unavailable");
             return true;
         }
@@ -225,7 +225,7 @@ public class IdempotencyLockService {
             stringRedisTemplate.execute(RELEASE_SCRIPT, List.of(redisKey), token);
             record(operation, "released");
         } catch (RuntimeException exception) {
-            log.warn("idempotency_lock_release_failed operation={} key={}", operation, redisKey, exception);
+            log.warn("idempotency_lock_release_failed operation={}", operation, exception);
             record(operation, "release_failed");
         }
     }
