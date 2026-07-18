@@ -5,7 +5,7 @@ public_subnet_ids             = ["subnet-aaaaaaa", "subnet-bbbbbbb"]
 app_instance_id               = "i-xxxxxxxxxxxxxxxxx"
 app_instance_security_group_id = "sg-xxxxxxxxxxxxxxxxx"
 domain_name                   = "api.gajabike.shop"
-health_check_path             = "/ready"
+health_check_path             = "/health"
 app_port                      = 8080
 
 # Keep false when DNS stays in Gabia.

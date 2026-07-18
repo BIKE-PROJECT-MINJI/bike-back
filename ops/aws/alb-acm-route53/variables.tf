@@ -38,7 +38,7 @@ variable "domain_name" {
 variable "health_check_path" {
   description = "Application health check path exposed by Spring Boot."
   type        = string
-  default     = "/ready"
+  default     = "/health"
 }
 
 variable "app_port" {
