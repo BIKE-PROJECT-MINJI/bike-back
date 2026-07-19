@@ -180,6 +180,17 @@ class EphemeralAwsValidationContractTest {
     }
 
     @Test
+    @DisplayName("임시 AWS 산출물은 백엔드 Docker 빌드 컨텍스트에서 제외한다")
+    void ephemeralAwsArtifactsStayOutsideDockerContext() throws Exception {
+        String dockerIgnore = Files.readString(Path.of(".dockerignore"));
+
+        assertThat(dockerIgnore).contains(
+                "ops/aws/ephemeral-validation/.artifacts",
+                "ops/aws/ephemeral-validation/.terraform"
+        );
+    }
+
+    @Test
     @DisplayName("단일 matrix 실행기는 순서를 고정하고 모든 종료 경로에서 삭제 감사를 수행한다")
     void matrixRunnerEnforcesOrderAndCleanup() throws Exception {
         String matrix = read("scripts/run-validation-matrix.sh");
