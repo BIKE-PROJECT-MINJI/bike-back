@@ -11,6 +11,8 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly STACK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly TFVARS="$STACK_DIR/terraform.auto.tfvars.json"
 readonly EVIDENCE_DIR="$STACK_DIR/.artifacts/teardown"
+readonly DESTROY_AUTHORIZATION_FILE="$STACK_DIR/.artifacts/destroy-authorized"
+trap 'rm -f "$DESTROY_AUTHORIZATION_FILE"' EXIT
 
 for command in aws python3 terraform; do
   command -v "$command" >/dev/null || {
@@ -43,18 +45,46 @@ install -d -m 0700 "$EVIDENCE_DIR"
 terraform -chdir="$STACK_DIR" output -json >"$EVIDENCE_DIR/pre-destroy-outputs.json" 2>/dev/null || true
 terraform -chdir="$STACK_DIR" show -json >"$EVIDENCE_DIR/pre-destroy-state.json" 2>/dev/null || true
 
+bucket_state() {
+  local error_file="$EVIDENCE_DIR/head-bucket-error.txt"
+  if aws s3api head-bucket \
+    --region "$AWS_REGION" \
+    --bucket "$ARTIFACT_BUCKET" >/dev/null 2>"$error_file"; then
+    rm -f "$error_file"
+    printf 'exists'
+    return 0
+  fi
+
+  local error_text
+  error_text="$(<"$error_file")"
+  if [[ "$error_text" == *'(404)'* \
+    || "$error_text" == *'NoSuchBucket'* \
+    || "$error_text" == *'Not Found'* ]]; then
+    rm -f "$error_file"
+    printf 'missing'
+    return 0
+  fi
+
+  printf 'head-bucket returned unexpected error; cleanup guard remains enabled\n%s\n' \
+    "$error_text" >&2
+  return 1
+}
+
 # Keep the scheduled cleanup guard alive if object or bucket deletion fails.
-if aws s3api head-bucket --bucket "$ARTIFACT_BUCKET" 2>/dev/null; then
+current_bucket_state="$(bucket_state)"
+if [[ "$current_bucket_state" == 'exists' ]]; then
   aws s3 rm "s3://$ARTIFACT_BUCKET" --recursive --only-show-errors
   aws s3api delete-bucket --region "$AWS_REGION" --bucket "$ARTIFACT_BUCKET"
 fi
-if aws s3api head-bucket --bucket "$ARTIFACT_BUCKET" 2>/dev/null; then
+if [[ "$(bucket_state)" != 'missing' ]]; then
   printf 'artifact bucket still exists; cleanup guard remains enabled\n' >&2
   exit 1
 fi
 
 # Destroy mode is an explicit CLI-only bypass because the external gate's
 # artifacts were deliberately removed while the cleanup guard was active.
+printf '%s\n' "$RUN_ID" >"$DESTROY_AUTHORIZATION_FILE"
+chmod 0600 "$DESTROY_AUTHORIZATION_FILE"
 terraform -chdir="$STACK_DIR" destroy \
   -input=false \
   -auto-approve \

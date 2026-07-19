@@ -36,6 +36,7 @@ QUERY_FIELDS: Final[tuple[str, ...]] = (
     "artifact_bucket",
     "artifact_prefix",
     "secret_prefix",
+    "run_id",
     "schedule_name",
     "cleanup_at",
 )
@@ -47,6 +48,7 @@ class GateQuery:
     artifact_bucket: str
     artifact_prefix: str
     secret_prefix: str
+    run_id: str
     schedule_name: str
     cleanup_at: str
 
@@ -130,19 +132,37 @@ def verify_artifacts(query: GateQuery) -> None:
 
 
 def verify_parameters(query: GateQuery) -> None:
+    expected_description = f"GAJA ephemeral validation run {query.run_id}"
     for secret_name in SECRET_NAMES:
-        _ = run_aws(
+        parameter_name = f"{query.secret_prefix}{secret_name}"
+        parameter_type = run_aws(
             "ssm",
             "get-parameter",
             "--region",
             query.aws_region,
             "--name",
-            f"{query.secret_prefix}{secret_name}",
+            parameter_name,
             "--query",
-            "Parameter.Name",
+            "Parameter.Type",
             "--output",
             "text",
         )
+        description = run_aws(
+            "ssm",
+            "describe-parameters",
+            "--region",
+            query.aws_region,
+            "--parameter-filters",
+            f"Key=Name,Option=Equals,Values={parameter_name}",
+            "--query",
+            "Parameters[0].Description",
+            "--output",
+            "text",
+        )
+        if parameter_type != "SecureString" or description != expected_description:
+            raise RuntimeError(
+                f"parameter ownership mismatch: {parameter_name} type={parameter_type}"
+            )
 
 
 def main() -> None:

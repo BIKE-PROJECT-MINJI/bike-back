@@ -86,10 +86,29 @@ put_secure_parameter() {
   local parameter_suffix="$1"
   local secret_file="$2"
   local parameter_name="${SECRET_PREFIX}${parameter_suffix}"
+  local expected_description="GAJA ephemeral validation run ${RUN_ID}"
   local request_file="$TEMP_DIR/${parameter_suffix}.json"
+  local parameter_type
+  local parameter_description
   if aws ssm get-parameter \
     --region "$AWS_REGION" \
     --name "$parameter_name" >/dev/null 2>&1; then
+    parameter_type="$(aws ssm get-parameter \
+      --region "$AWS_REGION" \
+      --name "$parameter_name" \
+      --query Parameter.Type \
+      --output text)"
+    parameter_description="$(aws ssm describe-parameters \
+      --region "$AWS_REGION" \
+      --parameter-filters "Key=Name,Option=Equals,Values=$parameter_name" \
+      --query 'Parameters[0].Description' \
+      --output text)"
+    [[ "$parameter_type" == 'SecureString' \
+      && "$parameter_description" == "$expected_description" ]] || {
+      printf 'existing parameter ownership mismatch: %s type=%s\n' \
+        "$parameter_name" "$parameter_type" >&2
+      exit 1
+    }
     return 0
   fi
   python3 - "$request_file" "$parameter_name" "$secret_file" "$RUN_ID" <<'PY'
@@ -104,6 +123,7 @@ request = {
     "Value": value,
     "Type": "SecureString",
     "Tier": "Standard",
+    "Description": f"GAJA ephemeral validation run {run_id}",
     "Tags": [
         {"Key": "Project", "Value": "GAJA"},
         {"Key": "Purpose", "Value": "ephemeral-validation"},

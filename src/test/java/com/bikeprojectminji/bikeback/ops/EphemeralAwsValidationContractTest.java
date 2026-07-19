@@ -85,6 +85,9 @@ class EphemeralAwsValidationContractTest {
                 "get-schedule",
                 "create-bucket",
                 "\"Tags\": [",
+                "Description",
+                "Parameter.Type",
+                "existing parameter ownership mismatch",
                 "ssm put-parameter"
         );
         assertThat(controlPlane).doesNotContain("ssm add-tags-to-resource", "request[\"Overwrite\"]");
@@ -173,7 +176,15 @@ class EphemeralAwsValidationContractTest {
                 "exit 1"
         );
         assertThat(teardown).doesNotContain("} | tee \"$EVIDENCE_DIR/residual-audit.json\"");
-        assertThat(teardown).contains("-var=destroy_mode=true", "artifact bucket still exists");
+        assertThat(teardown + read("bootstrap-gate.tf")).contains(
+                "-var=destroy_mode=true",
+                "destroy-authorized",
+                "trimspace(file(local.destroy_authorization_file)) == var.run_id",
+                "artifact bucket still exists",
+                "head-bucket returned unexpected error",
+                "'(404)'",
+                "'NoSuchBucket'"
+        );
         assertThat(teardown.indexOf("aws s3 rm"))
                 .isLessThan(teardown.indexOf("terraform -chdir=\"$STACK_DIR\" destroy"));
     }
