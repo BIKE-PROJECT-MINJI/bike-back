@@ -136,11 +136,6 @@ request = {
     "Type": "SecureString",
     "Tier": "Standard",
     "Description": f"GAJA ephemeral validation run {run_id}",
-    "Tags": [
-        {"Key": "Project", "Value": "GAJA"},
-        {"Key": "Purpose", "Value": "ephemeral-validation"},
-        {"Key": "RunId", "Value": run_id},
-    ],
 }
 with open(target, "w", encoding="utf-8") as output:
     json.dump(request, output, ensure_ascii=True)

@@ -105,7 +105,6 @@ class EphemeralAwsValidationContractTest {
                 "-target=aws_lambda_permission.scheduler",
                 "get-schedule",
                 "create-bucket",
-                "\"Tags\": [",
                 "Description",
                 "Parameter.Type",
                 "existing parameter ownership mismatch",
@@ -114,6 +113,7 @@ class EphemeralAwsValidationContractTest {
                 "ssm put-parameter"
         );
         assertThat(controlPlane).doesNotContain("ssm add-tags-to-resource", "request[\"Overwrite\"]");
+        assertThat(controlPlane).doesNotContain("\"Tags\": [");
         assertThat(controlPlane.indexOf("-target=aws_scheduler_schedule.cleanup"))
                 .isLessThan(controlPlane.indexOf("create-bucket"));
         assertThat(bootstrapGate).contains(
