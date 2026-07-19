@@ -155,6 +155,37 @@ class EphemeralAwsValidationContractTest {
     }
 
     @Test
+    @DisplayName("runtime gate는 준비 상태를 제한 시간 동안 재확인하고 실패 진단을 보존한다")
+    void runtimeGatePollsReadinessAndCapturesDiagnostics() throws Exception {
+        String gate = read("scripts/verify-bootstrap-and-attach.sh");
+
+        assertThat(gate).contains(
+                "wait_for_runtime_gate",
+                "collect_runtime_diagnostics",
+                "RUNTIME_GATE_TIMEOUT_SECONDS",
+                "RUNTIME_GATE_POLL_SECONDS",
+                "RUNTIME_GATE_DEADLINE_EPOCH",
+                "runtime_gate_failed",
+                "systemctl is-failed --quiet cloud-final.service",
+                "cloud-init status --long",
+                "journalctl -u cloud-final.service",
+                "docker ps -a --no-trunc",
+                "docker logs --since 20m --tail 120",
+                "[REDACTED_SECRET]",
+                "parallel runtime diagnostics",
+                "diagnostics-manifest.json",
+                "diagnostics-redaction-scan.json",
+                "runtime gate timed out"
+        );
+        assertThat(gate).doesNotContain(
+                "aws ssm wait command-executed",
+                "docker inspect",
+                "cat /run/gaja/secrets",
+                "printenv"
+        );
+    }
+
+    @Test
     @DisplayName("ALB target은 SSM 의존성 gate가 모두 통과한 뒤에만 등록한다")
     void targetAttachmentRequiresRuntimeDependencyGate() throws Exception {
         String gate = read("scripts/verify-bootstrap-and-attach.sh");
