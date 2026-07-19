@@ -124,19 +124,84 @@ class EphemeralAwsValidationContractTest {
     }
 
     @Test
-    @DisplayName("k6 evidence 권한과 장시간 SSM polling은 컨테이너 실행 계약에 맞는다")
-    void k6UsesWritableEvidenceAndLongPolling() throws Exception {
+    @DisplayName("k6 실패 evidence는 attempt 격리, SSM 출력, redaction을 포함한다")
+    void k6FailureEvidenceIsIsolatedAndRedacted() throws Exception {
         String runner = read("scripts/run-k6-stage.sh");
+        String commandEvidence = read("scripts/ssm-command-evidence.sh");
+        String workload = Files.readString(Path.of("ops/loadtest/k6/bike-api.js"));
 
         assertThat(runner).contains(
                 "install -d -m 0770 -o 12345 -g 12345",
-                "get-command-invocation",
-                "Pending|InProgress|Delayed",
-                "Failed|Cancelled|TimedOut",
+                "ATTEMPT_ID",
+                "k6.stdout.log",
+                "k6.stderr.log",
+                "OutputS3BucketName",
+                "OutputS3KeyPrefix",
+                "scan-k6-evidence-redaction.sh",
                 ".artifacts/$RUN_ID/k6/$STAGE",
                 "assert-remaining-ttl.sh"
         );
+        assertThat(runner).contains(
+                "evidence/{test_id}/{attempt_id}/ssm-output",
+                "render-k6-evidence-manifest.sh",
+                "-e TEST_ID=${ATTEMPT_ID}"
+        );
+        assertThat(runner).doesNotContain(
+                "rm -rf \"$EVIDENCE_DIR\"",
+                "rm -rf /opt/gaja-run/evidence/${TEST_ID}",
+                "> >(tee"
+        );
+        assertThat(commandEvidence).contains(
+                "get-command-invocation",
+                "InvocationDoesNotExist",
+                "command-poll-error.txt",
+                "Failed | Cancelled | TimedOut"
+        );
+        assertThat(workload).contains(
+                "summaryTrendStats",
+                "'p(95)'",
+                "'p(99)'"
+        );
         assertThat(runner).doesNotContain("aws ssm wait command-executed");
+    }
+
+    @Test
+    @DisplayName("단일 matrix 실행기는 순서를 고정하고 모든 종료 경로에서 삭제 감사를 수행한다")
+    void matrixRunnerEnforcesOrderAndCleanup() throws Exception {
+        String matrix = read("scripts/run-validation-matrix.sh");
+
+        assertThat(matrix).contains(
+                "trap cleanup EXIT INT TERM",
+                "preflight.sh",
+                "prepare-control-plane.sh",
+                "build-and-upload-artifacts.sh",
+                "plan-create-only.sh",
+                "EXPECTED_BACKEND_IMAGE",
+                "verify-bootstrap-and-attach.sh",
+                "run_stage smoke",
+                "run_stage baseline-10",
+                "run_stage stress-25",
+                "run_stage ai-25",
+                "collect-stage-observability.sh",
+                "destroy-and-audit.sh"
+        );
+        assertThat(matrix.indexOf("run_stage smoke"))
+                .isLessThan(matrix.indexOf("run_stage baseline-10"));
+        assertThat(matrix.indexOf("run_stage baseline-10"))
+                .isLessThan(matrix.indexOf("run_stage stress-25"));
+        assertThat(matrix.indexOf("run_stage stress-25"))
+                .isLessThan(matrix.indexOf("run_stage ai-25"));
+    }
+
+    @Test
+    @DisplayName("ALB 상시 health는 의존성 readiness와 분리한다")
+    void albUsesLivenessHealthAfterReadinessAttachment() throws Exception {
+        String edge = read("edge.tf");
+        String gate = read("scripts/verify-bootstrap-and-attach.sh");
+
+        assertThat(edge).contains("path                = \"/health\"");
+        assertThat(edge).doesNotContain("path                = \"/ready\"");
+        assertThat(gate).contains("http://127.0.0.1:8080/ready");
     }
 
     @Test

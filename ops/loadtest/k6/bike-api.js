@@ -334,6 +334,7 @@ function buildOptions() {
 }
 
 export var options = buildOptions();
+options.summaryTrendStats = ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'];
 
 function authHeaders(authToken) {
   var token = authToken || __ENV.AUTH_BEARER_TOKEN;
