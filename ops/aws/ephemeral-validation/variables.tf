@@ -68,6 +68,12 @@ variable "attach_app_targets" {
   default     = false
 }
 
+variable "destroy_mode" {
+  description = "Explicit destroy-only bypass for the artifact prerequisite gate. Never persist this in tfvars."
+  type        = bool
+  default     = false
+}
+
 variable "instance_types" {
   description = "Role sizes are intentionally capped at t3.small."
   type        = map(string)

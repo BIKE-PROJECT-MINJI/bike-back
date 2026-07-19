@@ -1,4 +1,5 @@
 data "external" "bootstrap_prerequisites" {
+  count   = var.destroy_mode ? 0 : 1
   program = ["python3", "${path.module}/scripts/check-bootstrap-prerequisites.py"]
 
   query = {
@@ -12,11 +13,14 @@ data "external" "bootstrap_prerequisites" {
 }
 
 resource "terraform_data" "bootstrap_prerequisites" {
-  input = data.external.bootstrap_prerequisites.result
+  input = var.destroy_mode ? {
+    ready  = "destroy"
+    run_id = var.run_id
+  } : data.external.bootstrap_prerequisites[0].result
 
   lifecycle {
     precondition {
-      condition     = data.external.bootstrap_prerequisites.result.ready == "true"
+      condition     = var.destroy_mode || data.external.bootstrap_prerequisites[0].result.ready == "true"
       error_message = "Run-scoped cleanup, artifacts, and SecureString prerequisites must exist before EC2 apply."
     }
   }

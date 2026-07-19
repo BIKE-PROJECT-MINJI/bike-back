@@ -84,11 +84,10 @@ class EphemeralAwsValidationContractTest {
                 "-target=aws_lambda_permission.scheduler",
                 "get-schedule",
                 "create-bucket",
-                "request[\"Tags\"]",
-                "request[\"Overwrite\"] = True",
+                "\"Tags\": [",
                 "ssm put-parameter"
         );
-        assertThat(controlPlane).doesNotContain("ssm add-tags-to-resource");
+        assertThat(controlPlane).doesNotContain("ssm add-tags-to-resource", "request[\"Overwrite\"]");
         assertThat(controlPlane.indexOf("-target=aws_scheduler_schedule.cleanup"))
                 .isLessThan(controlPlane.indexOf("create-bucket"));
         assertThat(bootstrapGate).contains(
@@ -174,8 +173,9 @@ class EphemeralAwsValidationContractTest {
                 "exit 1"
         );
         assertThat(teardown).doesNotContain("} | tee \"$EVIDENCE_DIR/residual-audit.json\"");
-        assertThat(teardown.indexOf("terraform -chdir=\"$STACK_DIR\" destroy"))
-                .isLessThan(teardown.indexOf("aws s3 rm"));
+        assertThat(teardown).contains("-var=destroy_mode=true", "artifact bucket still exists");
+        assertThat(teardown.indexOf("aws s3 rm"))
+                .isLessThan(teardown.indexOf("terraform -chdir=\"$STACK_DIR\" destroy"));
     }
 
     private static String read(String relativePath) throws Exception {
