@@ -175,6 +175,7 @@ class EphemeralAwsValidationContractTest {
                 "parallel runtime diagnostics",
                 "diagnostics-manifest.json",
                 "diagnostics-redaction-scan.json",
+                "done\nexit 0\nEOF",
                 "runtime gate timed out"
         );
         assertThat(gate).doesNotContain(

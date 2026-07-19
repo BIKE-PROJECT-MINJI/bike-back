@@ -184,6 +184,7 @@ printf '%s\n' '=== local HTTP probes ==='
 for probe in 'http://127.0.0.1:8080/ready' 'http://127.0.0.1:8091/health' 'http://127.0.0.1:8989/health'; do
   curl -sS --max-time 5 -o /dev/null -w "${probe} status=%{http_code} error=%{errormsg}\n" "$probe" 2>&1
 done
+exit 0
 EOF
 )"
 
