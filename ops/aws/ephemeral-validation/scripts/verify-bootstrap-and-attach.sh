@@ -287,7 +287,7 @@ for role, instance_id in {**payload["app"], **payload["singleton"]}.items():
     print(f"{role}\t{instance_id}")
 PY
 )
-  "$SCRIPT_DIR/render-runtime-diagnostics-manifest.sh" \
+  bash "$SCRIPT_DIR/render-runtime-diagnostics-manifest.sh" \
     "$EVIDENCE_DIR" \
     "$EVIDENCE_DIR/instance-ids.json" \
     "$EVIDENCE_DIR/diagnostics-manifest.json"
