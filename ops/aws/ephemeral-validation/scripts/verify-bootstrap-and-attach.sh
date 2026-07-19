@@ -134,23 +134,7 @@ collect_runtime_diagnostics() {
   local diagnostic_command
   diagnostic_command="$(cat <<'EOF'
 set +e
-printf '%s\n' '=== timestamp ==='
-date -u --iso-8601=seconds
-printf '%s\n' '=== cloud-init ==='
-cloud-init status --long 2>&1
-printf '%s\n' '=== cloud-final service ==='
-systemctl show cloud-final.service -p ActiveState -p SubState -p Result 2>&1
-printf '%s\n' '=== cloud-final journal ==='
-journalctl -u cloud-final.service --no-pager -n 80 2>&1
-printf '%s\n' '=== ready markers ==='
-find /opt/gaja-run -maxdepth 2 -name '*.ready' -printf '%p\n' 2>&1
-printf '%s\n' '=== disk and memory ==='
-df -h / /opt/gaja-run 2>&1
-free -m 2>&1
-printf '%s\n' '=== docker containers ==='
-docker ps -a --no-trunc 2>&1
-printf '%s\n' '=== bounded redacted container logs ==='
-redact_logs() {
+redact_output() {
   python3 -c '
 import pathlib
 import re
@@ -166,24 +150,51 @@ for secret_file in pathlib.Path("/run/gaja/secrets").glob("*"):
         payload = payload.replace(secret, "[REDACTED_SECRET]")
 patterns = (
     (r"(?i)(Bearer[ =:]+)[A-Za-z0-9._~+/=-]+", r"\1[REDACTED_TOKEN]"),
-    (r"(?i)((?:password|secret|token|authorization)[ =:]+)[^\\s,;]+", r"\1[REDACTED]"),
-    (r"(://)[^/@\\s]+:[^/@\\s]+@", r"\1[REDACTED_USERINFO]@"),
+    (r"(?i)((?:password|passwd|secret|token|authorization|api[_-]?key|client[_-]?secret)\s*[=:]\s*)[^\s,;]+", r"\1[REDACTED]"),
+    (r"(?i)(X-Amz-(?:Credential|Signature|Security-Token)=)[^&\s]+", r"\1[REDACTED]"),
+    (r"(://)[^/@\s]+:[^/@\s]+@", r"\1[REDACTED_USERINFO]@"),
+    (r"AIza[0-9A-Za-z_-]{30,}", "[REDACTED_GOOGLE_API_KEY]"),
 )
 for pattern, replacement in patterns:
     payload = re.sub(pattern, replacement, payload)
 sys.stdout.write(payload)
 '
 }
+collect_diagnostics() {
+printf '%s\n' '=== timestamp ==='
+date -u --iso-8601=seconds
+printf '%s\n' '=== container state ==='
 for container in gaja-back gaja-ai-route gaja-postgis gaja-redis gaja-graphhopper gaja-prometheus gaja-grafana; do
   if docker ps -a --format '{{.Names}}' | grep -qx "$container"; then
-    printf '%s\n' "--- ${container} ---"
-    docker logs --since 20m --tail 120 "$container" 2>&1 | redact_logs
+    docker container inspect --format '{{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restart={{.RestartCount}} error={{json .State.Error}}' "$container" 2>&1
   fi
 done
 printf '%s\n' '=== local HTTP probes ==='
 for probe in 'http://127.0.0.1:8080/ready' 'http://127.0.0.1:8091/health' 'http://127.0.0.1:8989/health'; do
   curl -sS --max-time 5 -o /dev/null -w "${probe} status=%{http_code} error=%{errormsg}\n" "$probe" 2>&1
 done
+printf '%s\n' '=== docker containers ==='
+docker ps -a --no-trunc 2>&1
+printf '%s\n' '=== bounded redacted container logs ==='
+for container in gaja-back gaja-ai-route gaja-postgis gaja-redis gaja-graphhopper gaja-prometheus gaja-grafana; do
+  if docker ps -a --format '{{.Names}}' | grep -qx "$container"; then
+    printf '%s\n' "--- ${container} ---"
+    docker logs --since 20m --tail 120 "$container" 2>&1
+  fi
+done
+printf '%s\n' '=== cloud-init ==='
+cloud-init status --long 2>&1
+printf '%s\n' '=== cloud-final service ==='
+systemctl show cloud-final.service -p ActiveState -p SubState -p Result 2>&1
+printf '%s\n' '=== cloud-final journal ==='
+journalctl -u cloud-final.service --no-pager -n 40 2>&1
+printf '%s\n' '=== ready markers ==='
+find /opt/gaja-run -maxdepth 2 -name '*.ready' -printf '%p\n' 2>&1
+printf '%s\n' '=== disk and memory ==='
+df -h / /opt/gaja-run 2>&1
+free -m 2>&1
+}
+collect_diagnostics 2>&1 | redact_output
 exit 0
 EOF
 )"
@@ -225,7 +236,6 @@ PY
     aws ssm list-command-invocations \
       --region "$AWS_REGION" \
       --command-id "$command_id" \
-      --details \
       --output json >"$result_file"
     if python3 - "$result_file" "$(wc -w <<<"$instance_ids")" <<'PY'
 import json
@@ -246,54 +256,74 @@ PY
   aws ssm list-command-invocations \
     --region "$AWS_REGION" \
     --command-id "$command_id" \
-    --details \
     --output json >"$result_file"
-  python3 - "$result_file" "$EVIDENCE_DIR/instance-ids.json" \
-    "$EVIDENCE_DIR/diagnostics-manifest.json" <<'PY'
+  while IFS=$'\t' read -r role instance_id; do
+    if ! aws ssm get-command-invocation \
+      --region "$AWS_REGION" \
+      --command-id "$command_id" \
+      --instance-id "$instance_id" \
+      --output json >"$EVIDENCE_DIR/diagnostics-${role}.json"; then
+      python3 - "$EVIDENCE_DIR/diagnostics-${role}.json" "$role" "$instance_id" <<'PY'
 import json
 import sys
 
-result_path, instance_path, target_path = sys.argv[1:]
-with open(result_path, encoding="utf-8") as source:
-    invocations = json.load(source).get("CommandInvocations", [])
-with open(instance_path, encoding="utf-8") as source:
-    instance_payload = json.load(source)
-roles = {value: key for key, value in {
-    **instance_payload["app"], **instance_payload["singleton"]
-}.items()}
-by_instance = {item.get("InstanceId"): item for item in invocations}
-manifest = []
-for instance_id, role in roles.items():
-    invocation = by_instance.get(instance_id)
-    plugins = (invocation or {}).get("CommandPlugins", [])
-    has_output = any(plugin.get("Output") for plugin in plugins)
-    status = (invocation or {}).get("Status", "MISSING")
-    manifest.append({
-        "role": role,
-        "instance_id": instance_id,
-        "capture": "CAPTURED" if has_output else "UNAVAILABLE",
-        "status": status,
-        "reason": None if has_output else f"no diagnostic output; command status={status}",
-    })
-with open(target_path, "w", encoding="utf-8") as output:
-    json.dump(manifest, output, ensure_ascii=True, indent=2)
+target, role, instance_id = sys.argv[1:]
+with open(target, "w", encoding="utf-8") as output:
+    json.dump({
+        "Status": "UNAVAILABLE",
+        "StandardOutputContent": "",
+        "StandardErrorContent": f"detail retrieval failed for role={role} instance={instance_id}",
+    }, output, ensure_ascii=True, indent=2)
     output.write("\n")
 PY
-  python3 - "$result_file" "$EVIDENCE_DIR/diagnostics-redaction-scan.json" <<'PY'
+    fi
+  done < <(python3 - "$EVIDENCE_DIR/instance-ids.json" <<'PY'
 import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    payload = json.load(source)
+for role, instance_id in {**payload["app"], **payload["singleton"]}.items():
+    print(f"{role}\t{instance_id}")
+PY
+)
+  "$SCRIPT_DIR/render-runtime-diagnostics-manifest.sh" \
+    "$EVIDENCE_DIR" \
+    "$EVIDENCE_DIR/instance-ids.json" \
+    "$EVIDENCE_DIR/diagnostics-manifest.json"
+  python3 - "$EVIDENCE_DIR" "$EVIDENCE_DIR/diagnostics-redaction-scan.json" <<'PY'
+import json
+import pathlib
 import re
 import sys
 
-source_path, target_path = sys.argv[1:]
-payload = open(source_path, encoding="utf-8").read()
+source_dir, target_path = sys.argv[1:]
+source_path = pathlib.Path(source_dir)
+scanned = sorted(
+    path for path in source_path.glob("diagnostics-*.json")
+    if path.name not in {
+        "diagnostics-request.json",
+        "diagnostics-manifest.json",
+        "diagnostics-redaction-scan.json",
+    }
+)
+payload = "\n".join(path.read_text(encoding="utf-8") for path in scanned)
 patterns = {
     "aws_access_key": r"(?:AKIA|ASIA)[A-Z0-9]{16}",
     "jwt": r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
     "unredacted_bearer": r"(?i)Bearer[ =:]+(?!\[REDACTED)[A-Za-z0-9._~+/=-]{16,}",
     "url_userinfo": r"://[^/@\s]+:[^/@\s]+@",
+    "generic_secret_assignment": r"(?i)(?:password|passwd|secret|token|authorization|api[_-]?key|client[_-]?secret)\s*[=:]\s*(?!\[REDACTED)[^\s,;]{4,}",
+    "aws_signed_query": r"(?i)X-Amz-(?:Credential|Signature|Security-Token)=(?!\[REDACTED)[^&\s]+",
+    "google_api_key": r"AIza[0-9A-Za-z_-]{30,}",
+    "private_key": r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
 }
 matches = {name: bool(re.search(pattern, payload)) for name, pattern in patterns.items()}
-result = {"pass": not any(matches.values()), "matches": matches}
+result = {
+    "pass": not any(matches.values()),
+    "scanned_files": [path.name for path in scanned],
+    "matches": matches,
+}
 with open(target_path, "w", encoding="utf-8") as output:
     json.dump(result, output, ensure_ascii=True, indent=2)
     output.write("\n")

@@ -158,6 +158,7 @@ class EphemeralAwsValidationContractTest {
     @DisplayName("runtime gate는 준비 상태를 제한 시간 동안 재확인하고 실패 진단을 보존한다")
     void runtimeGatePollsReadinessAndCapturesDiagnostics() throws Exception {
         String gate = read("scripts/verify-bootstrap-and-attach.sh");
+        String manifestRenderer = read("scripts/render-runtime-diagnostics-manifest.sh");
 
         assertThat(gate).contains(
                 "wait_for_runtime_gate",
@@ -170,17 +171,36 @@ class EphemeralAwsValidationContractTest {
                 "cloud-init status --long",
                 "journalctl -u cloud-final.service",
                 "docker ps -a --no-trunc",
+                "docker container inspect --format",
+                ".State.OOMKilled",
                 "docker logs --since 20m --tail 120",
                 "[REDACTED_SECRET]",
                 "parallel runtime diagnostics",
+                "get-command-invocation",
+                "diagnostics-${role}.json",
+                "render-runtime-diagnostics-manifest.sh",
                 "diagnostics-manifest.json",
                 "diagnostics-redaction-scan.json",
-                "done\nexit 0\nEOF",
+                "collect_diagnostics 2>&1 | redact_output",
+                "X-Amz-",
+                "exit 0\nEOF",
                 "runtime gate timed out"
         );
+        assertThat(manifestRenderer).contains(
+                "runtime_gate_status",
+                "diagnostic_command_status",
+                "potentially_truncated",
+                "23_900",
+                "7_900"
+        );
+        assertThat(gate.indexOf("=== container state ==="))
+                .isLessThan(gate.indexOf("=== cloud-final journal ==="));
+        assertThat(gate.indexOf("=== local HTTP probes ==="))
+                .isLessThan(gate.indexOf("=== cloud-final journal ==="));
         assertThat(gate).doesNotContain(
                 "aws ssm wait command-executed",
                 "docker inspect",
+                ".Config.Env",
                 "cat /run/gaja/secrets",
                 "printenv"
         );
