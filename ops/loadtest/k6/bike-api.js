@@ -8,6 +8,7 @@ var TEST_ID = __ENV.TEST_ID || 'bike-' + SCENARIO;
 var SUMMARY_DIR = (__ENV.SUMMARY_DIR || 'ops/loadtest/results').replace(/\/$/, '');
 var ENABLE_WEATHER_READ = ((__ENV.ENABLE_WEATHER_READ || 'true') + '').toLowerCase() !== 'false';
 var ENABLE_ADDRESS_SEARCH = ((__ENV.ENABLE_ADDRESS_SEARCH || 'true') + '').toLowerCase() !== 'false';
+var ADDRESS_SEARCH_EVERY_N_ITERATIONS = Math.max(1, intEnv('ADDRESS_SEARCH_EVERY_N_ITERATIONS', 1));
 var SLOW_REQUEST_SAMPLE_MS = intEnv('SLOW_REQUEST_SAMPLE_MS', 1000);
 var WRITE_ROUTE_POINT_COUNT = Math.max(2, intEnv('WRITE_ROUTE_POINT_COUNT', 2));
 var WRITE_POLL_FINALIZATION = ((__ENV.WRITE_POLL_FINALIZATION || 'false') + '').toLowerCase() === 'true';
@@ -334,6 +335,7 @@ function buildOptions() {
 }
 
 export var options = buildOptions();
+options.summaryTrendStats = ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'];
 
 function authHeaders(authToken) {
   var token = authToken || __ENV.AUTH_BEARER_TOKEN;
@@ -572,7 +574,8 @@ function runRoutePointsRead(setupData) {
 }
 
 function runAddressSearch() {
-  if (!ENABLE_ADDRESS_SEARCH) {
+  var iteration = typeof __ITER === 'undefined' ? 0 : __ITER;
+  if (!ENABLE_ADDRESS_SEARCH || iteration % ADDRESS_SEARCH_EVERY_N_ITERATIONS !== 0) {
     return;
   }
   group('address search', function() {
@@ -860,6 +863,7 @@ export function handleSummary(data) {
     scenario: SCENARIO,
     personas: ACTIVE_PERSONAS,
     address_search_enabled: ENABLE_ADDRESS_SEARCH,
+    address_search_every_n_iterations: ADDRESS_SEARCH_EVERY_N_ITERATIONS,
     weather_enabled: ENABLE_WEATHER_READ,
     write_route_point_count: WRITE_ROUTE_POINT_COUNT,
     write_poll_finalization: WRITE_POLL_FINALIZATION,

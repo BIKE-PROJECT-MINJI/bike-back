@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly RUN_ID='${run_id}'
+readonly NODE_ROLE='${role}'
+readonly ARTIFACT_URI='s3://${artifact_bucket_name}/${bootstrap_object_key}'
+readonly SECRET_PARAMETER_PREFIX='${secret_parameter_prefix}'
+readonly RUN_DIR='/opt/gaja-run'
+
+systemctl enable --now amazon-ssm-agent
+systemctl enable --now docker
+systemd-run \
+  --unit="gaja-$${RUN_ID}-hard-stop" \
+  --on-active='${shutdown_minutes}m' \
+  /sbin/shutdown -h now
+
+install -d -m 0700 "$${RUN_DIR}"
+for attempt in $(seq 1 60); do
+  if aws s3 cp "$${ARTIFACT_URI}" "$${RUN_DIR}/bootstrap.sh" \
+    && aws s3 cp "$${ARTIFACT_URI}.sha256" "$${RUN_DIR}/bootstrap.sh.sha256"; then
+    break
+  fi
+  if [[ "$${attempt}" == '60' ]]; then
+    printf 'bootstrap artifact unavailable after %s attempts\n' "$${attempt}" >&2
+    exit 1
+  fi
+  sleep 10
+done
+
+cd "$${RUN_DIR}"
+sha256sum --check bootstrap.sh.sha256
+chmod 0700 bootstrap.sh
+export GAJA_RUN_ID="$${RUN_ID}"
+export GAJA_NODE_ROLE="$${NODE_ROLE}"
+export GAJA_ARTIFACT_BUCKET='${artifact_bucket_name}'
+export GAJA_ARTIFACT_PREFIX='${bootstrap_object_key}'
+export GAJA_ARTIFACT_PREFIX="$${GAJA_ARTIFACT_PREFIX%/bootstrap.sh}"
+export GAJA_SECRET_PARAMETER_PREFIX="$${SECRET_PARAMETER_PREFIX}"
+exec ./bootstrap.sh

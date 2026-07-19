@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "run_id": "gaja-a13-20260719-1640",
+  "executed_at_utc": "2026-07-19",
+  "source": {
+    "backend_commit": "5de156ea5d2d0803072d9eff69d9c00635316db3",
+    "ai_worker_commit": "ec28787e766d18261828f1bac9826c42ab1e06ab"
+  },
+  "environment": {
+    "region": "ap-northeast-2",
+    "app_targets": 1,
+    "separated_roles": [
+      "app",
+      "postgresql_postgis",
+      "redis",
+      "graphhopper",
+      "observability",
+      "load_generator"
+    ],
+    "ai_provider_mode": "self-hosted",
+    "address_provider_mode": "fake",
+    "weather_provider_mode": "fake",
+    "historical_synthetic_client_ips": true,
+    "load_path": "private_load_node_to_app",
+    "alb_verification": "https_health_only"
+  },
+  "cost_guardrail": {
+    "estimated_base_usd": 1.850958,
+    "estimated_with_20_percent_headroom_usd": 2.2211496,
+    "configured_cap_usd": 3.0,
+    "ttl_minutes": 180
+  },
+  "stages": [
+    {
+      "id": "https-edge",
+      "result": "PASS",
+      "scope": "ALB HTTPS health",
+      "status": 200
+    },
+    {
+      "id": "smoke",
+      "result": "PASS",
+      "vus_max": 6,
+      "requests": 34,
+      "checks_passed": 72,
+      "checks_failed": 0,
+      "http_failure_rate": 0.0,
+      "p95_ms": 188.0818848,
+      "p99_ms": 334.20971068,
+      "source_summary_sha256": "07b3d75ce4b9f272c5f08c37fce94c98c21d9c855b3a5cff35b4bccbbc5a3445"
+    },
+    {
+      "id": "baseline-10",
+      "result": "PASS",
+      "vus_max": 10,
+      "requests": 2778,
+      "request_rate_per_second": 27.4755349947,
+      "checks_passed": 6226,
+      "checks_failed": 0,
+      "http_failure_rate": 0.0,
+      "p95_ms": 10.74747945,
+      "p99_ms": 28.89985061,
+      "write_p95_ms": 42.9531258,
+      "source_summary_sha256": "b722e38f14ee58d59b256e68a11bcf26bb6d91233ab0c2a591459e5814e16f13"
+    },
+    {
+      "id": "stress-25",
+      "result": "PASS",
+      "vus_max": 25,
+      "requests": 6479,
+      "request_rate_per_second": 64.3811050734,
+      "checks_passed": 14399,
+      "checks_failed": 0,
+      "http_failure_rate": 0.0,
+      "p95_ms": 6.0917914,
+      "p99_ms": 20.50214582,
+      "write_p95_ms": 32.8655054,
+      "source_summary_sha256": "35b9b58e1ac37fa23b035dd313ae123f20838625605fefed2ccd18de692cf337"
+    },
+    {
+      "id": "ai-mixed-25",
+      "result": "PASS_BOUNDED",
+      "vus_max": 25,
+      "requests": 5871,
+      "request_rate_per_second": 62.7753337976,
+      "checks_passed": 7033,
+      "checks_failed": 0,
+      "http_failure_rate": 0.0,
+      "p95_ms": 22.4694535,
+      "p99_ms": 69.4830881,
+      "ai_flow_p95_ms": 1100.93531635,
+      "ai_worker_plan_successes": 15,
+      "graphhopper_route_successes": 15,
+      "source_summary_sha256": "ab175d542bd67c88124522fe9ae3766f1e0f253b84b660fb87b1b71fbc28c164"
+    }
+  ],
+  "final_snapshots": {
+    "hikari_pending": 0,
+    "hikari_connection_timeout_total": 0,
+    "stress_finalization": {
+      "succeeded": 236,
+      "pending": 0,
+      "running": 0,
+      "retry_wait": 0,
+      "failed": 0
+    },
+    "ai_finalization": {
+      "succeeded": 777,
+      "pending": 0,
+      "running": 0,
+      "retry_wait": 0,
+      "failed": 0
+    }
+  },
+  "evidence_integrity": {
+    "redaction_scans_passed": 13,
+    "redaction_scans_failed": 0,
+    "https_redaction_sha256": "dcf0f34921a82e2e955822f106692c19270fb599003a1fddb7dc6fa450c29a37",
+    "teardown_audit_sha256": "a1c17c9e4ea29021d359a88c188029a7b5a7fc44023c33ab6f3bb68bfdba069d"
+  },
+  "teardown": {
+    "terraform_resources_destroyed": 91,
+    "audited_resource_categories": 21,
+    "residual_total": 0
+  },
+  "verdicts": {
+    "single_target_25_vu_capacity_matrix": "PASS",
+    "operational_poc": "PARTIAL",
+    "product_release": "NO_GO"
+  },
+  "limitations": [
+    "VU counts are not measured real users.",
+    "Load latency is private load-node-to-app latency, not ALB end-to-end latency.",
+    "ALB verification covered HTTPS health only.",
+    "AI load used the self-hosted worker and does not prove live provider or route quality.",
+    "Hikari values are stage-end snapshots and do not prove zero pending connections for every instant.",
+    "Address and weather providers were fake, and normal load used synthetic X-Forwarded-For values; provider quality and forwarded-header quota security were not validated.",
+    "Failure, recovery, deployment, two-target state sharing, 50 VU, spike, and soak remain unverified.",
+    "Raw Terraform state and SSM URLs are private evidence and are intentionally excluded."
+  ]
+}

@@ -22,6 +22,8 @@ bin
 ARTIFACTS
 .sisyphus
 ops/loadtest/results
+ops/aws/ephemeral-validation/.artifacts
+ops/aws/ephemeral-validation/.terraform
 smoke-check-file-summary.json
 
 **/__pycache__
