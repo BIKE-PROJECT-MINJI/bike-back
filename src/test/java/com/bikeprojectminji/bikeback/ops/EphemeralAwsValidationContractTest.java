@@ -172,10 +172,14 @@ class EphemeralAwsValidationContractTest {
                 "list-functions",
                 "list-instance-profiles",
                 "mapfile -t sorted_resources",
+                "final_bucket_state=\"$(bucket_state)\"",
                 "residual_total",
                 "exit 1"
         );
-        assertThat(teardown).doesNotContain("} | tee \"$EVIDENCE_DIR/residual-audit.json\"");
+        assertThat(teardown).doesNotContain(
+                "} | tee \"$EVIDENCE_DIR/residual-audit.json\"",
+                "--output text 2>/dev/null || printf '0'"
+        );
         assertThat(teardown + read("bootstrap-gate.tf")).contains(
                 "-var=destroy_mode=true",
                 "destroy-authorized",

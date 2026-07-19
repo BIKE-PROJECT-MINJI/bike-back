@@ -155,7 +155,7 @@ residuals[network_interfaces]="$(aws ec2 describe-network-interfaces --region "$
 residuals[load_balancers]="$(count_elbv2_tagged load-balancers)"
 residuals[target_groups]="$(count_elbv2_tagged target-groups)"
 residuals[parameters]="$(aws ssm get-parameters-by-path --region "$AWS_REGION" \
-  --path "$SECRET_PREFIX" --recursive --query 'length(Parameters)' --output text 2>/dev/null || printf '0')"
+  --path "$SECRET_PREFIX" --recursive --query 'length(Parameters)' --output text)"
 residuals[schedules]="$(aws scheduler list-schedules --region "$AWS_REGION" \
   --name-prefix "gaja-$RUN_ID" --query 'length(Schedules)' --output text)"
 residuals[functions]="$(aws lambda list-functions --region "$AWS_REGION" \
@@ -168,7 +168,12 @@ residuals[iam_roles]="$(aws iam list-roles --path-prefix / \
   --query "length(Roles[?starts_with(RoleName, 'gaja-$RUN_ID')])" --output text)"
 residuals[instance_profiles]="$(aws iam list-instance-profiles --path-prefix / \
   --query "length(InstanceProfiles[?starts_with(InstanceProfileName, 'gaja-$RUN_ID')])" --output text)"
-residuals[artifact_bucket]="$(aws s3api head-bucket --bucket "$ARTIFACT_BUCKET" 2>/dev/null && printf '1' || printf '0')"
+final_bucket_state="$(bucket_state)"
+if [[ "$final_bucket_state" == 'exists' ]]; then
+  residuals[artifact_bucket]=1
+else
+  residuals[artifact_bucket]=0
+fi
 
 residual_total=0
 mapfile -t sorted_resources < <(printf '%s\n' "${!residuals[@]}" | sort)
