@@ -9,7 +9,6 @@ var SUMMARY_DIR = (__ENV.SUMMARY_DIR || 'ops/loadtest/results').replace(/\/$/, '
 var ENABLE_WEATHER_READ = ((__ENV.ENABLE_WEATHER_READ || 'true') + '').toLowerCase() !== 'false';
 var ENABLE_ADDRESS_SEARCH = ((__ENV.ENABLE_ADDRESS_SEARCH || 'true') + '').toLowerCase() !== 'false';
 var ADDRESS_SEARCH_EVERY_N_ITERATIONS = Math.max(1, intEnv('ADDRESS_SEARCH_EVERY_N_ITERATIONS', 1));
-var SYNTHETIC_CLIENT_IPS = ((__ENV.SYNTHETIC_CLIENT_IPS || 'false') + '').toLowerCase() === 'true';
 var SLOW_REQUEST_SAMPLE_MS = intEnv('SLOW_REQUEST_SAMPLE_MS', 1000);
 var WRITE_ROUTE_POINT_COUNT = Math.max(2, intEnv('WRITE_ROUTE_POINT_COUNT', 2));
 var WRITE_POLL_FINALIZATION = ((__ENV.WRITE_POLL_FINALIZATION || 'false') + '').toLowerCase() === 'true';
@@ -584,10 +583,6 @@ function runAddressSearch() {
     var response = getJson('/api/v1/addresses/search?query=' + query + '&page=1&size=5', {
       flow: 'address-search',
       endpoint: 'address-search',
-    }, {
-      headers: SYNTHETIC_CLIENT_IPS
-        ? { 'X-Forwarded-For': '198.51.100.' + (1 + (((__VU || 1) - 1) % 200)) }
-        : {},
     });
     commonChecks(response, 200);
     check(response, {
@@ -869,7 +864,6 @@ export function handleSummary(data) {
     personas: ACTIVE_PERSONAS,
     address_search_enabled: ENABLE_ADDRESS_SEARCH,
     address_search_every_n_iterations: ADDRESS_SEARCH_EVERY_N_ITERATIONS,
-    synthetic_client_ips: SYNTHETIC_CLIENT_IPS,
     weather_enabled: ENABLE_WEATHER_READ,
     write_route_point_count: WRITE_ROUTE_POINT_COUNT,
     write_poll_finalization: WRITE_POLL_FINALIZATION,

@@ -18,6 +18,9 @@
       "load_generator"
     ],
     "ai_provider_mode": "self-hosted",
+    "address_provider_mode": "fake",
+    "weather_provider_mode": "fake",
+    "historical_synthetic_client_ips": true,
     "load_path": "private_load_node_to_app",
     "alb_verification": "https_health_only"
   },
@@ -131,6 +134,7 @@
     "ALB verification covered HTTPS health only.",
     "AI load used the self-hosted worker and does not prove live provider or route quality.",
     "Hikari values are stage-end snapshots and do not prove zero pending connections for every instant.",
+    "Address and weather providers were fake, and normal load used synthetic X-Forwarded-For values; provider quality and forwarded-header quota security were not validated.",
     "Failure, recovery, deployment, two-target state sharing, 50 VU, spike, and soak remain unverified.",
     "Raw Terraform state and SSM URLs are private evidence and are intentionally excluded."
   ]

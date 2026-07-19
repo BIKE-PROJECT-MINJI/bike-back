@@ -162,15 +162,13 @@ class EphemeralAwsValidationContractTest {
                 "'p(95)'",
                 "'p(99)'",
                 "ADDRESS_SEARCH_EVERY_N_ITERATIONS",
-                "address_search_every_n_iterations",
-                "SYNTHETIC_CLIENT_IPS",
-                "X-Forwarded-For",
-                "synthetic_client_ips"
+                "address_search_every_n_iterations"
         );
         assertThat(runner).contains(
-                "ADDRESS_SEARCH_EVERY_N_ITERATIONS=10",
-                "SYNTHETIC_CLIENT_IPS=true"
+                "ADDRESS_SEARCH_EVERY_N_ITERATIONS=20"
         );
+        assertThat(workload).doesNotContain("SYNTHETIC_CLIENT_IPS", "X-Forwarded-For", "synthetic_client_ips");
+        assertThat(runner).doesNotContain("SYNTHETIC_CLIENT_IPS");
         assertThat(runner).doesNotContain("aws ssm wait command-executed");
     }
 
