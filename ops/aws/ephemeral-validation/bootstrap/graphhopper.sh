@@ -29,6 +29,7 @@ docker run -d \
   --memory-swap 2300m \
   --restart unless-stopped \
   --mount type=bind,src=/opt/gaja-run/graphhopper,dst=/graphhopper \
+  --workdir /graphhopper \
   "$GRAPHHOPPER_IMAGE" \
   java -Xmx1050m \
     -Ddw.graphhopper.datareader.file=/graphhopper/data/south-korea-latest.osm.pbf \

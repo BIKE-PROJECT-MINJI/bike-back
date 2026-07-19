@@ -11,11 +11,12 @@ load_role_images
 prepare_secret_dir
 fetch_secret db-password spring.datasource.password
 fetch_secret jwt-secret auth.jwt.secret
-fetch_secret redis-password redis.password
-redis_password="$(<"$SECRET_DIR/redis.password")"
-printf 'redis://:%s@10.88.10.11:6379\n' "$redis_password" >"$SECRET_DIR/spring.data.redis.url"
-chmod 0600 "$SECRET_DIR/spring.data.redis.url"
-unset redis_password
+fetch_secret redis-password spring.data.redis.password
+printf '%s\n' '10.88.10.11' >"$SECRET_DIR/spring.data.redis.host"
+printf '%s\n' '6379' >"$SECRET_DIR/spring.data.redis.port"
+chmod 0600 \
+  "$SECRET_DIR/spring.data.redis.host" \
+  "$SECRET_DIR/spring.data.redis.port"
 
 source "$ROLE_DIR/role.env"
 docker run -d \
