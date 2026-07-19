@@ -65,15 +65,13 @@
       "Sid": "ManageRunScopedParameters",
       "Effect": "Allow",
       "Action": [
-        "ssm:AddTagsToResource",
         "ssm:DeleteParameter",
         "ssm:DeleteParameters",
         "ssm:GetParameter",
         "ssm:GetParameters",
         "ssm:GetParametersByPath",
         "ssm:ListTagsForResource",
-        "ssm:PutParameter",
-        "ssm:RemoveTagsFromResource"
+        "ssm:PutParameter"
       ],
       "Resource": "arn:aws:ssm:ap-northeast-2:*:parameter/gaja/ephemeral/*"
     },

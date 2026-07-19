@@ -85,36 +85,42 @@ aws s3api put-bucket-lifecycle-configuration \
 put_secure_parameter() {
   local parameter_suffix="$1"
   local secret_file="$2"
+  local parameter_name="${SECRET_PREFIX}${parameter_suffix}"
   local request_file="$TEMP_DIR/${parameter_suffix}.json"
-  python3 - "$request_file" "${SECRET_PREFIX}${parameter_suffix}" "$secret_file" <<'PY'
+  local parameter_exists=false
+  if aws ssm get-parameter \
+    --region "$AWS_REGION" \
+    --name "$parameter_name" >/dev/null 2>&1; then
+    parameter_exists=true
+  fi
+  python3 - "$request_file" "$parameter_name" "$secret_file" "$parameter_exists" "$RUN_ID" <<'PY'
 import json
 import sys
 
-target, name, secret_path = sys.argv[1:]
+target, name, secret_path, parameter_exists, run_id = sys.argv[1:]
 with open(secret_path, encoding="utf-8") as source:
     value = source.read().strip()
+request = {
+    "Name": name,
+    "Value": value,
+    "Type": "SecureString",
+    "Tier": "Standard",
+}
+if parameter_exists == "false":
+    request["Tags"] = [
+        {"Key": "Project", "Value": "GAJA"},
+        {"Key": "Purpose", "Value": "ephemeral-validation"},
+        {"Key": "RunId", "Value": run_id},
+    ]
+else:
+    request["Overwrite"] = True
 with open(target, "w", encoding="utf-8") as output:
-    json.dump(
-        {
-            "Name": name,
-            "Value": value,
-            "Type": "SecureString",
-            "Overwrite": True,
-            "Tier": "Standard",
-        },
-        output,
-        ensure_ascii=True,
-    )
+    json.dump(request, output, ensure_ascii=True)
 PY
   chmod 0600 "$request_file"
   aws ssm put-parameter \
     --region "$AWS_REGION" \
     --cli-input-json "file://$request_file" >/dev/null
-  aws ssm add-tags-to-resource \
-    --region "$AWS_REGION" \
-    --resource-type Parameter \
-    --resource-id "${SECRET_PREFIX#/}${parameter_suffix}" \
-    --tags Key=Project,Value=GAJA Key=Purpose,Value=ephemeral-validation Key=RunId,Value="$RUN_ID"
 }
 
 for secret_name in db-password redis-password jwt-secret grafana-password; do

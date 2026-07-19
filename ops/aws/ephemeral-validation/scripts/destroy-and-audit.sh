@@ -43,13 +43,14 @@ install -d -m 0700 "$EVIDENCE_DIR"
 terraform -chdir="$STACK_DIR" output -json >"$EVIDENCE_DIR/pre-destroy-outputs.json" 2>/dev/null || true
 terraform -chdir="$STACK_DIR" show -json >"$EVIDENCE_DIR/pre-destroy-state.json" 2>/dev/null || true
 
-# Empty the chargeable artifact bucket while the scheduled cleanup guard still exists.
+# Terraform refresh evaluates the external bootstrap gate even during destroy,
+# so its artifacts must remain available until the managed graph is gone.
+terraform -chdir="$STACK_DIR" destroy -input=false -auto-approve
+
 if aws s3api head-bucket --bucket "$ARTIFACT_BUCKET" 2>/dev/null; then
   aws s3 rm "s3://$ARTIFACT_BUCKET" --recursive --only-show-errors
   aws s3api delete-bucket --region "$AWS_REGION" --bucket "$ARTIFACT_BUCKET"
 fi
-
-terraform -chdir="$STACK_DIR" destroy -input=false -auto-approve
 
 mapfile -t parameter_names < <(aws ssm get-parameters-by-path \
   --region "$AWS_REGION" \
