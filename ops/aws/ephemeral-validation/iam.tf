@@ -78,6 +78,7 @@ resource "aws_iam_role_policy" "node_run_access" {
         Action = ["s3:PutObject"]
         Resource = [
           "arn:${data.aws_partition.current.partition}:s3:::${var.artifact_bucket_name}/${local.artifact_prefix}/evidence/*",
+          "arn:${data.aws_partition.current.partition}:s3:::${var.artifact_bucket_name}/${local.artifact_prefix}/observability/*",
         ]
       },
       {

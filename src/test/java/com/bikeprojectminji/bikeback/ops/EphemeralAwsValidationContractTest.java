@@ -166,6 +166,20 @@ class EphemeralAwsValidationContractTest {
     }
 
     @Test
+    @DisplayName("검증 노드는 실행별 k6와 관측성 evidence 경로에만 쓸 수 있다")
+    void validationNodeCanWriteOnlyRunEvidencePrefixes() throws Exception {
+        String iam = read("iam.tf");
+
+        assertThat(iam).contains(
+                "${local.artifact_prefix}/evidence/*",
+                "${local.artifact_prefix}/observability/*"
+        );
+        assertThat(iam).doesNotContain(
+                "arn:${data.aws_partition.current.partition}:s3:::${var.artifact_bucket_name}/*"
+        );
+    }
+
+    @Test
     @DisplayName("단일 matrix 실행기는 순서를 고정하고 모든 종료 경로에서 삭제 감사를 수행한다")
     void matrixRunnerEnforcesOrderAndCleanup() throws Exception {
         String matrix = read("scripts/run-validation-matrix.sh");
