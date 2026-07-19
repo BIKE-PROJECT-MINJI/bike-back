@@ -45,8 +45,8 @@ if [[ '${APP_COUNT}' == '2' ]]; then
   curl -fsS --max-time 10 http://10.88.11.20:18081/actuator/prometheus > \"\$evidence_dir/app-2-prometheus.txt\"
 fi
 docker stats --no-stream --format '{{json .}}' > \"\$evidence_dir/observability-docker-stats.jsonl\"
-find \"\$evidence_dir\" -maxdepth 1 -type f ! -name SHA256SUMS -print0 \\
-  | sort -z | xargs -0 -r sha256sum > \"\$evidence_dir/SHA256SUMS\"
+(cd \"\$evidence_dir\" && find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 \\
+  | sort -z | xargs -0 -r sha256sum > SHA256SUMS)
 aws s3 sync \"\$evidence_dir/\" s3://${ARTIFACT_BUCKET}/runs/${RUN_ID}/observability/${STAGE}/${PHASE}/ \\
   --sse AES256 --only-show-errors"
 

@@ -128,6 +128,7 @@ class EphemeralAwsValidationContractTest {
     void k6FailureEvidenceIsIsolatedAndRedacted() throws Exception {
         String runner = read("scripts/run-k6-stage.sh");
         String commandEvidence = read("scripts/ssm-command-evidence.sh");
+        String observability = read("scripts/collect-stage-observability.sh");
         String workload = Files.readString(Path.of("ops/loadtest/k6/bike-api.js"));
 
         assertThat(runner).contains(
@@ -169,6 +170,8 @@ class EphemeralAwsValidationContractTest {
         );
         assertThat(workload).doesNotContain("SYNTHETIC_CLIENT_IPS", "X-Forwarded-For", "synthetic_client_ips");
         assertThat(runner).doesNotContain("SYNTHETIC_CLIENT_IPS");
+        assertThat(runner).contains("(cd \\\"\\$evidence_dir\\\"", "> SHA256SUMS)");
+        assertThat(observability).contains("(cd \\\"\\$evidence_dir\\\"", "> SHA256SUMS)");
         assertThat(runner).doesNotContain("aws ssm wait command-executed");
     }
 

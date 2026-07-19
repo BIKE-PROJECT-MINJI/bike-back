@@ -82,8 +82,8 @@ finalize_evidence() {
   finalized=1
   printf '%s\\n' \"\$original_exit_code\" > \"\$evidence_dir/k6-exit-code.txt\"
   checksum_exit_code=0
-  find \"\$evidence_dir\" -maxdepth 1 -type f ! -name SHA256SUMS -print0 \\
-    | sort -z | xargs -0 -r sha256sum > \"\$evidence_dir/SHA256SUMS\" \\
+  (cd \"\$evidence_dir\" && find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 \\
+    | sort -z | xargs -0 -r sha256sum > SHA256SUMS) \\
     || checksum_exit_code=\$?
   printf '%s\\n' \"\$checksum_exit_code\" > \"\$evidence_dir/checksum-exit-code.txt\"
   upload_exit_code=0
