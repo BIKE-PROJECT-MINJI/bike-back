@@ -154,6 +154,7 @@ patterns = (
     (r"(?i)(X-Amz-(?:Credential|Signature|Security-Token)=)[^&\s]+", r"\1[REDACTED]"),
     (r"(://)[^/@\s]+:[^/@\s]+@", r"\1[REDACTED_USERINFO]@"),
     (r"AIza[0-9A-Za-z_-]{30,}", "[REDACTED_GOOGLE_API_KEY]"),
+    (r"(?i)(For input string:\s*\")[^\"]+(\")", r"\1[REDACTED_PARSE_VALUE]\2"),
 )
 for pattern, replacement in patterns:
     payload = re.sub(pattern, replacement, payload)
@@ -291,45 +292,9 @@ PY
     "$EVIDENCE_DIR" \
     "$EVIDENCE_DIR/instance-ids.json" \
     "$EVIDENCE_DIR/diagnostics-manifest.json"
-  python3 - "$EVIDENCE_DIR" "$EVIDENCE_DIR/diagnostics-redaction-scan.json" <<'PY'
-import json
-import pathlib
-import re
-import sys
-
-source_dir, target_path = sys.argv[1:]
-source_path = pathlib.Path(source_dir)
-scanned = sorted(
-    path for path in source_path.glob("diagnostics-*.json")
-    if path.name not in {
-        "diagnostics-request.json",
-        "diagnostics-manifest.json",
-        "diagnostics-redaction-scan.json",
-    }
-)
-payload = "\n".join(path.read_text(encoding="utf-8") for path in scanned)
-patterns = {
-    "aws_access_key": r"(?:AKIA|ASIA)[A-Z0-9]{16}",
-    "jwt": r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
-    "unredacted_bearer": r"(?i)Bearer[ =:]+(?!\[REDACTED)[A-Za-z0-9._~+/=-]{16,}",
-    "url_userinfo": r"://[^/@\s]+:[^/@\s]+@",
-    "generic_secret_assignment": r"(?i)(?:password|passwd|secret|token|authorization|api[_-]?key|client[_-]?secret)\s*[=:]\s*(?!\[REDACTED)[^\s,;]{4,}",
-    "aws_signed_query": r"(?i)X-Amz-(?:Credential|Signature|Security-Token)=(?!\[REDACTED)[^&\s]+",
-    "google_api_key": r"AIza[0-9A-Za-z_-]{30,}",
-    "private_key": r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
-}
-matches = {name: bool(re.search(pattern, payload)) for name, pattern in patterns.items()}
-result = {
-    "pass": not any(matches.values()),
-    "scanned_files": [path.name for path in scanned],
-    "matches": matches,
-}
-with open(target_path, "w", encoding="utf-8") as output:
-    json.dump(result, output, ensure_ascii=True, indent=2)
-    output.write("\n")
-if not result["pass"]:
-    raise SystemExit("runtime diagnostics redaction scan failed")
-PY
+  bash "$SCRIPT_DIR/scan-runtime-diagnostics-redaction.sh" \
+    "$EVIDENCE_DIR" \
+    "$EVIDENCE_DIR/diagnostics-redaction-scan.json"
   rm -f "$request_file"
 }
 

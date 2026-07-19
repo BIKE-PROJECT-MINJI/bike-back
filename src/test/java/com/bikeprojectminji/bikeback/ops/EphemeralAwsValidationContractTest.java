@@ -159,6 +159,7 @@ class EphemeralAwsValidationContractTest {
     void runtimeGatePollsReadinessAndCapturesDiagnostics() throws Exception {
         String gate = read("scripts/verify-bootstrap-and-attach.sh");
         String manifestRenderer = read("scripts/render-runtime-diagnostics-manifest.sh");
+        String redactionScanner = read("scripts/scan-runtime-diagnostics-redaction.sh");
 
         assertThat(gate).contains(
                 "wait_for_runtime_gate",
@@ -179,10 +180,12 @@ class EphemeralAwsValidationContractTest {
                 "get-command-invocation",
                 "diagnostics-${role}.json",
                 "render-runtime-diagnostics-manifest.sh",
+                "scan-runtime-diagnostics-redaction.sh",
                 "diagnostics-manifest.json",
                 "diagnostics-redaction-scan.json",
                 "collect_diagnostics 2>&1 | redact_output",
                 "X-Amz-",
+                "[REDACTED_PARSE_VALUE]",
                 "exit 0\nEOF",
                 "runtime gate timed out"
         );
@@ -193,6 +196,7 @@ class EphemeralAwsValidationContractTest {
                 "23_900",
                 "7_900"
         );
+        assertThat(redactionScanner).contains("invalid_json_files", "parse_exception_value");
         assertThat(gate.indexOf("=== container state ==="))
                 .isLessThan(gate.indexOf("=== cloud-final journal ==="));
         assertThat(gate.indexOf("=== local HTTP probes ==="))
