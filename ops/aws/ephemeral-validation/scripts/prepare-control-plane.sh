@@ -35,6 +35,8 @@ readonly CLEANUP_SCHEDULE="gaja-${RUN_ID}-cleanup"
 readonly TEMP_DIR="$(mktemp -d /dev/shm/gaja-control-plane.XXXXXX)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
+"$SCRIPT_DIR/assert-remaining-ttl.sh" 150
+
 # The cleanup guard must exist before the first chargeable artifact is uploaded.
 terraform -chdir="$STACK_DIR" init -input=false
 terraform -chdir="$STACK_DIR" apply \
@@ -64,6 +66,16 @@ if ! aws s3api head-bucket --bucket "$ARTIFACT_BUCKET" 2>/dev/null; then
     --bucket "$ARTIFACT_BUCKET" \
     --region "$AWS_REGION" \
     --create-bucket-configuration "LocationConstraint=$AWS_REGION" >/dev/null
+else
+  readonly EXISTING_BUCKET_RUN_ID="$(aws s3api get-bucket-tagging \
+    --bucket "$ARTIFACT_BUCKET" \
+    --query "TagSet[?Key=='RunId'].Value | [0]" \
+    --output text)"
+  [[ "$EXISTING_BUCKET_RUN_ID" == "$RUN_ID" ]] || {
+    printf 'existing artifact bucket ownership mismatch: bucket=%s expected_run=%s actual_run=%s\n' \
+      "$ARTIFACT_BUCKET" "$RUN_ID" "$EXISTING_BUCKET_RUN_ID" >&2
+    exit 1
+  }
 fi
 
 aws s3api put-public-access-block \

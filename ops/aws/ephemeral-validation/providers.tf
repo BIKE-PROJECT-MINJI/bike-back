@@ -29,9 +29,13 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-data "aws_ami" "ecs_optimized" {
-  most_recent = true
-  owners      = ["amazon"]
+data "aws_ami" "ecs_optimized_selected" {
+  owners = ["amazon"]
+
+  filter {
+    name   = "image-id"
+    values = [var.ecs_optimized_ami_id]
+  }
 
   filter {
     name   = "name"

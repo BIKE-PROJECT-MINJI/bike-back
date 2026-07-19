@@ -10,7 +10,6 @@ readonly ALLOW_AWS_APPLY="${ALLOW_AWS_APPLY:-NO}"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly STACK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly TFVARS="$STACK_DIR/terraform.auto.tfvars.json"
-readonly EVIDENCE_DIR="$STACK_DIR/.artifacts/runtime-gate"
 
 for command in aws python3 terraform; do
   command -v "$command" >/dev/null || {
@@ -36,6 +35,9 @@ PY
 
 readonly AWS_REGION="$(read_tfvar aws_region)"
 readonly RUN_ID="$(read_tfvar run_id)"
+readonly EVIDENCE_DIR="$STACK_DIR/.artifacts/$RUN_ID/runtime-gate"
+"$SCRIPT_DIR/assert-remaining-ttl.sh" 30
+rm -rf "$EVIDENCE_DIR"
 install -d -m 0700 "$EVIDENCE_DIR"
 
 terraform -chdir="$STACK_DIR" output -json instance_ids >"$EVIDENCE_DIR/instance-ids.json"

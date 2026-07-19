@@ -1,7 +1,7 @@
 resource "aws_instance" "app" {
   for_each = local.app_nodes
 
-  ami                                  = data.aws_ami.ecs_optimized.id
+  ami                                  = var.ecs_optimized_ami_id
   instance_type                        = var.instance_types["app"]
   subnet_id                            = aws_subnet.private[tostring(each.value.availability_zone_index)].id
   private_ip                           = each.value.private_ip
@@ -10,6 +10,10 @@ resource "aws_instance" "app" {
   associate_public_ip_address          = false
   monitoring                           = false
   instance_initiated_shutdown_behavior = "terminate"
+
+  credit_specification {
+    cpu_credits = "standard"
+  }
 
   user_data = templatefile("${path.module}/templates/bootstrap.tftpl", {
     artifact_bucket_name    = var.artifact_bucket_name
@@ -40,6 +44,13 @@ resource "aws_instance" "app" {
     instance_metadata_tags      = "disabled"
   }
 
+  lifecycle {
+    precondition {
+      condition     = var.root_volume_sizes_gib["app"] >= local.ecs_ami_root_volume_size_gib
+      error_message = "App root volume is smaller than the pinned AMI root snapshot. Run preflight again."
+    }
+  }
+
   tags = {
     Name = "gaja-${var.run_id}-${each.key}"
     Role = "app"
@@ -55,7 +66,7 @@ resource "aws_instance" "app" {
 resource "aws_instance" "singleton" {
   for_each = local.singleton_roles
 
-  ami                                  = data.aws_ami.ecs_optimized.id
+  ami                                  = var.ecs_optimized_ami_id
   instance_type                        = var.instance_types[each.value]
   subnet_id                            = aws_subnet.private["0"].id
   private_ip                           = local.singleton_private_ips[each.value]
@@ -64,6 +75,10 @@ resource "aws_instance" "singleton" {
   associate_public_ip_address          = false
   monitoring                           = false
   instance_initiated_shutdown_behavior = "terminate"
+
+  credit_specification {
+    cpu_credits = "standard"
+  }
 
   user_data = templatefile("${path.module}/templates/bootstrap.tftpl", {
     artifact_bucket_name    = var.artifact_bucket_name
@@ -92,6 +107,13 @@ resource "aws_instance" "singleton" {
     http_put_response_hop_limit = 1
     http_tokens                 = "required"
     instance_metadata_tags      = "disabled"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.root_volume_sizes_gib[each.value] >= local.ecs_ami_root_volume_size_gib
+      error_message = "Singleton root volume is smaller than the pinned AMI root snapshot. Run preflight again."
+    }
   }
 
   tags = {

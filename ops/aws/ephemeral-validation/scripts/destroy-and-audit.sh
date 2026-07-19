@@ -10,7 +10,6 @@ readonly ALLOW_AWS_DESTROY="${ALLOW_AWS_DESTROY:-NO}"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly STACK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly TFVARS="$STACK_DIR/terraform.auto.tfvars.json"
-readonly EVIDENCE_DIR="$STACK_DIR/.artifacts/teardown"
 readonly DESTROY_AUTHORIZATION_FILE="$STACK_DIR/.artifacts/destroy-authorized"
 trap 'rm -f "$DESTROY_AUTHORIZATION_FILE"' EXIT
 
@@ -40,6 +39,8 @@ readonly AWS_REGION="$(read_tfvar aws_region)"
 readonly RUN_ID="$(read_tfvar run_id)"
 readonly ARTIFACT_BUCKET="$(read_tfvar artifact_bucket_name)"
 readonly SECRET_PREFIX="$(read_tfvar secret_parameter_prefix)"
+readonly EVIDENCE_DIR="$STACK_DIR/.artifacts/$RUN_ID/teardown"
+rm -rf "$EVIDENCE_DIR"
 install -d -m 0700 "$EVIDENCE_DIR"
 
 terraform -chdir="$STACK_DIR" output -json >"$EVIDENCE_DIR/pre-destroy-outputs.json" 2>/dev/null || true

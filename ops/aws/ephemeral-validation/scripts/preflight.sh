@@ -17,6 +17,7 @@ readonly INTERFACE_ENDPOINT_COUNT=3
 readonly PUBLIC_IPV4_HOURLY_CEILING_USD=0.005
 readonly PUBLIC_IPV4_COUNT=2
 readonly EBS_GIB_MONTH_CEILING_USD=0.15
+readonly ROOT_VOLUME_SIZE_GIB=30
 readonly LOG_INGESTION_CEILING_USD=0.75
 readonly S3_LAMBDA_SCHEDULER_CEILING_USD=0.15
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,8 +35,56 @@ done
   exit 1
 }
 
+mapfile -t ECS_AMI_METADATA < <(
+  aws ec2 describe-images \
+    --region "$AWS_REGION" \
+    --owners amazon \
+    --filters \
+      'Name=name,Values=al2023-ami-ecs-hvm-*-x86_64' \
+      'Name=state,Values=available' \
+    --query 'sort_by(Images, &CreationDate)[-1]' \
+    --output json | python3 -c '
+import json
+import sys
+
+image = json.load(sys.stdin)
+if not isinstance(image, dict) or not image:
+    raise SystemExit("latest ECS-optimized AL2023 AMI not found")
+image_id = image.get("ImageId")
+image_name = image.get("Name")
+root_device = image.get("RootDeviceName")
+mappings = image.get("BlockDeviceMappings", [])
+root_mapping = next(
+    (mapping for mapping in mappings if mapping.get("DeviceName") == root_device),
+    None,
+)
+volume_size = (root_mapping or {}).get("Ebs", {}).get("VolumeSize")
+if not isinstance(image_id, str) or not image_id.startswith("ami-"):
+    raise SystemExit("resolved ECS AMI has no valid ImageId")
+if not isinstance(image_name, str) or not image_name:
+    raise SystemExit("resolved ECS AMI has no Name")
+if not isinstance(volume_size, int) or volume_size <= 0:
+    raise SystemExit("resolved ECS AMI has no positive root volume size")
+print(image_id)
+print(image_name)
+print(volume_size)
+'
+)
+[[ "${#ECS_AMI_METADATA[@]}" == "3" ]] || {
+  printf 'failed to resolve ECS AMI metadata\n' >&2
+  exit 1
+}
+readonly ECS_AMI_ID="${ECS_AMI_METADATA[0]}"
+readonly ECS_AMI_NAME="${ECS_AMI_METADATA[1]}"
+readonly ECS_AMI_ROOT_VOLUME_GIB="${ECS_AMI_METADATA[2]}"
+((ROOT_VOLUME_SIZE_GIB >= ECS_AMI_ROOT_VOLUME_GIB)) || {
+  printf 'root volume gate failed: configured=%sGiB ami_minimum=%sGiB ami=%s\n' \
+    "$ROOT_VOLUME_SIZE_GIB" "$ECS_AMI_ROOT_VOLUME_GIB" "$ECS_AMI_ID" >&2
+  exit 1
+}
+
 readonly ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-readonly ARTIFACT_BUCKET="gaja-ev-${ACCOUNT_ID}-${RUN_ID:0:24}"
+readonly ARTIFACT_BUCKET="gaja-ev-${ACCOUNT_ID}-${RUN_ID}"
 readonly SECRET_PREFIX="/gaja/ephemeral/${RUN_ID}/"
 readonly CLEANUP_START_AT="$(date -u -d "+${CLEANUP_START_MINUTES} minutes" +%Y-%m-%dT%H:%M:%S)"
 
@@ -94,7 +143,7 @@ readonly T3_MICRO_HOURLY="$(price_ec2_hourly t3.micro)"
 readonly SMALL_COUNT="$((APP_COUNT + 3))"
 readonly MICRO_COUNT=2
 readonly HOURS="$((TTL_MINUTES / 60))"
-readonly ROOT_VOLUME_GIB="$((APP_COUNT * 16 + 20 + 8 + 20 + 8 + 16))"
+readonly ROOT_VOLUME_GIB="$((ROOT_VOLUME_SIZE_GIB * (APP_COUNT + 5)))"
 readonly EC2_COST="$(echo "scale=6; (($T3_SMALL_HOURLY * $SMALL_COUNT) + ($T3_MICRO_HOURLY * $MICRO_COUNT)) * $HOURS" | bc)"
 readonly ALB_COST="$(echo "scale=6; ($ALB_HOURLY_CEILING_USD + $ALB_LCU_HOURLY_CEILING_USD) * $HOURS" | bc)"
 readonly INTERFACE_ENDPOINT_COST="$(echo "scale=6; $INTERFACE_ENDPOINT_HOURLY_CEILING_USD * $INTERFACE_ENDPOINT_COUNT * $HOURS" | bc)"
@@ -119,6 +168,7 @@ payload = {
     "run_id": "$RUN_ID",
     "domain_name": "$DOMAIN_NAME",
     "existing_acm_certificate_arn": "$ACM_ARN",
+    "ecs_optimized_ami_id": "$ECS_AMI_ID",
     "artifact_bucket_name": "$ARTIFACT_BUCKET",
     "secret_parameter_prefix": "$SECRET_PREFIX",
     "cleanup_start_at": "$CLEANUP_START_AT",
@@ -126,6 +176,14 @@ payload = {
     "attach_app_targets": False,
     "ttl_minutes": 180,
     "cost_limit_usd": 3,
+    "root_volume_sizes_gib": {
+        "app": $ROOT_VOLUME_SIZE_GIB,
+        "db": $ROOT_VOLUME_SIZE_GIB,
+        "redis": $ROOT_VOLUME_SIZE_GIB,
+        "graphhopper": $ROOT_VOLUME_SIZE_GIB,
+        "load": $ROOT_VOLUME_SIZE_GIB,
+        "observability": $ROOT_VOLUME_SIZE_GIB,
+    },
 }
 with open(target, "w", encoding="utf-8") as output:
     json.dump(payload, output, ensure_ascii=True, indent=2)
@@ -141,3 +199,5 @@ printf 'cost_breakdown ec2=%s alb_lcu=%s interface_endpoints=%s public_ipv4=%s e
   "$EC2_COST" "$ALB_COST" "$INTERFACE_ENDPOINT_COST" "$PUBLIC_IPV4_COST" "$EBS_COST" \
   "$LOG_INGESTION_CEILING_USD" "$S3_LAMBDA_SCHEDULER_CEILING_USD"
 printf 'artifact_bucket=%s secret_prefix=%s\n' "$ARTIFACT_BUCKET" "$SECRET_PREFIX"
+printf 'ecs_ami_id=%s ecs_ami_name=%s ami_root_minimum_gib=%s configured_root_gib=%s total_root_gib=%s\n' \
+  "$ECS_AMI_ID" "$ECS_AMI_NAME" "$ECS_AMI_ROOT_VOLUME_GIB" "$ROOT_VOLUME_SIZE_GIB" "$ROOT_VOLUME_GIB"

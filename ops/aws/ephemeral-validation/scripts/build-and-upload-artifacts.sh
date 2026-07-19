@@ -43,6 +43,8 @@ readonly PROMETHEUS_IMAGE='prom/prometheus:v3.5.0'
 readonly GRAFANA_IMAGE='grafana/grafana-oss:12.1.1'
 readonly ARTIFACT_ROOT="$STACK_DIR/.artifacts/$RUN_ID"
 
+"$SCRIPT_DIR/assert-remaining-ttl.sh" 120
+
 for command in aws docker gzip python3 rg sha256sum tar; do
   command -v "$command" >/dev/null || {
     printf 'missing required command: %s\n' "$command" >&2
@@ -68,6 +70,10 @@ git -C "$GRAPHHOPPER_SOURCE_REPO" diff --quiet HEAD -- \
 git -C "$BACKEND_REPO" diff --quiet HEAD -- \
   src/main build.gradle settings.gradle gradle.properties Dockerfile.test-runtime || {
   printf 'backend runtime inputs must be committed before artifact build\n' >&2
+  exit 1
+}
+[[ -z "$(git -C "$BACKEND_REPO" status --porcelain)" ]] || {
+  printf 'backend worktree must be clean and committed before artifact build\n' >&2
   exit 1
 }
 
@@ -196,6 +202,7 @@ python3 - \
   "$GRAPHHOPPER_SOURCE_DIR" \
   "$BACKEND_COMMIT" \
   "$GRAPHHOPPER_SOURCE_COMMIT" \
+  "$TFVARS" \
   "$(docker image inspect "$BACKEND_IMAGE" --format '{{.Size}}')" \
   "$(docker image inspect "$AI_IMAGE" --format '{{.Size}}')" \
   "$(docker image inspect "$POSTGIS_IMAGE" --format '{{.Size}}')" \
@@ -212,7 +219,8 @@ artifact_root = Path(sys.argv[1])
 graphhopper_source = Path(sys.argv[2])
 backend_commit = sys.argv[3]
 graphhopper_source_commit = sys.argv[4]
-image_sizes = [int(value) for value in sys.argv[5:]]
+tfvars_path = Path(sys.argv[5])
+image_sizes = [int(value) for value in sys.argv[6:]]
 
 def tree_size(path: Path) -> int:
     return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
@@ -225,14 +233,14 @@ role_image_sizes = {
     "load": image_sizes[5],
     "observability": image_sizes[6] + image_sizes[7],
 }
-volume_gib = {
-    "app": 16,
-    "db": 20,
-    "redis": 8,
-    "graphhopper": 20,
-    "load": 8,
-    "observability": 16,
-}
+with tfvars_path.open(encoding="utf-8") as source:
+    tfvars = json.load(source)
+volume_gib = tfvars.get("root_volume_sizes_gib")
+expected_roles = set(role_image_sizes)
+if not isinstance(volume_gib, dict) or set(volume_gib) != expected_roles:
+    raise SystemExit("root_volume_sizes_gib must contain exactly the six artifact roles")
+if any(not isinstance(size, int) or size != 30 for size in volume_gib.values()):
+    raise SystemExit("all artifact role root volumes must be exactly 30 GiB")
 reserve_bytes = 4 * 1024**3
 graphhopper_extract_bytes = tree_size(graphhopper_source)
 roles: dict[str, dict[str, int | bool]] = {}

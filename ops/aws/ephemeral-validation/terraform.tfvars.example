@@ -1,6 +1,7 @@
 run_id                      = "gaja-run-a-20260719"
 domain_name                 = "api.gajabike.shop"
 existing_acm_certificate_arn = "arn:aws:acm:ap-northeast-2:000000000000:certificate/replace-me"
+ecs_optimized_ami_id         = "ami-replace-with-preflight-output"
 artifact_bucket_name        = "gaja-ev-000000000000-gaja-run-a"
 secret_parameter_prefix     = "/gaja/ephemeral/gaja-run-a-20260719/"
 cleanup_start_at            = "2026-07-19T06:00:00"

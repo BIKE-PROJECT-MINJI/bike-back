@@ -3,6 +3,10 @@ locals {
   artifact_prefix    = "${var.bootstrap_object_prefix}/${var.run_id}"
   expires_at         = "${var.cleanup_start_at}Z"
   resource_prefix    = substr("gaja-${var.run_id}", 0, 20)
+  ecs_ami_root_volume_size_gib = tonumber(one([
+    for mapping in data.aws_ami.ecs_optimized_selected.block_device_mappings :
+    mapping.ebs["volume_size"] if mapping.device_name == data.aws_ami.ecs_optimized_selected.root_device_name
+  ]))
 
   common_tags = merge(var.tags, {
     Project   = "GAJA"

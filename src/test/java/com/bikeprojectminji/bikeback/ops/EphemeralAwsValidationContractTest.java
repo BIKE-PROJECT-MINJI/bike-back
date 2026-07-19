@@ -44,12 +44,33 @@ class EphemeralAwsValidationContractTest {
     @DisplayName("비용과 TTL gate는 20퍼센트 여유·3달러·165분 정리·180분 상한을 강제한다")
     void stackEnforcesCostAndCleanupGates() throws Exception {
         String variables = read("variables.tf");
+        String compute = read("compute.tf");
+        String providers = read("providers.tf");
         String cleanup = read("cleanup.tf");
         String preflight = read("scripts/preflight.sh");
+        String artifactBuild = read("scripts/build-and-upload-artifacts.sh");
 
-        assertThat(variables).contains("cost_limit_usd", "default     = 3", "ttl_minutes", "default     = 180");
+        assertThat(variables).contains(
+                "cost_limit_usd", "default     = 3", "ttl_minutes", "default     = 180",
+                "ecs_optimized_ami_id", "lookup(var.root_volume_sizes_gib, role, -1) == 30"
+        );
+        assertThat(compute).contains(
+                "ami                                  = var.ecs_optimized_ami_id",
+                "cpu_credits = \"standard\"",
+                "local.ecs_ami_root_volume_size_gib"
+        );
+        assertThat(providers).contains("image-id", "var.ecs_optimized_ami_id");
         assertThat(cleanup).contains("aws_scheduler_schedule", "cleanup_start_at");
-        assertThat(preflight).contains("COST_HEADROOM=1.20", "pricing get-products", "165", "180");
+        assertThat(preflight).contains(
+                "COST_HEADROOM=1.20", "pricing get-products", "165", "180",
+                "ROOT_VOLUME_SIZE_GIB=30", "describe-images", "ECS_AMI_ROOT_VOLUME_GIB",
+                "root_volume_sizes_gib", "APP_COUNT + 5"
+        );
+        assertThat(artifactBuild).contains(
+                "tfvars.get(\"root_volume_sizes_gib\")",
+                "backend worktree must be clean and committed"
+        );
+        assertThat(artifactBuild).doesNotContain("\"app\": 16", "\"redis\": 8");
     }
 
     @Test
@@ -88,6 +109,8 @@ class EphemeralAwsValidationContractTest {
                 "Description",
                 "Parameter.Type",
                 "existing parameter ownership mismatch",
+                "get-bucket-tagging",
+                "existing artifact bucket ownership mismatch",
                 "ssm put-parameter"
         );
         assertThat(controlPlane).doesNotContain("ssm add-tags-to-resource", "request[\"Overwrite\"]");
@@ -109,7 +132,9 @@ class EphemeralAwsValidationContractTest {
                 "install -d -m 0770 -o 12345 -g 12345",
                 "get-command-invocation",
                 "Pending|InProgress|Delayed",
-                "Failed|Cancelled|TimedOut"
+                "Failed|Cancelled|TimedOut",
+                ".artifacts/$RUN_ID/k6/$STAGE",
+                "assert-remaining-ttl.sh"
         );
         assertThat(runner).doesNotContain("aws ssm wait command-executed");
     }
@@ -124,7 +149,8 @@ class EphemeralAwsValidationContractTest {
         assertThat(gate).contains(
                 "/opt/gaja-run/verify-observability.sh",
                 "EXPECTED_APP_TARGETS",
-                "healthy_targets"
+                "healthy_targets",
+                ".artifacts/$RUN_ID/runtime-gate"
         );
     }
 
@@ -173,6 +199,7 @@ class EphemeralAwsValidationContractTest {
                 "list-instance-profiles",
                 "mapfile -t sorted_resources",
                 "final_bucket_state=\"$(bucket_state)\"",
+                ".artifacts/$RUN_ID/teardown",
                 "residual_total",
                 "exit 1"
         );

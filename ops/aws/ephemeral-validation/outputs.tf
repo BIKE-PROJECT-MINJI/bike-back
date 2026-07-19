@@ -2,6 +2,15 @@ output "run_id" {
   value = var.run_id
 }
 
+output "ecs_optimized_ami" {
+  value = {
+    id                   = data.aws_ami.ecs_optimized_selected.id
+    name                 = data.aws_ami.ecs_optimized_selected.name
+    root_device_name     = data.aws_ami.ecs_optimized_selected.root_device_name
+    root_volume_size_gib = local.ecs_ami_root_volume_size_gib
+  }
+}
+
 output "alb_dns_name" {
   value = aws_lb.api.dns_name
 }

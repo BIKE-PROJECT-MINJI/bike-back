@@ -25,6 +25,16 @@ variable "existing_acm_certificate_arn" {
   type        = string
 }
 
+variable "ecs_optimized_ami_id" {
+  description = "Exact ECS-optimized AL2023 AMI resolved and size-checked by preflight."
+  type        = string
+
+  validation {
+    condition     = can(regex("^ami-[0-9a-f]+$", var.ecs_optimized_ami_id))
+    error_message = "ecs_optimized_ami_id must be a valid AMI ID resolved by preflight."
+  }
+}
+
 variable "artifact_bucket_name" {
   description = "Preflight-created encrypted S3 bucket containing offline artifacts."
   type        = string
@@ -95,20 +105,23 @@ variable "instance_types" {
 }
 
 variable "root_volume_sizes_gib" {
-  description = "Encrypted gp3 root volume sizes; no role may exceed 30 GiB."
+  description = "Encrypted gp3 root volume sizes. Every approved role uses 30 GiB."
   type        = map(number)
   default = {
-    app           = 16
-    db            = 20
-    redis         = 8
-    graphhopper   = 20
-    load          = 8
-    observability = 16
+    app           = 30
+    db            = 30
+    redis         = 30
+    graphhopper   = 30
+    load          = 30
+    observability = 30
   }
 
   validation {
-    condition     = alltrue([for size in values(var.root_volume_sizes_gib) : size >= 8 && size <= 30])
-    error_message = "Root volumes must be between 8 and 30 GiB."
+    condition = length(var.root_volume_sizes_gib) == 6 && alltrue([
+      for role in ["app", "db", "redis", "graphhopper", "load", "observability"] :
+      lookup(var.root_volume_sizes_gib, role, -1) == 30
+    ])
+    error_message = "All six role root volumes must be present and exactly 30 GiB."
   }
 }
 

@@ -6,7 +6,6 @@ readonly ALLOW_HIGH_VUS="${ALLOW_HIGH_VUS:-NO}"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly STACK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly TFVARS="$STACK_DIR/terraform.auto.tfvars.json"
-readonly EVIDENCE_DIR="$STACK_DIR/.artifacts/k6/$STAGE"
 
 for command in aws python3 terraform; do
   command -v "$command" >/dev/null || {
@@ -29,9 +28,12 @@ PY
 readonly AWS_REGION="$(read_tfvar aws_region)"
 readonly RUN_ID="$(read_tfvar run_id)"
 readonly ARTIFACT_BUCKET="$(read_tfvar artifact_bucket_name)"
+readonly EVIDENCE_DIR="$STACK_DIR/.artifacts/$RUN_ID/k6/$STAGE"
 readonly LOAD_INSTANCE_ID="$(terraform -chdir="$STACK_DIR" output -json instance_ids \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["singleton"]["load"])')"
 readonly TEST_ID="${RUN_ID}-${STAGE}"
+"$SCRIPT_DIR/assert-remaining-ttl.sh" 20
+rm -rf "$EVIDENCE_DIR"
 install -d -m 0700 "$EVIDENCE_DIR"
 
 case "$STAGE" in
