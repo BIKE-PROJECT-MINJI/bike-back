@@ -49,6 +49,13 @@ ops/aws/alb-acm-route53/.terraform.lock.hcl
 ops/aws/alb-acm-route53/terraform.tfstate
 ops/aws/alb-acm-route53/terraform.tfstate.backup
 ops/aws/alb-acm-route53/terraform.tfvars.discovered
+ops/aws/ephemeral-validation/.terraform/
+ops/aws/ephemeral-validation/*.tfstate
+ops/aws/ephemeral-validation/*.tfstate.*
+ops/aws/ephemeral-validation/*.tfvars
+ops/aws/ephemeral-validation/terraform.auto.tfvars.json
+!ops/aws/ephemeral-validation/*.tfvars.example
+ops/aws/ephemeral-validation/.artifacts/
 
 # Local verification artifacts
 smoke-check-file-summary.json
