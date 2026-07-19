@@ -38,11 +38,12 @@ run_stage() {
   return "$stage_exit_code"
 }
 
-AWS_REGION="${AWS_REGION:-ap-northeast-2}" \
-DOMAIN_NAME="${DOMAIN_NAME:-api.gajabike.shop}" \
-APP_COUNT="${APP_COUNT:-1}" \
-RUN_ID="$RUN_ID" \
-ACM_ARN="$ACM_ARN" \
+env \
+  AWS_REGION="${AWS_REGION:-ap-northeast-2}" \
+  DOMAIN_NAME="${DOMAIN_NAME:-api.gajabike.shop}" \
+  APP_COUNT="${APP_COUNT:-1}" \
+  RUN_ID="$RUN_ID" \
+  ACM_ARN="$ACM_ARN" \
   bash "$SCRIPT_DIR/preflight.sh"
 cleanup_required='YES'
 
