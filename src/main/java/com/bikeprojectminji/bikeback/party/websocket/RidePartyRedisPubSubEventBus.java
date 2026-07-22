@@ -53,7 +53,7 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
     private volatile long pendingHeartbeatSentAtNanos;
     private volatile MessageListener activeListener;
     private volatile boolean listenerRegistered;
-    private volatile boolean recoveryAllowed = true;
+    private volatile boolean recoveryAllowed;
 
     @Autowired
     public RidePartyRedisPubSubEventBus(
@@ -132,6 +132,7 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
         this.nanoTime = nanoTime;
         this.heartbeatTimeoutNanos = heartbeatTimeoutNanos;
         this.autoStartup = autoStartup;
+        this.recoveryAllowed = autoStartup;
         this.listenerContainer.setErrorHandler(error -> fail("listener"));
     }
 

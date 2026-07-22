@@ -1,13 +1,9 @@
 # T-BE-05 결과
-- A-T-BE-05-01: 두 Party WebSocket 컴포넌트의 public 런타임 생성자에 `@Autowired`를 추가했다.
-- Handler 컨텍스트 회귀 테스트는 Handler와 RevocationListener를 모두 생성한다.
-- A-T-BE-05-02: Redis Pub/Sub lifecycle auto-start를 `bike.party.redis.auto-start` 설정으로 주입했다.
-- 운영 기본값은 `true`이며 test profile은 명시적으로 `false`여서 외부 Redis 없이 컨텍스트가 기동한다.
-- 회귀 테스트는 기본값 true와 test 설정 false가 `isAutoStartup()`에 반영됨을 확인한다.
-- 직접 `start()`하는 Pub/Sub 단위 계약은 기존 Party WebSocket 집중 시험으로 보존·검증했다.
-- 집중 검증: 관련 5개 테스트 클래스를 실행해 BUILD SUCCESSFUL (2m 37s)을 확인했다.
-- 전체 검증: `./gradlew --rerun-tasks --no-daemon test --console=plain` BUILD SUCCESSFUL (12m 26s).
-- 최종 XML: `build/test-results/test/` 132개, tests 652 / failures 0 / errors 0 / skipped 0.
+
+- A-T-BE-05-03: `recoveryAllowed`의 초기값을 `autoStartup` 설정에서 가져오도록 변경했다. 따라서 `bike.party.redis.auto-start=false`인 컨텍스트에서는 scheduled recovery가 명시적 `start()` 전까지 Redis container를 시작하거나 listener를 등록하지 않는다.
+- 명시적 `start()`는 recovery를 활성화하고 구독을 등록한다. 구독 실패 뒤 `recoverIfNecessary()`는 다시 구독하며, `stop()` 뒤에는 recovery가 비활성화되어 재구독하지 않는다.
+- 회귀 테스트는 auto-start false의 inert recovery와 explicit start/recovery/stop lifecycle을 직접 검증한다.
+- 집중 검증: `./gradlew --no-daemon test --tests 'com.bikeprojectminji.bikeback.party.websocket.*' --console=plain` 성공, XML 7개에서 tests 46 / failures 0 / errors 0 / skipped 0.
+- 전체 검증: `./gradlew --rerun-tasks --no-daemon test --console=plain` 성공. 최종 `build/test-results/test/` XML 132개에서 tests 654 / failures 0 / errors 0 / skipped 0 (652 이상).
+- 최종 XML 및 HTML system output에서 `scheduler.*RedisConnectionFailureException`, `RedisConnectionFailureException.*scheduler`, `subscription unavailable`를 검색한 결과는 0건이다. 별도 Redis failure 계약 및 integration fixture의 의도된 RedisConnectionFailureException 출력은 이 scheduler/subscription 조건에 해당하지 않는다.
 - `git diff --check`: 통과.
-- 후보 SHA/PR: initial pushed candidate `4bf91f001c9779ca4464c2375aa8c1ed76e64b1d`; Draft PR https://github.com/BIKE-PROJECT-MINJI/bike-back/pull/88.
-- 남은 위험: test profile에서만 auto-start를 비활성화하며 운영 fail-closed 기본값은 유지한다.
