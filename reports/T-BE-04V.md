@@ -14,7 +14,7 @@
 - Result: Backend CD 58/0/0, ALB 1/0/0, AI route smoke 1/0/0, HealthController 4/0/0 — **64/0/0** total.
 - XML: Backend CD `2026-07-22T16:40:55.352Z`, SHA-256 `2eb7820d9327f95b27f35ef0b1a75fdaee9120b9e9e799968f340076ab37a73d`; ALB `2026-07-22T16:40:54.872Z`, `1e235ae2727b01c1aa1fe51e5cf21534f0e7ae92417901e6fc94fffe25ae773e`; AI `2026-07-22T16:40:27.571Z`, `a0d1f4d97eea7932f8754820fd0933715c8c94be8298d97ecf8bd4725f7a89b6`; Health `2026-07-22T16:40:52.252Z`, `e9ef4910a7f926b09e6e5e98568180893ed8da48ab9ef85b015ba0b9943c8ce0`.
 - `git diff --check` passed.
-- Provenance: PR #82 reviewed SHA `b5b258444f9202326987207b059ba3b1d9616d28`; inherited base commit `c3c1fb6208943841195762458199eadbc9ad7487`; workflow SHA-256 `5ec197a578c3d50fb665a72933a1fbfa8db6918d30dc658fc031229d0d1c0de1`; contract-test SHA-256 `c3944d85295d4b387aad7a8357d8fd200bafa985f5f11f2e6b648e00f764cbd8`.
+- Provenance: validation started from candidate parent `b5b258444f9202326987207b059ba3b1d9616d28`; validated source fingerprints are the following workflow/test SHA-256: workflow `5ec197a578c3d50fb665a72933a1fbfa8db6918d30dc658fc031229d0d1c0de1`; contract-test `c3944d85295d4b387aad7a8357d8fd200bafa985f5f11f2e6b648e00f764cbd8`.
 
 ## Residual risk
 
