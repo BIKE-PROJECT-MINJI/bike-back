@@ -2,8 +2,7 @@ name: bike-back-cd
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -12,7 +11,7 @@ permissions:
 
 concurrency:
   group: bike-back-cd-main
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   AWS_REGION: ap-northeast-2
@@ -22,27 +21,70 @@ env:
   APP_INSTANCE_ID: ${{ vars.APP_INSTANCE_ID }}
   DEPLOY_S3_BUCKET: ${{ vars.DEPLOY_S3_BUCKET }}
   HEALTHCHECK_URL: ${{ vars.HEALTHCHECK_URL }}
+  TARGET_DB_CREDENTIAL_PARAMETER: ${{ vars.TARGET_DB_CREDENTIAL_PARAMETER }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Validate required configuration
+      - name: Validate and encode deployment configuration
+        id: config
         env:
           AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
         run: |
           set -euo pipefail
-          for value in AWS_DEPLOY_ROLE_ARN APP_INSTANCE_ID DEPLOY_S3_BUCKET HEALTHCHECK_URL; do
-            if [ -z "${!value:-}" ]; then
-              printf '[ERROR] Missing required GitHub Actions setting: %s\n' "$value" >&2
-              exit 1
-            fi
-          done
+          python3 - <<'PY'
+          import base64, json, os, re
+          from urllib.parse import urlsplit, urlunsplit
+          required = ('AWS_DEPLOY_ROLE_ARN', 'APP_INSTANCE_ID', 'DEPLOY_S3_BUCKET', 'HEALTHCHECK_URL', 'TARGET_DB_CREDENTIAL_PARAMETER')
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit('missing required setting: ' + ', '.join(missing))
+          deploy_dir = os.environ['APP_DEPLOY_DIR']
+          if not re.fullmatch(r'/opt/bike-back(?:/[A-Za-z0-9_-]+)*', deploy_dir):
+              raise SystemExit('APP_DEPLOY_DIR must be an approved /opt/bike-back safe-character path')
+          service = os.environ['APP_SERVICE_NAME']
+          if not re.fullmatch(r'[A-Za-z0-9_.@-]+', service):
+              raise SystemExit('APP_SERVICE_NAME contains unsafe characters')
+          try:
+              port = int(os.environ['APP_PORT'])
+          except ValueError as exc:
+              raise SystemExit('APP_PORT must be numeric') from exc
+          if not 1 <= port <= 65535:
+              raise SystemExit('APP_PORT outside 1..65535')
+          if not re.fullmatch(r'i-(?:[0-9a-f]{8}|[0-9a-f]{17})', os.environ['APP_INSTANCE_ID']):
+              raise SystemExit('APP_INSTANCE_ID must be an EC2 instance ID')
+          bucket = os.environ['DEPLOY_S3_BUCKET']
+          if not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]|\.(?!\.)){1,61}[a-z0-9]', bucket) or re.fullmatch(r'\d+\.\d+\.\d+\.\d+', bucket):
+              raise SystemExit('DEPLOY_S3_BUCKET is invalid')
+          if not re.fullmatch(r'/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+', os.environ['TARGET_DB_CREDENTIAL_PARAMETER']):
+              raise SystemExit('TARGET_DB_CREDENTIAL_PARAMETER is invalid')
+          def health_url(value):
+              parsed = urlsplit(value)
+              if parsed.scheme != 'https' or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path != '/health':
+                  raise SystemExit('HEALTHCHECK_URL must be an HTTPS /health URL without credentials, query, or fragment')
+              if not parsed.hostname or len(parsed.hostname) > 253 or any(not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label) for label in parsed.hostname.split('.')):
+                  raise SystemExit('HEALTHCHECK_URL hostname is invalid')
+              if parsed.port is not None and not 1 <= parsed.port <= 65535:
+                  raise SystemExit('HEALTHCHECK_URL port outside 1..65535')
+              return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, '', ''))
+          health = health_url(os.environ['HEALTHCHECK_URL'])
+          ready = health[:-len('/health')] + '/ready'
+          if not re.fullmatch(r'[0-9a-f]{40}', os.environ['GITHUB_SHA']):
+              raise SystemExit('GITHUB_SHA must be a 40 character lowercase SHA')
+          run_id, run_attempt = os.environ.get('GITHUB_RUN_ID', ''), os.environ.get('GITHUB_RUN_ATTEMPT', '')
+          if not re.fullmatch(r'[1-9][0-9]*', run_id) or not re.fullmatch(r'[1-9][0-9]*', run_attempt):
+              raise SystemExit('GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT must be positive decimal identifiers')
+          config = {'deploy_dir': deploy_dir, 'service': service, 'port': port, 'bucket': os.environ['DEPLOY_S3_BUCKET'], 'sha': os.environ['GITHUB_SHA'], 'run_id': run_id, 'run_attempt': run_attempt, 'db_parameter': os.environ['TARGET_DB_CREDENTIAL_PARAMETER'], 'health_url': health, 'ready_url': ready}
+          encoded = base64.b64encode(json.dumps(config, separators=(',', ':')).encode()).decode()
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('encoded=' + encoded + '\n')
+              output.write('health_url=' + health + '\n')
+              output.write('ready_url=' + ready + '\n')
+          PY
 
       - name: Configure AWS credentials with GitHub OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -50,108 +92,384 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
-
-      - name: Grant Gradle wrapper permission
-        run: chmod +x ./gradlew
-
-      - name: Run tests before deploy
-        run: ./gradlew --no-daemon test
-
-      - name: Build executable jar
-        run: ./gradlew --no-daemon clean bootJar
+      - run: chmod +x ./gradlew
+      - run: ./gradlew --no-daemon test
+      - run: ./gradlew --no-daemon clean bootJar
 
       - name: Resolve artifact path
         id: artifact
         run: |
           set -euo pipefail
-          ARTIFACT_PATH="$(find build/libs -maxdepth 1 -type f -name '*.jar' | head -n 1)"
-          if [ -z "$ARTIFACT_PATH" ]; then
-            printf '[ERROR] No Spring Boot jar was produced in build/libs\n' >&2
-            exit 1
-          fi
-          printf 'artifact_path=%s\n' "$ARTIFACT_PATH" >> "$GITHUB_OUTPUT"
+          artifact_path="$(find build/libs -maxdepth 1 -type f -name '*.jar' -print -quit)"
+          test -n "$artifact_path"
+          printf 'artifact_path=%s\n' "$artifact_path" >> "$GITHUB_OUTPUT"
+          printf 'artifact_digest=%s\n' "$(sha256sum "$artifact_path" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
-      - name: Upload artifact to S3
+      - name: Render target DB gate command
+        run: |
+          set -euo pipefail
+          CONFIG_B64='${{ steps.config.outputs.encoded }}' python3 - <<'PY'
+          import json, os
+          commands = ['CONFIG_B64=' + os.environ['CONFIG_B64'],
+            'set -euo pipefail',
+            'CONFIG_B64="$CONFIG_B64"',
+            'config=$(printf %s "$CONFIG_B64" | base64 -d)',
+            '''sha=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')''',
+            '''run_id=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')''',
+            '''run_attempt=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_attempt"])')''',
+            '''db_parameter=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["db_parameter"])')''',
+            'test -n "$db_parameter"',
+            'db_url=$(aws ssm get-parameter --name "$db_parameter" --with-decryption --query Parameter.Value --output text)',
+            'test -n "$db_url"',
+            "db_gate=$(psql \"$db_url\" -v ON_ERROR_STOP=1 -tA -F \"|\" -c \"select coalesce(postgis_version(), ''), count(*) filter (where success = false) from flyway_schema_history\")",
+            'IFS="|" read -r postgis failed_rows <<EOF\n$db_gate\nEOF',
+            'test -n "$postgis" && test "$failed_rows" = 0',
+            'printf "{\\"sha\\":\\"%s\\",\\"runId\\":\\"%s\\",\\"runAttempt\\":\\"%s\\",\\"postgis\\":\\"%s\\",\\"failedRows\\":%s}\\n" "$sha" "$run_id" "$run_attempt" "$postgis" "$failed_rows" | tee /tmp/bike-db-gate-evidence.json',
+          ]
+          with open('ssm-db-gate.json', 'w', encoding='utf-8') as f:
+              json.dump({'commands': commands}, f)
+          json.load(open('ssm-db-gate.json', encoding='utf-8'))
+          PY
+
+      - name: Send and wait for pre-upload target DB gate
+        id: preupload_db_gate
+        run: |
+          set -euo pipefail
+          command_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --comment 'bike-back pre-upload target DB gate' --parameters file://ssm-db-gate.json --query Command.CommandId --output text)"
+          printf 'command_id=%s\n' "$command_id" >> "$GITHUB_OUTPUT"
+          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; [ "$status" = Success ] && exit 0; case "$status" in Pending|InProgress|Delayed) sleep 10;; *) exit 1;; esac; done; exit 1
+
+      - name: Upload immutable artifact to S3 after DB gate
+        id: artifact_upload
         env:
           ARTIFACT_PATH: ${{ steps.artifact.outputs.artifact_path }}
+          ARTIFACT_DIGEST: ${{ steps.artifact.outputs.artifact_digest }}
         run: |
           set -euo pipefail
-          aws s3 cp "$ARTIFACT_PATH" "s3://${DEPLOY_S3_BUCKET}/bike-back/releases/${GITHUB_SHA}/app.jar"
+          key="bike-back/releases/${GITHUB_SHA}/${ARTIFACT_DIGEST}/app.jar"
+          if aws s3api put-object --bucket "$DEPLOY_S3_BUCKET" --key "$key" --body "$ARTIFACT_PATH" --metadata "sha256=$ARTIFACT_DIGEST" --if-none-match '*' > artifact-put.json 2>artifact-put.err; then :; else
+            put_status=$?
+            # Fail closed: only S3's immutable-object conflict is safe to
+            # reconcile. Transport ambiguity is not permission to reuse data.
+            # S3 maps conditional PutObject PreconditionFailed to HTTP 412,
+            # but AWS CLI stderr does not reliably print that status. Match
+            # only its complete PutObject service-error form, anchored per line.
+            python3 -c 'import re; value=open("artifact-put.err", encoding="utf-8", errors="replace").read(); assert re.search(r"^An error occurred \(PreconditionFailed\) when calling the PutObject operation:.*$", value, re.M)' || exit "$put_status"
+            # A retry may encounter the immutable object written by its earlier attempt.
+            # Reuse it only after checking both its metadata and version identifier.
+            aws s3api head-object --bucket "$DEPLOY_S3_BUCKET" --key "$key" > artifact-put.json
+            ARTIFACT_DIGEST="$ARTIFACT_DIGEST" python3 -c 'import json,os; value=json.load(open("artifact-put.json")); assert value.get("Metadata",{}).get("sha256")==os.environ["ARTIFACT_DIGEST"]; assert value.get("VersionId")'
+          fi
+          version_id="$(python3 -c 'import json; print(json.load(open("artifact-put.json")).get("VersionId", ""))')"
+          test -n "$version_id"
+          KEY="$key" VERSION="$version_id" DISPOSITION="immutable-upload-or-verified-reuse" DIGEST="$ARTIFACT_DIGEST" python3 -c 'import json,os; json.dump({"bucket":os.environ["DEPLOY_S3_BUCKET"],"key":os.environ["KEY"],"versionId":os.environ["VERSION"],"disposition":os.environ["DISPOSITION"],"digest":os.environ["DIGEST"]},open("artifact-upload-manifest.json","w"),separators=(",",":"))'
+          printf 'key=%s\nversion_id=%s\ndigest=%s\n' "$key" "$version_id" "$ARTIFACT_DIGEST" >> "$GITHUB_OUTPUT"
 
-      - name: Render SSM deploy command
+      - name: Render rollback-safe deploy state machine
         run: |
           set -euo pipefail
-          cat > ssm-commands.json <<EOF
-          {
-            "commands": [
-              "set -euo pipefail",
-              "APP_DEPLOY_DIR='${APP_DEPLOY_DIR}'",
-              "APP_SERVICE_NAME='${APP_SERVICE_NAME}'",
-              "APP_PORT='${APP_PORT}'",
-              "DEPLOY_BUCKET='${DEPLOY_S3_BUCKET}'",
-              "DEPLOY_SHA='${GITHUB_SHA}'",
-              "mkdir -p \"${APP_DEPLOY_DIR}/releases/${GITHUB_SHA}\"",
-              "PREVIOUS_TARGET=\$(readlink -f \"${APP_DEPLOY_DIR}/current.jar\" || true)",
-              "aws s3 cp \"s3://${DEPLOY_S3_BUCKET}/bike-back/releases/${GITHUB_SHA}/app.jar\" \"${APP_DEPLOY_DIR}/releases/${GITHUB_SHA}/app.jar\"",
-              "ln -sfn \"${APP_DEPLOY_DIR}/releases/${GITHUB_SHA}/app.jar\" \"${APP_DEPLOY_DIR}/current.jar\"",
-              "if systemctl restart \"${APP_SERVICE_NAME}\"; then n=0; while [ \$n -lt 15 ]; do if curl -fsS \"http://127.0.0.1:${APP_PORT}/ready\" >/tmp/bike-back-ready.json; then exit 0; fi; n=\$((n+1)); sleep 2; done; fi",
-              "if [ -n \"\${PREVIOUS_TARGET}\" ]; then ln -sfn \"\${PREVIOUS_TARGET}\" \"${APP_DEPLOY_DIR}/current.jar\"; systemctl restart \"${APP_SERVICE_NAME}\"; fi",
-              "exit 1"
-            ]
+          CONFIG_B64='${{ steps.config.outputs.encoded }}' ARTIFACT_KEY='${{ steps.artifact_upload.outputs.key }}' ARTIFACT_VERSION='${{ steps.artifact_upload.outputs.version_id }}' ARTIFACT_DIGEST='${{ steps.artifact_upload.outputs.digest }}' python3 - <<'PY'
+          import json, os
+          commands = ['CONFIG_B64=' + os.environ['CONFIG_B64'] + '\nARTIFACT_KEY=' + os.environ['ARTIFACT_KEY'] + '\nARTIFACT_VERSION=' + os.environ['ARTIFACT_VERSION'] + '\nEXPECTED_DIGEST=' + os.environ['ARTIFACT_DIGEST'] + '''
+          set -euo pipefail
+          config=$(printf %s "$CONFIG_B64" | base64 -d)
+          deploy_dir=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["deploy_dir"])')
+          service=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["service"])')
+          bucket=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bucket"])')
+          sha=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
+          run_id=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+          run_attempt=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_attempt"])')
+          port=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["port"])')
+          db_parameter=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["db_parameter"])')
+          printf %s "$run_id" | grep -Eq '^[1-9][0-9]*$'; printf %s "$run_attempt" | grep -Eq '^[1-9][0-9]*$'
+          command -v flock >/dev/null 2>&1
+          test -d "$deploy_dir" && test -w "$deploy_dir"
+          secure_component() { test ! -L "$1" && test "$(stat -c %u "$1")" = 0 && test "$(stat -c %g "$1")" = 0 && case "$(stat -c %a "$1")" in *[2367][0-7]|*[0-7][2367]) return 1;; esac; }
+          secure_component "$deploy_dir"
+          # Every approved-root state path is opened through a root dirfd.  In
+          # particular, do not let shell redirection follow a pre-created link.
+          dirfd_guard() { python3 - "$deploy_dir" "$@" <<'DIRFD'
+          import os, stat, sys
+          root, entries = sys.argv[1], sys.argv[2:]
+          nofollow = getattr(os, 'O_NOFOLLOW', 0)
+          def checked(fd):
+              value = os.fstat(fd)
+              if not stat.S_ISDIR(value.st_mode) or value.st_mode & 0o077 or (not os.environ.get('BIKE_CD_TEST_ALLOW_UNPRIVILEGED') and (value.st_uid != 0 or value.st_gid != 0)):
+                  raise SystemExit('unsafe deployment state directory')
+          def descend(parts, create):
+              fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | nofollow)
+              checked(fd)
+              try:
+                  for part in parts:
+                      if not part or part in ('.', '..') or '/' in part: raise SystemExit('unsafe state component')
+                      try: child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | nofollow, dir_fd=fd)
+                      except FileNotFoundError:
+                          if not create: raise
+                          os.mkdir(part, 0o700, dir_fd=fd)
+                          child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | nofollow, dir_fd=fd)
+                      checked(child); os.close(fd); fd = child
+                  return fd
+              except BaseException:
+                  os.close(fd); raise
+          for entry in entries:
+              kind, relative = entry.split(':', 1)
+              parts = relative.split('/')
+              if kind == 'dir':
+                  fd = descend(parts, True); os.close(fd)
+              elif kind == 'check':
+                  fd = descend(parts[:-1], False)
+                  try:
+                      try: value = os.open(parts[-1], os.O_RDONLY | nofollow, dir_fd=fd)
+                      except FileNotFoundError: continue
+                      os.close(value)
+                  finally: os.close(fd)
+              elif kind == 'create':
+                  fd = descend(parts[:-1], True)
+                  try:
+                      value = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o600, dir_fd=fd)
+                      os.close(value)
+                  except FileExistsError:
+                      value = os.open(parts[-1], os.O_RDONLY | nofollow, dir_fd=fd); os.close(value)
+                  finally: os.close(fd)
+              else: raise SystemExit('unknown dirfd action')
+          DIRFD
           }
+          dirfd_guard create:.deploy.lock create:.accepted-generation
+          exec 9>"$deploy_dir/.deploy.lock"
+          flock -n 9
+          generation_file="$deploy_dir/.accepted-generation"
+          accepted_generation="$(cat "$generation_file" 2>/dev/null || true)"; test -n "$accepted_generation" || accepted_generation='0 0'
+          generation_action="$(CURRENT="$accepted_generation" CANDIDATE="$run_id $run_attempt" python3 -c 'import os; current=tuple(map(int,os.environ["CURRENT"].split())); candidate=tuple(map(int,os.environ["CANDIDATE"].split())); print("reject" if candidate < current else "advance" if candidate > current else "retry")')"
+          test "$generation_action" != reject
+          if test "$generation_action" = advance; then generation_tmp="$generation_file.$$.tmp"; printf '%s %s\n' "$run_id" "$run_attempt" > "$generation_tmp"; mv "$generation_tmp" "$generation_file"; fi
+          run_store="$deploy_dir/.ssm-runs"
+          run_dir="$run_store/$sha/$EXPECTED_DIGEST/$run_id/$run_attempt"
+          dirfd_guard "dir:.ssm-runs/$sha/$EXPECTED_DIGEST/$run_id/$run_attempt"
+          for component in "$run_store/$sha" "$run_store/$sha/$EXPECTED_DIGEST" "$run_store/$sha/$EXPECTED_DIGEST/$run_id" "$run_dir"; do secure_component "$component"; done
+          marker="$run_dir/promotion-armed"
+          dirfd_guard "check:.ssm-runs/$sha/$EXPECTED_DIGEST/$run_id/$run_attempt/promotion-armed"
+          if test -f "$marker"; then
+            grep -qFx "sha=$sha" "$marker" && grep -qFx "digest=$EXPECTED_DIGEST" "$marker" && grep -qFx "run_id=$run_id" "$marker" && grep -qFx "run_attempt=$run_attempt" "$marker"
+            candidate="$deploy_dir/$sha/$EXPECTED_DIGEST/app.jar"
+            grep -qFx "candidate=$candidate" "$marker"
+            previous_target=$(sed -n 's/^previous=//p' "$marker")
+          else
+            previous_target=$(readlink -f "$deploy_dir/current.jar" || true)
+          fi
+          test -n "$previous_target" && previous_digest=$(sha256sum "$previous_target" | awk '{print $1}')
+          ancestry_dir="$run_store/.ancestry/$sha/$run_id"; ancestry="$ancestry_dir/original"
+          dirfd_guard "dir:.ssm-runs/.ancestry/$sha/$run_id" "check:.ssm-runs/.ancestry/$sha/$run_id/original"
+          secure_component "$run_store/.ancestry"; secure_component "$run_store/.ancestry/$sha"; secure_component "$ancestry_dir"
+          if test -f "$ancestry"; then
+            grep -qFx "sha=$sha" "$ancestry"
+            previous_target=$(sed -n 's/^previous=//p' "$ancestry")
+          else
+            ancestry_tmp="$ancestry_dir/original.$$.tmp"
+            printf 'sha=%s\nprevious=%s\nprevious_digest=%s\n' "$sha" "$previous_target" "$previous_digest" > "$ancestry_tmp"
+            chmod 600 "$ancestry_tmp"; mv "$ancestry_tmp" "$ancestry"
+          fi
+          if [ -n "$previous_target" ]; then
+          case "$previous_target" in "$deploy_dir"/[0-9a-f]*/*/app.jar) ;; *) false;; esac
+          release_sha=$(basename "$(dirname "$(dirname "$previous_target")")")
+          previous_digest=$(basename "$(dirname "$previous_target")")
+          printf %s "$release_sha" | grep -Eq '^[0-9a-f]{40}$'
+          test ${#previous_digest} = 64
+          printf %s "$previous_digest" | grep -Eq '^[0-9a-f]{64}$'
+          test "$(sha256sum "$previous_target" | awk '{print $1}')" = "$previous_digest"
+          else
+          false
+          fi
+          if ! test -f "$marker"; then
+            marker_tmp="$run_dir/promotion-armed.$$.tmp"
+            dirfd_guard "create:.ssm-runs/$sha/$EXPECTED_DIGEST/$run_id/$run_attempt/$(basename "$marker_tmp")"
+            printf 'sha=%s\ndigest=%s\nrun_id=%s\nrun_attempt=%s\ncandidate=%s\nprevious=%s\n' "$sha" "$EXPECTED_DIGEST" "$run_id" "$run_attempt" "$deploy_dir/$sha/$EXPECTED_DIGEST/app.jar" "$previous_target" > "$marker_tmp"
+            chmod 600 "$marker_tmp"
+            mv "$marker_tmp" "$marker"
+          fi
+          rollback() {
+            test -n "${previous_target:-}" || return 1
+            test "$(sha256sum "$previous_target" | awk '{print $1}')" = "$previous_digest" || return $?
+            ln -sfn "$previous_target" "$deploy_dir/current.jar" || return $?
+            systemctl restart "$service" || return $?
+            for _ in $(seq 1 15); do curl -fsS "http://127.0.0.1:$port/health" >/dev/null && curl -fsS "http://127.0.0.1:$port/ready" >/dev/null && return 0; sleep 2; done
+            return 1
+          }
+          printf '%s\n' '#!/bin/sh' 'set -eu' "previous_target=$previous_target" "previous_digest=$previous_digest" "deploy_dir=$deploy_dir" "service=$service" "port=$port" "$(declare -f rollback)" 'rollback' > "$run_dir/rollback.sh"
+          chmod 700 "$run_dir/rollback.sh"
+          trap 'original_status=$?; if rollback; then printf "original_status=%s\\nrollback_status=0\\nrun_id=%s\\nrun_attempt=%s\\n" "$original_status" "$run_id" "$run_attempt" > "$run_dir/rollback-status"; cat "$run_dir/rollback-status"; exit "$original_status"; else rollback_status=$?; printf "original_status=%s\\nrollback_status=%s\\nrun_id=%s\\nrun_attempt=%s\\n" "$original_status" "$rollback_status" "$run_id" "$run_attempt" > "$run_dir/rollback-status"; cat "$run_dir/rollback-status"; exit "$rollback_status"; fi' ERR
+          db_url=$(aws ssm get-parameter --name "$db_parameter" --with-decryption --query Parameter.Value --output text)
+          db_gate=$(psql "$db_url" -v ON_ERROR_STOP=1 -tA -F '|' -c "select coalesce(postgis_version(), ''), count(*) filter (where success = false) from flyway_schema_history")
+          IFS='|' read -r postgis failed_rows <<EOF
+          $db_gate
           EOF
+          test -n "$postgis" && test "$failed_rows" = 0
+          candidate_dir="$deploy_dir/$sha/$EXPECTED_DIGEST"; candidate="$candidate_dir/app.jar"; dirfd_guard "dir:$sha/$EXPECTED_DIGEST" "check:$sha/$EXPECTED_DIGEST/app.jar"
+          candidate_tmp="$candidate_dir/.app.jar.$run_id.$run_attempt.$$.tmp"
+          dirfd_guard "create:$sha/$EXPECTED_DIGEST/$(basename "$candidate_tmp")"
+          aws s3api get-object --bucket "$bucket" --key "$ARTIFACT_KEY" --version-id "$ARTIFACT_VERSION" "$candidate_tmp" >"$run_dir/s3-get.json"
+          digest=$(sha256sum "$candidate_tmp" | awk '{print $1}')
+          test "$digest" = "$EXPECTED_DIGEST"
+          mv "$candidate_tmp" "$candidate"
+          ln -sfn "$candidate" "$deploy_dir/current.jar"
+          systemctl restart "$service"
+          main_pid=$(systemctl show --property MainPID --value "$service")
+          test "$main_pid" -gt 1
+          main_jar=$(tr '\000' '\n' < "/proc/$main_pid/cmdline" | awk 'seen { print; exit } $0 == "-jar" { seen=1 }')
+          case "$main_jar" in /*) ;; *) main_jar="$(readlink -f "/proc/$main_pid/cwd")/$main_jar";; esac
+          main_jar=$(readlink -f "$main_jar")
+          test "$main_jar" = "$deploy_dir/$sha/$EXPECTED_DIGEST/app.jar"
+          test "$(sha256sum "$main_jar" | awk '{print $1}')" = "$EXPECTED_DIGEST"
+          for n in $(seq 1 15); do curl -fsS "http://127.0.0.1:$port/health" >"$run_dir/health.json" && curl -fsS "http://127.0.0.1:$port/ready" >"$run_dir/ready.json" && break; sleep 2; done
+          curl -fsS "http://127.0.0.1:$port/health" >"$run_dir/health.json"
+          curl -fsS "http://127.0.0.1:$port/ready" >"$run_dir/ready.json"
+          printf '{"sha":"%s","digest":"%s","runId":"%s","runAttempt":"%s","previous":"%s","postgis":"%s","failedRows":%s}\n' "$sha" "$digest" "$run_id" "$run_attempt" "$previous_target" "$postgis" "$failed_rows" > "$run_dir/deploy-evidence.json"
+          cat "$run_dir/deploy-evidence.json"
+          ''']
+          with open('ssm-deploy.json', 'w', encoding='utf-8') as f: json.dump({'commands': commands}, f)
+          json.load(open('ssm-deploy.json', encoding='utf-8'))
+          PY
 
-      - name: Send deploy command to EC2 with SSM
-        id: ssm
+      - name: Send and wait for deploy state machine
+        id: deploy_ssm
         run: |
           set -euo pipefail
-          COMMAND_ID="$(aws ssm send-command \
-            --instance-ids "$APP_INSTANCE_ID" \
-            --document-name 'AWS-RunShellScript' \
-            --comment "bike-back deploy ${GITHUB_SHA}" \
-            --parameters file://ssm-commands.json \
-            --query 'Command.CommandId' \
-            --output text)"
-          printf 'command_id=%s\n' "$COMMAND_ID" >> "$GITHUB_OUTPUT"
+          command_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --comment "bike-back deploy ${GITHUB_SHA}" --parameters file://ssm-deploy.json --query Command.CommandId --output text)"
+          printf 'command_id=%s\n' "$command_id" >> "$GITHUB_OUTPUT"
+          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; [ "$status" = Success ] && exit 0; case "$status" in Pending|InProgress|Delayed) sleep 10;; *) exit 1;; esac; done; exit 1
 
-      - name: Wait for SSM command completion
-        env:
-          COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
+      - name: Verify public health and readiness with compensation
+        id: public_probe
+        if: always()
         run: |
           set -euo pipefail
-          for _ in $(seq 1 60); do
-            STATUS="$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$APP_INSTANCE_ID" \
-              --query 'Status' \
-              --output text)"
+          if curl -fsS '${{ steps.config.outputs.health_url }}' > public-health.json && curl -fsS '${{ steps.config.outputs.ready_url }}' > public-ready.json; then exit 0; fi
+          CONFIG_B64='${{ steps.config.outputs.encoded }}' EXPECTED_DIGEST='${{ steps.artifact_upload.outputs.digest }}' python3 - <<'PY'
+          import json, os
+          command = '''set -euo pipefail
+          config=$(printf %s "$CONFIG_B64" | base64 -d)
+          sha=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
+          run_id=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+          run_attempt=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_attempt"])')
+          deploy_dir=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["deploy_dir"])')
+          service=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["service"])')
+          printf %s "$run_id" | grep -Eq '^[1-9][0-9]*$'; printf %s "$run_attempt" | grep -Eq '^[1-9][0-9]*$'
+          command -v flock >/dev/null 2>&1
+          test -d "$deploy_dir" && test -w "$deploy_dir"
+          secure_component() { test ! -L "$1" && test "$(stat -c %u "$1")" = 0 && test "$(stat -c %g "$1")" = 0 && case "$(stat -c %a "$1")" in *[2367][0-7]|*[0-7][2367]) return 1;; esac; }
+          secure_component "$deploy_dir"
+          # Open the public-compensation lock relative to an already verified
+          # directory fd before the shell acquires it.  The deployment root is
+          # root-owned and non-writable by the service user, so this rejects a
+          # pre-created symlink rather than truncating its target.
+          dirfd_lock_guard() { python3 - "$deploy_dir" <<'PUBDIRFD'
+          import os, stat, sys
+          root=sys.argv[1]; nofollow=getattr(os,'O_NOFOLLOW',0)
+          fd=os.open(root, os.O_RDONLY|os.O_DIRECTORY|nofollow)
+          try:
+              value=os.fstat(fd)
+              test_mode=bool(os.environ.get('BIKE_CD_TEST_ALLOW_UNPRIVILEGED'))
+              if not stat.S_ISDIR(value.st_mode) or value.st_mode & 0o077 or (not test_mode and (value.st_uid != 0 or value.st_gid != 0)):
+                  raise SystemExit('unsafe deployment root')
+              try: lock=os.open('.deploy.lock', os.O_WRONLY|os.O_CREAT|os.O_EXCL|nofollow, 0o600, dir_fd=fd)
+              except FileExistsError: lock=os.open('.deploy.lock', os.O_RDONLY|nofollow, dir_fd=fd)
+              os.close(lock)
+          finally: os.close(fd)
+          PUBDIRFD
+          }
+          dirfd_lock_guard
+          exec 9>"$deploy_dir/.deploy.lock"
+          flock -n 9
+          run_dir="$deploy_dir/.ssm-runs/$sha/$EXPECTED_DIGEST/$run_id/$run_attempt"
+          for component in "$deploy_dir/.ssm-runs" "$deploy_dir/.ssm-runs/$sha" "$deploy_dir/.ssm-runs/$sha/$EXPECTED_DIGEST" "$deploy_dir/.ssm-runs/$sha/$EXPECTED_DIGEST/$run_id" "$run_dir"; do secure_component "$component"; done
+          marker="$run_dir/promotion-armed"
+          test -f "$marker" && grep -qFx "sha=$sha" "$marker" && grep -qFx "digest=$EXPECTED_DIGEST" "$marker" && grep -qFx "run_id=$run_id" "$marker" && grep -qFx "run_attempt=$run_attempt" "$marker"
+          candidate="$deploy_dir/$sha/$EXPECTED_DIGEST/app.jar"
+          previous=$(sed -n 's/^previous=//p' "$marker")
+          ancestry="$deploy_dir/.ssm-runs/.ancestry/$sha/$run_id/original"
+          secure_component "$deploy_dir/.ssm-runs/.ancestry"; secure_component "$deploy_dir/.ssm-runs/.ancestry/$sha"; secure_component "$(dirname "$ancestry")"
+          test -f "$ancestry" && grep -qFx "sha=$sha" "$ancestry" && grep -qFx "previous=$previous" "$ancestry"
+          grep -qFx "candidate=$candidate" "$marker"
+          test -f "$candidate"
+          test "$(sha256sum "$candidate" | awk '{print $1}')" = "$EXPECTED_DIGEST"
+          case "$previous" in "$deploy_dir"/[0-9a-f]*/*/app.jar) ;; *) exit 1;; esac
+          previous_sha=$(basename "$(dirname "$(dirname "$previous")")"); previous_digest=$(basename "$(dirname "$previous")")
+          printf %s "$previous_sha" | grep -Eq '^[0-9a-f]{40}$'; printf %s "$previous_digest" | grep -Eq '^[0-9a-f]{64}$'
+          test -f "$previous"
+          test "$(sha256sum "$previous" | awk '{print $1}')" = "$previous_digest"
+          test "$(readlink -f "$deploy_dir/current.jar")" = "$candidate"
+          main_pid=$(systemctl show --property MainPID --value "$service")
+          test "$main_pid" -gt 1
+          main_jar=$(tr '\000' '\n' < "/proc/$main_pid/cmdline" | awk 'seen { print; exit } $0 == "-jar" { seen=1 }')
+          case "$main_jar" in /*) ;; *) main_jar="$(readlink -f "/proc/$main_pid/cwd")/$main_jar";; esac
+          main_jar=$(readlink -f "$main_jar")
+          test "$main_jar" = "$candidate"
+          test "$(sha256sum "$main_jar" | awk '{print $1}')" = "$EXPECTED_DIGEST"
+          rm -f "$run_dir/public-rollback-status.json"
+          test -x "$run_dir/rollback.sh"
+          original_status=1
+          if "$run_dir/rollback.sh"; then rollback_status=0; else rollback_status=$?; fi
+          status_tmp="$run_dir/public-rollback-status.$$.tmp"
+          printf '{"originalPublicStatus":%s,"rollbackStatus":%s,"sha":"%s","digest":"%s","runId":"%s","runAttempt":"%s","candidate":"%s","previous":"%s","runDir":"%s"}\n' "$original_status" "$rollback_status" "$sha" "$EXPECTED_DIGEST" "$run_id" "$run_attempt" "$candidate" "$previous" "$run_dir" > "$status_tmp"
+          mv "$status_tmp" "$run_dir/public-rollback-status.json"
+          cat "$run_dir/public-rollback-status.json"
+          test "$rollback_status" = 0'''
+          with open('ssm-public-rollback.json', 'w', encoding='utf-8') as f:
+              json.dump({'commands': ['CONFIG_B64=' + os.environ['CONFIG_B64'] + '\nEXPECTED_DIGEST=' + os.environ['EXPECTED_DIGEST'] + '\n' + command]}, f)
+          PY
+          aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --comment 'bike-back public probe rollback' --parameters file://ssm-public-rollback.json --query Command.CommandId --output text > rollback-command-id.txt
+          rollback_id="$(cat rollback-command-id.txt)"; for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$rollback_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; if [ "$status" = Success ]; then for _ in $(seq 1 15); do curl -fsS '${{ steps.config.outputs.health_url }}' > rollback-health.json && curl -fsS '${{ steps.config.outputs.ready_url }}' > rollback-ready.json && exit 1; sleep 2; done; exit 1; fi; case "$status" in Pending|InProgress|Delayed) sleep 10;; *) exit 1;; esac; done; exit 1
 
-            case "$STATUS" in
-              Success)
-                exit 0
-                ;;
-              Pending|InProgress|Delayed)
-                sleep 10
-                ;;
-              *)
-                aws ssm get-command-invocation \
-                  --command-id "$COMMAND_ID" \
-                  --instance-id "$APP_INSTANCE_ID"
-                exit 1
-                ;;
-            esac
-          done
-
-          printf '[ERROR] Timed out waiting for SSM deploy command\n' >&2
-          exit 1
-
-      - name: Verify public health endpoint
+      - name: Preserve remote and runner evidence and final verdict
+        if: always()
         run: |
-          set -euo pipefail
-          curl -fsS "$HEALTHCHECK_URL"
+          set +e
+          mkdir -p deployment-evidence
+          failures=""
+          capture() {
+            phase="$1"; command_id="$2"; destination="$3"
+            if test -z "$command_id"; then
+              printf '{"phase":"%s","state":"not-run"}\n' "$phase" > "$destination"
+            else
+              capture_tmp="$destination.$$.tmp"
+              aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" > "$capture_tmp"
+              retrieval_status=$?
+              if test "$retrieval_status" -eq 0; then
+                mv "$capture_tmp" "$destination"
+              else
+                rm -f "$capture_tmp"
+                printf '{"phase":"%s","state":"retrieval-error","commandId":"%s","exitCode":%s}\n' "$phase" "$command_id" "$retrieval_status" > "$destination"
+                failures="${failures}${failures:+,}${phase}:retrieval"
+              fi
+            fi
+          }
+          capture preupload-db-gate '${{ steps.preupload_db_gate.outputs.command_id }}' deployment-evidence/preupload-db-gate.json
+          capture deploy-state-machine '${{ steps.deploy_ssm.outputs.command_id }}' deployment-evidence/deploy-state-machine.json
+          rollback_id="$(cat rollback-command-id.txt 2>/dev/null || true)"
+          capture public-rollback "$rollback_id" deployment-evidence/public-rollback.json
+          cp -f artifact-upload-manifest.json deployment-evidence/artifact-upload-manifest.json 2>/dev/null || true
+          cp -f artifact-put.err deployment-evidence/artifact-put.err 2>/dev/null || true
+          validate() {
+            phase="$1"; source="$2"; required="$3"
+            if ! PHASE="$phase" SOURCE="$source" INCOMING_JOB_STATUS='${{ job.status }}' EXPECTED_SHA="$GITHUB_SHA" EXPECTED_DIGEST='${{ steps.artifact_upload.outputs.digest }}' EXPECTED_RUN_ID="$GITHUB_RUN_ID" EXPECTED_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" DEPLOY_DIR="$APP_DEPLOY_DIR" python3 -c 'import json,os,re; value=json.load(open(os.environ["SOURCE"])); state=value.get("state"); phase=os.environ["PHASE"]; incoming=os.environ["INCOMING_JOB_STATUS"]; allowed=state == "not-run" and (incoming != "success" or phase == "public-rollback"); lines=[line for line in value.get("StandardOutputContent","").splitlines() if line.strip()]; assert allowed or (value.get("Status") == "Success" and len(lines)==1); record={} if allowed else json.loads(lines[0]); sha=os.environ["EXPECTED_SHA"]; digest=os.environ["EXPECTED_DIGEST"]; run=os.environ["EXPECTED_RUN_ID"]; attempt=os.environ["EXPECTED_RUN_ATTEMPT"]; root=os.environ["DEPLOY_DIR"]; assert allowed or (record.get("sha")==sha and record.get("runId")==run and record.get("runAttempt")==attempt); canonical=r"^"+re.escape(root)+r"/[0-9a-f]{40}/[0-9a-f]{64}/app[.]jar$"; assert allowed or (phase != "preupload-db-gate" or (record.get("postgis") and record.get("failedRows")==0)); assert allowed or (phase != "deploy-state-machine" or (record.get("digest")==digest and record.get("failedRows")==0 and re.fullmatch(canonical,record.get("previous","")))); assert allowed or (phase != "public-rollback" or (record.get("digest")==digest and record.get("rollbackStatus")==0 and record.get("candidate")==root+"/"+sha+"/"+digest+"/app.jar" and re.fullmatch(canonical,record.get("previous",""))))'; then
+              failures="${failures}${failures:+,}${phase}:validation"
+            fi
+          }
+          validate preupload-db-gate deployment-evidence/preupload-db-gate.json '"postgis","failedRows"'
+          validate deploy-state-machine deployment-evidence/deploy-state-machine.json '"sha","digest","runId","runAttempt","previous","failedRows"'
+          validate public-rollback deployment-evidence/public-rollback.json '"sha","digest","runId","runAttempt","candidate","previous"'
+          if ! EXPECTED_BUCKET="$DEPLOY_S3_BUCKET" EXPECTED_SHA="$GITHUB_SHA" EXPECTED_DIGEST='${{ steps.artifact_upload.outputs.digest }}' EXPECTED_VERSION='${{ steps.artifact_upload.outputs.version_id }}' python3 -c 'import json,os; value=json.load(open("deployment-evidence/artifact-upload-manifest.json")); digest=os.environ["EXPECTED_DIGEST"]; assert set(value)=={"bucket","key","versionId","disposition","digest"}; assert value["bucket"]==os.environ["EXPECTED_BUCKET"]; assert value["key"]=="bike-back/releases/"+os.environ["EXPECTED_SHA"]+"/"+digest+"/app.jar"; assert value["versionId"]==os.environ["EXPECTED_VERSION"]; assert value["digest"]==digest; assert value["disposition"]=="immutable-upload-or-verified-reuse"'; then failures="${failures:+$failures,}artifact-upload-manifest:validation"; fi
+          cp -f public-health.json public-ready.json rollback-health.json rollback-ready.json rollback-command-id.txt deployment-evidence/ 2>/dev/null || true
+          test -f deployment-evidence/artifact-upload-manifest.json && python3 -c 'import json; value=json.load(open("deployment-evidence/artifact-upload-manifest.json")); assert set(value)=={"bucket","key","versionId","disposition","digest"}; assert value["bucket"] and value["key"] and value["versionId"] and value["digest"]'
+          final_verdict="$(FAILURES="$failures" INCOMING_JOB_STATUS='${{ job.status }}' python3 -c 'import json,os; failures=[value for value in os.environ["FAILURES"].split(",") if value]; incoming=os.environ["INCOMING_JOB_STATUS"]; verdict="success" if incoming == "success" and not failures else "failure"; print(json.dumps({"incomingJobStatus":incoming,"finalVerdict":verdict,"evidenceValidationErrors":failures,"evidenceValid":not failures},separators=(",",":")))')"
+          printf '%s\n' "$final_verdict" > deployment-evidence/final-verdict.json
+          test "$(printf %s "$final_verdict" | python3 -c 'import json,sys; print(json.load(sys.stdin)["finalVerdict"])')" = success
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bike-back-deployment-evidence
+          path: deployment-evidence
