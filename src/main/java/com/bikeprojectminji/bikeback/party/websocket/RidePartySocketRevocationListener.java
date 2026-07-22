@@ -10,18 +10,35 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class RidePartySocketRevocationListener {
 
     private final RidePartySocketSessionRegistry sessionRegistry;
+    private final RidePartyDistributedStateService distributedStateService;
 
-    public RidePartySocketRevocationListener(RidePartySocketSessionRegistry sessionRegistry) {
+    public RidePartySocketRevocationListener(
+            RidePartySocketSessionRegistry sessionRegistry,
+            RidePartyDistributedStateService distributedStateService
+    ) {
         this.sessionRegistry = sessionRegistry;
+        this.distributedStateService = distributedStateService;
+    }
+
+    RidePartySocketRevocationListener(RidePartySocketSessionRegistry sessionRegistry) {
+        this(sessionRegistry, null);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onMemberLeft(RidePartyMemberLeftEvent event) {
-        sessionRegistry.closeMember(event.partyId(), event.userId());
+        if (distributedStateService != null) {
+            distributedStateService.publishMemberRevoked(event.partyId(), event.userId());
+        } else {
+            sessionRegistry.closeMember(event.partyId(), event.userId());
+        }
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onPartyCanceled(RidePartyCanceledEvent event) {
-        sessionRegistry.closeParty(event.partyId());
+        if (distributedStateService != null) {
+            distributedStateService.publishPartyCanceled(event.partyId());
+        } else {
+            sessionRegistry.closeParty(event.partyId());
+        }
     }
 }

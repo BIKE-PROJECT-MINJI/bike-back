@@ -57,8 +57,7 @@ class RidePartyLocationWebSocketHandlerTest {
                 {
                   "latitude": 37.5001,
                   "longitude": 127.0002,
-                  "accuracyM": 8.5,
-                  "capturedAt": "2026-06-26T00:00:00Z"
+                  "accuracyM": 8.5
                 }
                 """));
 
