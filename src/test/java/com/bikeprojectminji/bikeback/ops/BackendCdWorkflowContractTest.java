@@ -23,7 +23,7 @@ class BackendCdWorkflowContractTest {
     }
 
     static Stream<String> scenarios() {
-        return Stream.of("config-valid", "config-invalid", "db-render", "deploy-render-success", "deploy-mainpid-rejected", "same-release-transfer-failure", "delayed-old-fence", "candidate-identity-failure", "rollback-ln-failure", "rollback-systemctl-failure", "rollback-previous-digest-failure", "public-recover", "public-mainpid-rejected", "retry-preserves-ancestry", "attempt-ancestry-preserved", "public-attempt-ancestry", "attempt-digest-b-failure-recovers-original", "attempt-digest-b-public-recovers-original", "run-store-symlink-rejected", "intermediate-store-symlink-rejected", "dirfd-symlink-sentinels", "public-lock-symlink-sentinel", "owner-mismatch-rejected", "uid-gid-mode-rejected", "workflow-upload-send-poll", "upload-only-exact-conflict-reconciles", "manifest-negative", "jar-form-canonicalization", "relative-current-jar-deploy-public", "evidence-rendered-stdout", "public-evidence-rendered-stdout", "rollback-failure", "stale-marker-rejected", "candidate-replaced-rejected", "cross-run-rejected", "lock-contention-rejected", "always-evidence", "evidence-absent-ids", "evidence-incoming-failure", "evidence-retrieval-error", "evidence-malformed", "evidence-identity-mismatch", "aws-negative-argv");
+        return Stream.of("config-valid", "config-invalid", "main-oidc-gate", "db-render", "db-uri-not-argv", "deploy-render-success", "deploy-mainpid-rejected", "same-release-transfer-failure", "delayed-old-fence", "candidate-identity-failure", "rollback-ln-failure", "rollback-systemctl-failure", "rollback-previous-digest-failure", "public-recover", "public-mainpid-rejected", "stale-generation-public-rejected", "retry-preserves-ancestry", "attempt-ancestry-preserved", "public-attempt-ancestry", "attempt-digest-b-failure-recovers-original", "attempt-digest-b-public-recovers-original", "run-store-symlink-rejected", "intermediate-store-symlink-rejected", "dirfd-symlink-sentinels", "public-lock-symlink-sentinel", "owner-mismatch-rejected", "uid-gid-mode-rejected", "workflow-upload-send-poll", "ssm-poll-timeout-cancels", "upload-only-exact-conflict-reconciles", "manifest-negative", "jar-form-canonicalization", "relative-current-jar-deploy-public", "evidence-rendered-stdout", "public-evidence-rendered-stdout", "rollback-failure", "stale-marker-rejected", "candidate-replaced-rejected", "cross-run-rejected", "lock-contention-rejected", "always-evidence", "evidence-absent-ids", "evidence-incoming-failure", "evidence-retrieval-error", "evidence-malformed", "evidence-identity-mismatch", "aws-negative-argv");
     }
 
     private static final String HARNESS = """
@@ -48,7 +48,7 @@ class BackendCdWorkflowContractTest {
             s3api:put-object) test "$#" = 10 && test "$1" = --bucket && test "$2" = bike-artifacts && test "$3" = --key && test -n "$4" && test "$5" = --body && test -f "$6" && test "$7" = --metadata && test "$8" = "sha256=$EXPECTED_DIGEST" && test "$9" = --if-none-match && test "${10}" = '*' || exit 64; case "${PUT_ERROR:-}" in conflict) echo 'An error occurred (PreconditionFailed) when calling the PutObject operation: conditional request failed' >&2; exit 255;; other-operation) echo 'An error occurred (PreconditionFailed) when calling the HeadObject operation: conditional request failed' >&2; exit 255;; lookalike) echo 'PreconditionFailed but not an AWS PutObject response' >&2; exit 255;; access) echo 'An error occurred (AccessDenied) when calling the PutObject operation:' >&2; exit 255;; validation) echo 'An error occurred (ValidationError) when calling the PutObject operation:' >&2; exit 255;; timeout) echo 'timeout reset' >&2; exit 255;; esac; test "${PUT_FAIL:-0}" != 1 || exit 54; printf '{"VersionId":"version-1"}\\n';;
             s3api:head-object) test "$#" = 4 && test "$1" = --bucket && test "$2" = bike-artifacts && test "$3" = --key && test -n "$4" || exit 64; test "${HEAD_BAD_METADATA:-0}" != 1 || { printf '{"VersionId":"version-1","Metadata":{"sha256":"bad"}}\\n'; exit; }; test "${HEAD_NO_VERSION:-0}" != 1 || { printf '{"Metadata":{"sha256":"%s"}}\\n' "$EXPECTED_DIGEST"; exit; }; printf '{"VersionId":"version-1","Metadata":{"sha256":"%s"}}\\n' "$EXPECTED_DIGEST";;
             ssm:get-command-invocation) test "$1" = --command-id && test "$3" = --instance-id && test "$4" = i-aaaaaaaa || exit 64; if test "$#" = 8; then test "$5" = --query && test "$6" = Status && test "$7" = --output && test "$8" = text && echo Success; elif test "$#" = 4; then case "$2" in db-1) printf '%s\\n' "$FAKE_DB_INVOCATION";; deploy-1) printf '%s\\n' "$FAKE_DEPLOY_INVOCATION";; roll-1) printf '%s\\n' "$FAKE_ROLL_INVOCATION";; *) exit 7;; esac; else exit 64; fi;;
-            ssm:send-command) test "$#" = 12 || exit 64; test "$1" = --instance-ids && test "$2" = i-aaaaaaaa && test "$3" = --document-name && test "$4" = AWS-RunShellScript && test "$5" = --comment && test -n "$6" && test "$7" = --parameters && test "$9" = --query && test "${10}" = Command.CommandId && test "${11}" = --output && test "${12}" = text || exit 64; case "$8" in file://ssm-db-gate.json|file://ssm-deploy.json|file://ssm-public-rollback.json) echo command-1;; *) exit 64;; esac;;
+            ssm:send-command) test "$1" = --instance-ids && test "$2" = i-aaaaaaaa && test "$3" = --document-name && test "$4" = AWS-RunShellScript || exit 64; if test "$#" = 14; then test "$5" = --timeout-seconds && test "$6" = 600 && test "$7" = --comment && test -n "$8" && test "$9" = --parameters && test "${11}" = --query && test "${12}" = Command.CommandId && test "${13}" = --output && test "${14}" = text || exit 64; document="${10}"; elif test "$#" = 12; then test "$5" = --comment && test -n "$6" && test "$7" = --parameters && test "$9" = --query && test "${10}" = Command.CommandId && test "${11}" = --output && test "${12}" = text || exit 64; document="$8"; else exit 64; fi; case "$document" in file://ssm-db-gate.json|file://ssm-deploy.json|file://ssm-public-rollback.json) echo command-1;; *) exit 64;; esac;;
             *) exit 64;;
           esac''')
           fake('curl','''case "$CURL_MODE:$*" in
@@ -97,10 +97,20 @@ class BackendCdWorkflowContractTest {
             return run('Preserve remote and runner evidence and final verdict',wd,local,config() if cfg_value is None else cfg_value,ids)
           if scenario=='config-valid': assert run('Validate and encode deployment configuration',wd,env).returncode==0
           elif scenario=='config-invalid': env['APP_INSTANCE_ID']='i-'+'a'*9; assert run('Validate and encode deployment configuration',wd,env).returncode!=0
+          elif scenario=='main-oidc-gate':
+            job=w['jobs']['deploy']; assert job['if']=="github.ref == 'refs/heads/main'" and job['environment']=='production'
+            assert w['permissions']=={'contents':'read'} and job['permissions']['id-token']=='write'
+            assert list(steps).index('Configure AWS credentials with GitHub OIDC') > 0
           elif scenario=='db-render':
             assert run('Render target DB gate command',wd,env).returncode==0
             commands=json.loads((wd/'ssm-db-gate.json').read_text())['commands']
             assert subprocess.run(['bash','-euo','pipefail','-c','\\n'.join(commands)],cwd=wd,env=env).returncode==0
+          elif scenario=='db-uri-not-argv':
+            assert run('Render target DB gate command',wd,env).returncode==0
+            commands='\\n'.join(json.loads((wd/'ssm-db-gate.json').read_text())['commands'])
+            assert 'PGSERVICEFILE="$db_service" psql "service=target"' in commands and 'trap' in commands and 'psql "$db_url"' not in commands
+            deploy,previous,source,cdigest,proc=target(); commands,local=render_deploy(deploy,cdigest)
+            assert 'PGSERVICEFILE="$db_service" psql "service=target"' in '\\n'.join(commands) and 'psql "$db_url"' not in '\\n'.join(commands)
           elif scenario=='deploy-render-success':
             deploy,previous,source,cdigest,proc=target(); commands,local=render_deploy(deploy,cdigest)
             result=execute(commands,{**local,'FAKE_ARTIFACT':str(source)},deploy,proc); assert result.returncode==0
@@ -155,6 +165,11 @@ class BackendCdWorkflowContractTest {
             deploy,previous,source,cdigest,proc=target(); commands,local=render_deploy(deploy,cdigest); assert execute(commands,{**local,'FAKE_ARTIFACT':str(source)},deploy,proc).returncode==0
             document,local=public_document(deploy,cdigest); proc.write_bytes(b'java\\0-jar\\0'+str(previous).encode()+b'\\0')
             assert execute(document,local,deploy,proc).returncode!=0
+            assert (deploy/'current.jar').resolve()==deploy/('a'*40)/cdigest/'app.jar'
+          elif scenario=='stale-generation-public-rejected':
+            deploy,previous,source,cdigest,proc=target(); first,local=render_deploy(deploy,cdigest,'101','1'); assert execute(first,{**local,'FAKE_ARTIFACT':str(source)},deploy,proc).returncode==0
+            second,local=render_deploy(deploy,cdigest,'102','1'); assert execute(second,{**local,'FAKE_ARTIFACT':str(source)},deploy,proc).returncode==0
+            document,local=public_document(deploy,cdigest,'101','1'); assert execute(document,local,deploy,proc).returncode!=0
             assert (deploy/'current.jar').resolve()==deploy/('a'*40)/cdigest/'app.jar'
             assert not (run_path(cdigest)/'public-rollback-status.json').exists()
             proc.unlink(); assert execute(document,local,deploy,proc).returncode!=0
@@ -226,6 +241,10 @@ class BackendCdWorkflowContractTest {
             assert run('Render target DB gate command',wd,local).returncode==0
             assert run('Send and wait for pre-upload target DB gate',wd,local).returncode==0
             assert 's3api put-object --bucket bike-artifacts' in log.read_text() and 's3api head-object --bucket bike-artifacts' in log.read_text() and 'ssm send-command' in log.read_text() and 'ssm get-command-invocation' in log.read_text()
+          elif scenario=='ssm-poll-timeout-cancels':
+            for name in ('Send and wait for pre-upload target DB gate','Send and wait for deploy state machine'):
+              text=steps[name]['run']; assert '--timeout-seconds 600' in text and 'aws ssm cancel-command --command-id "$command_id"' in text
+              assert text.index('cancel-command') > text.index('seq 1 60') and 'Cancelled|TimedOut|Failed' in text and 'terminal.json' in text
           elif scenario=='upload-only-exact-conflict-reconciles':
             artifact=wd/'artifact.jar'; artifact.write_bytes(b'candidate'); local={**env,'ARTIFACT_PATH':str(artifact),'ARTIFACT_DIGEST':digest(artifact.read_bytes()),'EXPECTED_DIGEST':digest(artifact.read_bytes())}
             for error in ('lookalike','other-operation','access','validation','timeout'):

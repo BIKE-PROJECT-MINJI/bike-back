@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 concurrency:
@@ -25,6 +24,13 @@ env:
 
 jobs:
   deploy:
+    # Manual dispatches are permitted only for the protected main ref; this
+    # guard is evaluated before the OIDC credential step.
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -125,8 +131,8 @@ jobs:
             '''db_parameter=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["db_parameter"])')''',
             'test -n "$db_parameter"',
             'db_url=$(aws ssm get-parameter --name "$db_parameter" --with-decryption --query Parameter.Value --output text)',
-            'test -n "$db_url"',
-            "db_gate=$(psql \"$db_url\" -v ON_ERROR_STOP=1 -tA -F \"|\" -c \"select coalesce(postgis_version(), ''), count(*) filter (where success = false) from flyway_schema_history\")",
+            "test -n \"$db_url\"; umask 077; db_service=$(mktemp /tmp/bike-db-service.XXXXXX); chmod 600 \"$db_service\"; trap 'rm -f \"$db_service\"' EXIT; printf '[target]\\ndbname=%s\\n' \"$db_url\" > \"$db_service\"",
+            "db_gate=$(PGSERVICEFILE=\"$db_service\" psql \"service=target\" -v ON_ERROR_STOP=1 -tA -F \"|\" -c \"select coalesce(postgis_version(), ''), count(*) filter (where success = false) from flyway_schema_history\")",
             'IFS="|" read -r postgis failed_rows <<EOF\n$db_gate\nEOF',
             'test -n "$postgis" && test "$failed_rows" = 0',
             'printf "{\\"sha\\":\\"%s\\",\\"runId\\":\\"%s\\",\\"runAttempt\\":\\"%s\\",\\"postgis\\":\\"%s\\",\\"failedRows\\":%s}\\n" "$sha" "$run_id" "$run_attempt" "$postgis" "$failed_rows" | tee /tmp/bike-db-gate-evidence.json',
@@ -140,9 +146,11 @@ jobs:
         id: preupload_db_gate
         run: |
           set -euo pipefail
-          command_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --comment 'bike-back pre-upload target DB gate' --parameters file://ssm-db-gate.json --query Command.CommandId --output text)"
+          command_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --timeout-seconds 600 --comment 'bike-back pre-upload target DB gate' --parameters file://ssm-db-gate.json --query Command.CommandId --output text)"
           printf 'command_id=%s\n' "$command_id" >> "$GITHUB_OUTPUT"
-          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; [ "$status" = Success ] && exit 0; case "$status" in Pending|InProgress|Delayed) sleep 10;; *) exit 1;; esac; done; exit 1
+          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; [ "$status" = Success ] && exit 0; case "$status" in Pending|InProgress|Delayed) sleep 10;; *) exit 1;; esac; done
+          aws ssm cancel-command --command-id "$command_id"
+          for _ in $(seq 1 15); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; case "$status" in Cancelled|TimedOut|Failed) aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" > preupload-db-gate-terminal.json; exit 1;; Pending|InProgress|Delayed) sleep 2;; *) exit 1;; esac; done; exit 1
 
       - name: Upload immutable artifact to S3 after DB gate
         id: artifact_upload
@@ -303,7 +311,9 @@ jobs:
           chmod 700 "$run_dir/rollback.sh"
           trap 'original_status=$?; if rollback; then printf "original_status=%s\\nrollback_status=0\\nrun_id=%s\\nrun_attempt=%s\\n" "$original_status" "$run_id" "$run_attempt" > "$run_dir/rollback-status"; cat "$run_dir/rollback-status"; exit "$original_status"; else rollback_status=$?; printf "original_status=%s\\nrollback_status=%s\\nrun_id=%s\\nrun_attempt=%s\\n" "$original_status" "$rollback_status" "$run_id" "$run_attempt" > "$run_dir/rollback-status"; cat "$run_dir/rollback-status"; exit "$rollback_status"; fi' ERR
           db_url=$(aws ssm get-parameter --name "$db_parameter" --with-decryption --query Parameter.Value --output text)
-          db_gate=$(psql "$db_url" -v ON_ERROR_STOP=1 -tA -F '|' -c "select coalesce(postgis_version(), ''), count(*) filter (where success = false) from flyway_schema_history")
+          test -n "$db_url"; umask 077; db_service=$(mktemp /tmp/bike-db-service.XXXXXX); chmod 600 "$db_service"; trap 'rm -f "$db_service"' EXIT
+          printf '[target]\ndbname=%s\n' "$db_url" > "$db_service"
+          db_gate=$(PGSERVICEFILE="$db_service" psql "service=target" -v ON_ERROR_STOP=1 -tA -F '|' -c "select coalesce(postgis_version(), ''), count(*) filter (where success = false) from flyway_schema_history")
           IFS='|' read -r postgis failed_rows <<EOF
           $db_gate
           EOF
@@ -338,9 +348,11 @@ jobs:
         id: deploy_ssm
         run: |
           set -euo pipefail
-          command_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --comment "bike-back deploy ${GITHUB_SHA}" --parameters file://ssm-deploy.json --query Command.CommandId --output text)"
+          command_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --timeout-seconds 600 --comment "bike-back deploy ${GITHUB_SHA}" --parameters file://ssm-deploy.json --query Command.CommandId --output text)"
           printf 'command_id=%s\n' "$command_id" >> "$GITHUB_OUTPUT"
-          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; [ "$status" = Success ] && exit 0; case "$status" in Pending|InProgress|Delayed) sleep 10;; *) exit 1;; esac; done; exit 1
+          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; [ "$status" = Success ] && exit 0; case "$status" in Pending|InProgress|Delayed) sleep 10;; *) exit 1;; esac; done
+          aws ssm cancel-command --command-id "$command_id"
+          for _ in $(seq 1 15); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; case "$status" in Cancelled|TimedOut|Failed) aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" > deploy-state-machine-terminal.json; exit 1;; Pending|InProgress|Delayed) sleep 2;; *) exit 1;; esac; done; exit 1
 
       - name: Verify public health and readiness with compensation
         id: public_probe
@@ -384,6 +396,9 @@ jobs:
           dirfd_lock_guard
           exec 9>"$deploy_dir/.deploy.lock"
           flock -n 9
+          generation_file="$deploy_dir/.accepted-generation"
+          accepted_generation="$(cat "$generation_file" 2>/dev/null || true)"
+          test "$accepted_generation" = "$run_id $run_attempt"
           run_dir="$deploy_dir/.ssm-runs/$sha/$EXPECTED_DIGEST/$run_id/$run_attempt"
           for component in "$deploy_dir/.ssm-runs" "$deploy_dir/.ssm-runs/$sha" "$deploy_dir/.ssm-runs/$sha/$EXPECTED_DIGEST" "$deploy_dir/.ssm-runs/$sha/$EXPECTED_DIGEST/$run_id" "$run_dir"; do secure_component "$component"; done
           marker="$run_dir/promotion-armed"
