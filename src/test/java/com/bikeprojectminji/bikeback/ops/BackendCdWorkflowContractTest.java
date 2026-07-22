@@ -23,7 +23,7 @@ class BackendCdWorkflowContractTest {
     }
 
     static Stream<String> scenarios() {
-        return Stream.of("config-valid", "config-invalid", "main-oidc-gate", "db-render", "db-uri-not-argv", "deploy-render-success", "deploy-mainpid-rejected", "same-release-transfer-failure", "delayed-old-fence", "candidate-identity-failure", "rollback-ln-failure", "rollback-systemctl-failure", "rollback-previous-digest-failure", "public-recover", "public-mainpid-rejected", "stale-generation-public-rejected", "retry-preserves-ancestry", "attempt-ancestry-preserved", "public-attempt-ancestry", "attempt-digest-b-failure-recovers-original", "attempt-digest-b-public-recovers-original", "run-store-symlink-rejected", "intermediate-store-symlink-rejected", "dirfd-symlink-sentinels", "public-lock-symlink-sentinel", "owner-mismatch-rejected", "uid-gid-mode-rejected", "workflow-upload-send-poll", "ssm-poll-timeout-cancels", "upload-only-exact-conflict-reconciles", "manifest-negative", "jar-form-canonicalization", "relative-current-jar-deploy-public", "evidence-rendered-stdout", "public-evidence-rendered-stdout", "rollback-failure", "stale-marker-rejected", "candidate-replaced-rejected", "cross-run-rejected", "lock-contention-rejected", "always-evidence", "evidence-absent-ids", "evidence-incoming-failure", "evidence-retrieval-error", "evidence-malformed", "evidence-identity-mismatch", "aws-negative-argv");
+        return Stream.of("config-valid", "config-invalid", "main-oidc-gate", "db-render", "db-uri-not-argv", "deploy-render-success", "deploy-mainpid-rejected", "same-release-transfer-failure", "delayed-old-fence", "candidate-identity-failure", "rollback-ln-failure", "rollback-systemctl-failure", "rollback-previous-digest-failure", "public-recover", "public-mainpid-rejected", "stale-generation-public-rejected", "retry-preserves-ancestry", "attempt-ancestry-preserved", "public-attempt-ancestry", "attempt-digest-b-failure-recovers-original", "attempt-digest-b-public-recovers-original", "run-store-symlink-rejected", "intermediate-store-symlink-rejected", "dirfd-symlink-sentinels", "public-lock-symlink-sentinel", "owner-mismatch-rejected", "uid-gid-mode-rejected", "workflow-upload-send-poll", "ssm-poll-timeout-cancels", "ssm-cancel-before-promotion", "ssm-cancel-after-symlink-promotion", "ssm-cancel-during-restart", "ssm-delayed-public-rollback", "upload-only-exact-conflict-reconciles", "manifest-negative", "jar-form-canonicalization", "relative-current-jar-deploy-public", "evidence-rendered-stdout", "public-evidence-rendered-stdout", "rollback-failure", "stale-marker-rejected", "candidate-replaced-rejected", "cross-run-rejected", "lock-contention-rejected", "always-evidence", "evidence-absent-ids", "evidence-incoming-failure", "evidence-retrieval-error", "evidence-malformed", "evidence-identity-mismatch", "aws-negative-argv");
     }
 
     private static final String HARNESS = """
@@ -47,8 +47,9 @@ class BackendCdWorkflowContractTest {
             s3api:get-object) test "$#" = 7 && test "$1" = --bucket && test "$2" = bike-artifacts && test "$3" = --key && test -n "$4" && test "$5" = --version-id && test -n "$6" && test -n "$7" || exit 64; test "${S3_FAIL:-0}" != 1 || exit 55; cp "$FAKE_ARTIFACT" "$7"; echo '{}';;
             s3api:put-object) test "$#" = 10 && test "$1" = --bucket && test "$2" = bike-artifacts && test "$3" = --key && test -n "$4" && test "$5" = --body && test -f "$6" && test "$7" = --metadata && test "$8" = "sha256=$EXPECTED_DIGEST" && test "$9" = --if-none-match && test "${10}" = '*' || exit 64; case "${PUT_ERROR:-}" in conflict) echo 'An error occurred (PreconditionFailed) when calling the PutObject operation: conditional request failed' >&2; exit 255;; other-operation) echo 'An error occurred (PreconditionFailed) when calling the HeadObject operation: conditional request failed' >&2; exit 255;; lookalike) echo 'PreconditionFailed but not an AWS PutObject response' >&2; exit 255;; access) echo 'An error occurred (AccessDenied) when calling the PutObject operation:' >&2; exit 255;; validation) echo 'An error occurred (ValidationError) when calling the PutObject operation:' >&2; exit 255;; timeout) echo 'timeout reset' >&2; exit 255;; esac; test "${PUT_FAIL:-0}" != 1 || exit 54; printf '{"VersionId":"version-1"}\\n';;
             s3api:head-object) test "$#" = 4 && test "$1" = --bucket && test "$2" = bike-artifacts && test "$3" = --key && test -n "$4" || exit 64; test "${HEAD_BAD_METADATA:-0}" != 1 || { printf '{"VersionId":"version-1","Metadata":{"sha256":"bad"}}\\n'; exit; }; test "${HEAD_NO_VERSION:-0}" != 1 || { printf '{"Metadata":{"sha256":"%s"}}\\n' "$EXPECTED_DIGEST"; exit; }; printf '{"VersionId":"version-1","Metadata":{"sha256":"%s"}}\\n' "$EXPECTED_DIGEST";;
-            ssm:get-command-invocation) test "$1" = --command-id && test "$3" = --instance-id && test "$4" = i-aaaaaaaa || exit 64; if test "$#" = 8; then test "$5" = --query && test "$6" = Status && test "$7" = --output && test "$8" = text && echo Success; elif test "$#" = 4; then case "$2" in db-1) printf '%s\\n' "$FAKE_DB_INVOCATION";; deploy-1) printf '%s\\n' "$FAKE_DEPLOY_INVOCATION";; roll-1) printf '%s\\n' "$FAKE_ROLL_INVOCATION";; *) exit 7;; esac; else exit 64; fi;;
-            ssm:send-command) test "$1" = --instance-ids && test "$2" = i-aaaaaaaa && test "$3" = --document-name && test "$4" = AWS-RunShellScript || exit 64; if test "$#" = 14; then test "$5" = --timeout-seconds && test "$6" = 600 && test "$7" = --comment && test -n "$8" && test "$9" = --parameters && test "${11}" = --query && test "${12}" = Command.CommandId && test "${13}" = --output && test "${14}" = text || exit 64; document="${10}"; elif test "$#" = 12; then test "$5" = --comment && test -n "$6" && test "$7" = --parameters && test "$9" = --query && test "${10}" = Command.CommandId && test "${11}" = --output && test "${12}" = text || exit 64; document="$8"; else exit 64; fi; case "$document" in file://ssm-db-gate.json|file://ssm-deploy.json|file://ssm-public-rollback.json) echo command-1;; *) exit 64;; esac;;
+            ssm:get-command-invocation) test "$1" = --command-id && test "$3" = --instance-id && test "$4" = i-aaaaaaaa || exit 64; if test "$#" = 8; then test "$5" = --query && test "$6" = Status && test "$7" = --output && test "$8" = text || exit 64; if test "${SSM_BEHAVIOR:-}" = timeout; then if test -f "$SSM_CANCELLED"; then case "$2" in command-1|command-3) echo Cancelled;; *) echo Success;; esac; else echo Pending; fi; else echo Success; fi; elif test "$#" = 4; then case "$2" in db-1) printf '%s\\n' "$FAKE_DB_INVOCATION";; deploy-1) printf '%s\\n' "$FAKE_DEPLOY_INVOCATION";; roll-1) printf '%s\\n' "$FAKE_ROLL_INVOCATION";; command-1|command-2|command-3) printf '{"CommandId":"%s","Status":"Cancelled","StandardOutputContent":""}\\n' "$2";; *) exit 7;; esac; else exit 64; fi;;
+            ssm:cancel-command) test "$#" = 2 && test "$1" = --command-id && test -n "$2" || exit 64; : > "$SSM_CANCELLED";;
+            ssm:send-command) test "$1" = --instance-ids && test "$2" = i-aaaaaaaa && test "$3" = --document-name && test "$4" = AWS-RunShellScript && test "$#" = 14 && test "$5" = --timeout-seconds && test "$6" = 600 && test "$7" = --comment && test -n "$8" && test "$9" = --parameters && test "${11}" = --query && test "${12}" = Command.CommandId && test "${13}" = --output && test "${14}" = text || exit 64; document="${10}"; case "$document" in file://ssm-db-gate.json|file://ssm-deploy.json|file://ssm-public-rollback.json|file://ssm-reconcile.json) n=$(cat "$SSM_SEND_COUNT" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$SSM_SEND_COUNT"; echo "command-$n";; *) exit 64;; esac;;
             *) exit 64;;
           esac''')
           fake('curl','''case "$CURL_MODE:$*" in
@@ -67,8 +68,8 @@ class BackendCdWorkflowContractTest {
           identity={'sha':'a'*40,'runId':'101','runAttempt':'1'}; previous='/opt/bike-back/'+'b'*40+'/'+'c'*64+'/app.jar'; candidate='/opt/bike-back/'+'a'*40+'/'+'0'*64+'/app.jar'
           db_evidence=json.dumps({'Status':'Success','StandardOutputContent':json.dumps({**identity,'postgis':'POSTGIS','failedRows':0})})
           deploy_evidence=json.dumps({'Status':'Success','StandardOutputContent':json.dumps({**identity,'digest':'0'*64,'previous':previous,'failedRows':0})})
-          roll_evidence=json.dumps({'Status':'Success','StandardOutputContent':json.dumps({**identity,'digest':'0'*64,'candidate':candidate,'previous':previous,'rollbackStatus':0})})
-          env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],'BIKE_CD_TEST_ALLOW_UNPRIVILEGED':'1','APP_INSTANCE_ID':'i-aaaaaaaa','DEPLOY_S3_BUCKET':'bike-artifacts','APP_DEPLOY_DIR':'/opt/bike-back','APP_SERVICE_NAME':'bike-back','APP_PORT':'8080','HEALTHCHECK_URL':'https://bike.example/health','TARGET_DB_CREDENTIAL_PARAMETER':'/bike/db','AWS_DEPLOY_ROLE_ARN':'arn','GITHUB_SHA':'a'*40,'GITHUB_RUN_ID':'101','GITHUB_RUN_ATTEMPT':'1','GITHUB_OUTPUT':str(wd/'out'),'EXPECTED_DIGEST':'0'*64,'CURL_MODE':'normal','CURL_COUNT':str(wd/'curl-count'),'FAKE_DB_INVOCATION':db_evidence,'FAKE_DEPLOY_INVOCATION':deploy_evidence,'FAKE_ROLL_INVOCATION':roll_evidence}
+          roll_evidence=json.dumps({'Status':'Success','StandardOutputContent':json.dumps({**identity,'digest':'0'*64,'candidate':candidate,'previous':previous,'acceptedGeneration':'101 1','markerIdentity':'sha='+'a'*40+',digest='+'0'*64+',run=101/1','currentJar':previous,'mainPid':'4242','mainJar':previous,'mainDigest':'c'*64,'action':'rollback','rollbackStatus':0})})
+          env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],'BIKE_CD_TEST_ALLOW_UNPRIVILEGED':'1','APP_INSTANCE_ID':'i-aaaaaaaa','DEPLOY_S3_BUCKET':'bike-artifacts','APP_DEPLOY_DIR':'/opt/bike-back','APP_SERVICE_NAME':'bike-back','APP_PORT':'8080','HEALTHCHECK_URL':'https://bike.example/health','TARGET_DB_CREDENTIAL_PARAMETER':'/bike/db','AWS_DEPLOY_ROLE_ARN':'arn','GITHUB_SHA':'a'*40,'GITHUB_RUN_ID':'101','GITHUB_RUN_ATTEMPT':'1','GITHUB_OUTPUT':str(wd/'out'),'EXPECTED_DIGEST':'0'*64,'CURL_MODE':'normal','CURL_COUNT':str(wd/'curl-count'),'SSM_CANCELLED':str(wd/'ssm-cancelled'),'SSM_SEND_COUNT':str(wd/'ssm-send-count'),'FAKE_DB_INVOCATION':db_evidence,'FAKE_DEPLOY_INVOCATION':deploy_evidence,'FAKE_ROLL_INVOCATION':roll_evidence}
           def digest(value): return hashlib.sha256(value).hexdigest()
           def run_path(cdigest,run_id='101',run_attempt='1',deploy=None): return (deploy if deploy is not None else wd/'deploy')/'.ssm-runs'/('a'*40)/cdigest/run_id/run_attempt
           def target():
@@ -245,6 +246,40 @@ class BackendCdWorkflowContractTest {
             for name in ('Send and wait for pre-upload target DB gate','Send and wait for deploy state machine'):
               text=steps[name]['run']; assert '--timeout-seconds 600' in text and 'aws ssm cancel-command --command-id "$command_id"' in text
               assert text.index('cancel-command') > text.index('seq 1 60') and 'Cancelled|TimedOut|Failed' in text and 'terminal.json' in text
+            public=steps['Verify public health and readiness with compensation']['run']; assert '--timeout-seconds 600' in public and 'aws ssm cancel-command --command-id "$rollback_id"' in public and public.index('cancel-command') > public.index('seq 1 60') and 'public-rollback-terminal.json' in public
+            deploy=steps['Send and wait for deploy state machine']['run']; assert 'file://ssm-reconcile.json' in deploy and deploy.index('deploy-state-machine-terminal.json') < deploy.index('file://ssm-reconcile.json') and 'aws ssm cancel-command --command-id "$reconcile_id"' in deploy and 'deploy-reconciliation-control.json' in deploy
+          elif scenario in ('ssm-cancel-before-promotion','ssm-cancel-after-symlink-promotion','ssm-cancel-during-restart','ssm-delayed-public-rollback'):
+            deploy,previous,source,cdigest,proc=target(); commands,local=render_deploy(deploy,cdigest)
+            # The fake state machine yields Pending through the runner deadline,
+            # then Cancelled only after cancel-command.  It makes ordering
+            # observable without contacting AWS.
+            pathlib.Path(local['SSM_CANCELLED']).unlink(missing_ok=True); pathlib.Path(local['SSM_SEND_COUNT']).unlink(missing_ok=True); log.write_text('')
+            timed={**local,'SSM_BEHAVIOR':'timeout'}
+            reconciliation=json.loads((wd/'ssm-reconcile.json').read_text())['commands']
+            if scenario=='ssm-cancel-before-promotion': (deploy/'.accepted-generation').write_text('101 1'+chr(10)); run_path(cdigest).mkdir(parents=True,exist_ok=True)
+            if scenario=='ssm-delayed-public-rollback':
+              assert execute(commands,{**local,'FAKE_ARTIFACT':str(source)},deploy,proc).returncode==0
+              document,public_local=public_document(deploy,cdigest)
+              assert execute(document,public_local,deploy,proc).returncode==0 and (deploy/'current.jar').resolve()==previous
+              pathlib.Path(timed['CURL_COUNT']).unlink(missing_ok=True)
+              result=run('Verify public health and readiness with compensation',wd,timed,config(deploy))
+              assert result.returncode!=0 and (deploy/'current.jar').resolve()==previous
+              calls=log.read_text(); assert calls.index('ssm send-command') < calls.index('ssm cancel-command') < calls.rindex('ssm get-command-invocation')
+              assert 'file://ssm-public-rollback.json' in calls and (wd/'public-rollback-terminal.json').exists()
+            else:
+              if scenario=='ssm-cancel-after-symlink-promotion': assert execute(commands,{**local,'FAKE_ARTIFACT':str(source)},deploy,proc).returncode==0 and (deploy/'current.jar').resolve()!=previous
+              if scenario=='ssm-cancel-during-restart': assert execute(commands,{**local,'FAKE_ARTIFACT':str(source),'SYSTEMCTL_FAIL':'1'},deploy,proc).returncode!=0 and (deploy/'current.jar').resolve()==previous
+              result=run('Send and wait for deploy state machine',wd,timed,config(deploy))
+              assert result.returncode!=0
+              calls=log.read_text(); assert calls.index('ssm send-command') < calls.index('ssm cancel-command') < calls.index('file://ssm-reconcile.json')
+              assert (wd/'deploy-state-machine-terminal.json').exists() and (wd/'deploy-reconciliation.json').exists()
+              reconcile='\\n'.join(reconciliation)
+              for field in ('acceptedGeneration','markerIdentity','currentJar','mainPid','mainJar','mainDigest','action','rollbackStatus'):
+                assert field in reconcile
+              assert execute(reconciliation,local,deploy,proc).returncode==0
+              reconciliation_record=json.loads((run_path(cdigest)/'reconciliation.json').read_text())
+              if scenario=='ssm-cancel-before-promotion': assert reconciliation_record['action']=='no-promotion' and (deploy/'current.jar').resolve()==previous
+              else: assert reconciliation_record['action'] in ('rollback','complete') and (deploy/'current.jar').resolve()==previous
           elif scenario=='upload-only-exact-conflict-reconciles':
             artifact=wd/'artifact.jar'; artifact.write_bytes(b'candidate'); local={**env,'ARTIFACT_PATH':str(artifact),'ARTIFACT_DIGEST':digest(artifact.read_bytes()),'EXPECTED_DIGEST':digest(artifact.read_bytes())}
             for error in ('lookalike','other-operation','access','validation','timeout'):
@@ -282,9 +317,12 @@ class BackendCdWorkflowContractTest {
             document,local=public_document(deploy,cdigest); result=execute(document,local,deploy,proc)
             assert result.returncode==0 and len([line for line in result.stdout.splitlines() if line.strip()])==1
             (wd/'rollback-command-id.txt').write_text('roll-1')
+            (wd/'public-rollback-control.json').write_text(json.dumps({'commandId':'roll-1','terminalStatus':'Success'}))
             invocation=json.dumps({'Status':'Success','StandardOutputContent':result.stdout})
             deploy_invocation=json.dumps({'Status':'Success','StandardOutputContent':(run_path(cdigest)/'deploy-evidence.json').read_text()})
-            assert evidence_step({**local,'APP_DEPLOY_DIR':str(deploy),'FAKE_DEPLOY_INVOCATION':deploy_invocation,'FAKE_ROLL_INVOCATION':invocation},cfg_value=config(deploy)).returncode==0
+            evidence_result=evidence_step({**local,'APP_DEPLOY_DIR':str(deploy),'FAKE_DEPLOY_INVOCATION':deploy_invocation,'FAKE_ROLL_INVOCATION':invocation},cfg_value=config(deploy))
+            if evidence_result.returncode!=0: print((wd/'deployment-evidence/final-verdict.json').read_text())
+            assert evidence_result.returncode==0
           elif scenario=='rollback-failure':
             deploy,previous,source,cdigest,proc=target(); commands,local=render_deploy(deploy,cdigest); assert execute(commands,{**local,'FAKE_ARTIFACT':str(source)},deploy,proc).returncode==0
             document,local=public_document(deploy,cdigest); result=execute(document,{**local,'CURL_MODE':'rollback-fail'},deploy,proc); assert result.returncode!=0
@@ -359,7 +397,7 @@ class BackendCdWorkflowContractTest {
             assert subprocess.run(['aws','ssm','get-parameter','--name','/bike/db'],cwd=wd,env=env).returncode!=0
             assert subprocess.run(['aws','ssm','get-command-invocation','--command-id','db-1','--instance-id','i-aaaaaaaa','--query','Wrong','--output','text'],cwd=wd,env=env).returncode!=0
             assert subprocess.run(['aws','s3api','get-object','--bucket','bike-artifacts'],cwd=wd,env=env).returncode!=0
-            valid=['aws','ssm','send-command','--instance-ids','i-aaaaaaaa','--document-name','AWS-RunShellScript','--comment','ok','--parameters','file://ssm-deploy.json','--query','Command.CommandId','--output','text']
+            valid=['aws','ssm','send-command','--instance-ids','i-aaaaaaaa','--document-name','AWS-RunShellScript','--timeout-seconds','600','--comment','ok','--parameters','file://ssm-deploy.json','--query','Command.CommandId','--output','text']
             assert subprocess.run(valid,cwd=wd,env=env).returncode==0
             for bad in (valid[:-1],valid+['extra'],valid[:3]+['wrong']+valid[4:],valid[:9]+['file://wrong.json']+valid[10:],valid[:11]+['Wrong']+valid[12:]): assert subprocess.run(bad,cwd=wd,env=env).returncode!=0
         """;

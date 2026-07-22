@@ -324,6 +324,9 @@ jobs:
           aws s3api get-object --bucket "$bucket" --key "$ARTIFACT_KEY" --version-id "$ARTIFACT_VERSION" "$candidate_tmp" >"$run_dir/s3-get.json"
           digest=$(sha256sum "$candidate_tmp" | awk '{print $1}')
           test "$digest" = "$EXPECTED_DIGEST"
+          # A terminal reconciliation owns this generation after cancellation;
+          # a delayed invocation must not re-promote it.
+          test ! -f "$run_dir/reconciliation.json"
           mv "$candidate_tmp" "$candidate"
           ln -sfn "$candidate" "$deploy_dir/current.jar"
           systemctl restart "$service"
@@ -341,7 +344,52 @@ jobs:
           cat "$run_dir/deploy-evidence.json"
           ''']
           with open('ssm-deploy.json', 'w', encoding='utf-8') as f: json.dump({'commands': commands}, f)
+          # This document is invoked only after a terminal non-success deploy
+          # invocation.  The same generation lock prevents a delayed command
+          # from promoting after reconciliation has chosen the owned outcome.
+          reconcile = '''set -euo pipefail
+          config=$(printf %s "$CONFIG_B64" | base64 -d)
+          sha=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
+          run_id=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+          run_attempt=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_attempt"])')
+          deploy_dir=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["deploy_dir"])')
+          service=$(printf %s "$config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["service"])')
+          dirfd_lock_guard() { python3 - "$deploy_dir" <<'RECONDIRFD'
+          import os, stat, sys
+          fd=os.open(sys.argv[1], os.O_RDONLY|os.O_DIRECTORY|getattr(os,'O_NOFOLLOW',0))
+          try:
+              value=os.fstat(fd); test_mode=bool(os.environ.get('BIKE_CD_TEST_ALLOW_UNPRIVILEGED'))
+              if not stat.S_ISDIR(value.st_mode) or value.st_mode & 0o077 or (not test_mode and (value.st_uid != 0 or value.st_gid != 0)): raise SystemExit('unsafe deployment root')
+              try: lock=os.open('.deploy.lock', os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o600,dir_fd=fd)
+              except FileExistsError: lock=os.open('.deploy.lock',os.O_RDONLY|getattr(os,'O_NOFOLLOW',0),dir_fd=fd)
+              os.close(lock)
+          finally: os.close(fd)
+          RECONDIRFD
+          }
+          dirfd_lock_guard; exec 9>"$deploy_dir/.deploy.lock"; flock -n 9
+          accepted_generation=$(cat "$deploy_dir/.accepted-generation" 2>/dev/null || true)
+          test "$accepted_generation" = "$run_id $run_attempt"
+          run_dir="$deploy_dir/.ssm-runs/$sha/$EXPECTED_DIGEST/$run_id/$run_attempt"; marker="$run_dir/promotion-armed"; candidate="$deploy_dir/$sha/$EXPECTED_DIGEST/app.jar"
+          marker_identity=absent; previous=''; previous_digest=''; action=no-promotion; rollback_status=0; current=$(readlink -f "$deploy_dir/current.jar" || true)
+          if test -f "$marker"; then
+            grep -qFx "sha=$sha" "$marker" && grep -qFx "digest=$EXPECTED_DIGEST" "$marker" && grep -qFx "run_id=$run_id" "$marker" && grep -qFx "run_attempt=$run_attempt" "$marker" && grep -qFx "candidate=$candidate" "$marker"
+            marker_identity=owned; test -f "$candidate"; test "$(sha256sum "$candidate" | awk '{print $1}')" = "$EXPECTED_DIGEST"
+            previous=$(sed -n 's/^previous=//p' "$marker"); test -n "$previous"; test -f "$previous"; previous_digest=$(sha256sum "$previous" | awk '{print $1}'); test "$(basename "$(dirname "$previous")")" = "$previous_digest"
+            if test "$current" = "$candidate"; then action=rollback; if "$run_dir/rollback.sh"; then rollback_status=0; else rollback_status=$?; fi; else test "$current" = "$previous"; action=complete; fi
+          fi
+          current=$(readlink -f "$deploy_dir/current.jar" || true)
+          main_pid=$(systemctl show --property MainPID --value "$service" || true); main_jar=''; main_digest=''
+          if test "${main_pid:-0}" -gt 1 2>/dev/null; then main_jar=$(tr '\000' '\n' < "/proc/$main_pid/cmdline" | awk 'seen {print;exit} $0=="-jar" {seen=1}'); case "$main_jar" in /*) ;; *) main_jar="$(readlink -f "/proc/$main_pid/cwd")/$main_jar";; esac; main_jar=$(readlink -f "$main_jar"); main_digest=$(sha256sum "$main_jar" | awk '{print $1}'); fi
+          test "$rollback_status" = 0
+          if test "$marker_identity" = owned; then
+            test "$current" = "$previous"; test "$main_jar" = "$previous"; test "$main_digest" = "$previous_digest"
+          else
+            test "$action" = no-promotion; test "$current" != "$candidate"
+          fi
+          status_tmp="$run_dir/reconciliation.$$.tmp"; printf '{"sha":"%s","digest":"%s","runId":"%s","runAttempt":"%s","acceptedGeneration":"%s","markerIdentity":"%s","candidate":"%s","previous":"%s","previousDigest":"%s","currentJar":"%s","mainPid":"%s","mainJar":"%s","mainDigest":"%s","action":"%s","rollbackStatus":%s}\n' "$sha" "$EXPECTED_DIGEST" "$run_id" "$run_attempt" "$accepted_generation" "$marker_identity" "$candidate" "$previous" "$previous_digest" "$current" "$main_pid" "$main_jar" "$main_digest" "$action" "$rollback_status" > "$status_tmp"; mv "$status_tmp" "$run_dir/reconciliation.json"; cat "$run_dir/reconciliation.json"'''
+          with open('ssm-reconcile.json', 'w', encoding='utf-8') as f: json.dump({'commands': ['CONFIG_B64=' + os.environ['CONFIG_B64'] + '\nEXPECTED_DIGEST=' + os.environ['ARTIFACT_DIGEST'] + '\n' + reconcile]}, f)
           json.load(open('ssm-deploy.json', encoding='utf-8'))
+          json.load(open('ssm-reconcile.json', encoding='utf-8'))
           PY
 
       - name: Send and wait for deploy state machine
@@ -350,16 +398,26 @@ jobs:
           set -euo pipefail
           command_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --timeout-seconds 600 --comment "bike-back deploy ${GITHUB_SHA}" --parameters file://ssm-deploy.json --query Command.CommandId --output text)"
           printf 'command_id=%s\n' "$command_id" >> "$GITHUB_OUTPUT"
-          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; [ "$status" = Success ] && exit 0; case "$status" in Pending|InProgress|Delayed) sleep 10;; *) exit 1;; esac; done
-          aws ssm cancel-command --command-id "$command_id"
-          for _ in $(seq 1 15); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; case "$status" in Cancelled|TimedOut|Failed) aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" > deploy-state-machine-terminal.json; exit 1;; Pending|InProgress|Delayed) sleep 2;; *) exit 1;; esac; done; exit 1
+          terminal_status=''
+          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; [ "$status" = Success ] && exit 0; case "$status" in Pending|InProgress|Delayed|Cancelling) sleep 10;; *) terminal_status="$status"; break;; esac; done
+          if test -z "$terminal_status"; then aws ssm cancel-command --command-id "$command_id"; for _ in $(seq 1 15); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; case "$status" in Cancelled|TimedOut|Failed|Success) terminal_status="$status"; break;; Pending|InProgress|Delayed|Cancelling) sleep 2;; *) exit 1;; esac; done; fi
+          test -n "$terminal_status"; aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" > deploy-state-machine-terminal.json
+          reconcile_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --timeout-seconds 600 --comment 'bike-back deploy terminal reconciliation' --parameters file://ssm-reconcile.json --query Command.CommandId --output text)"; printf '%s\n' "$reconcile_id" > deploy-reconciliation-command-id.txt
+          reconcile_terminal=''
+          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$reconcile_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; case "$status" in Pending|InProgress|Delayed|Cancelling) sleep 10;; *) reconcile_terminal="$status"; break;; esac; done
+          if test -z "$reconcile_terminal"; then aws ssm cancel-command --command-id "$reconcile_id"; for _ in $(seq 1 15); do status="$(aws ssm get-command-invocation --command-id "$reconcile_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; case "$status" in Cancelled|TimedOut|Failed|Success) reconcile_terminal="$status"; break;; Pending|InProgress|Delayed|Cancelling) sleep 2;; *) exit 1;; esac; done; fi
+          test -n "$reconcile_terminal"; aws ssm get-command-invocation --command-id "$reconcile_id" --instance-id "$APP_INSTANCE_ID" > deploy-reconciliation.json; printf '{"commandId":"%s","terminalStatus":"%s"}\n' "$reconcile_id" "$reconcile_terminal" > deploy-reconciliation-control.json
+          test "$reconcile_terminal" = Success; exit 1
 
       - name: Verify public health and readiness with compensation
         id: public_probe
         if: always()
         run: |
           set -euo pipefail
-          if curl -fsS '${{ steps.config.outputs.health_url }}' > public-health.json && curl -fsS '${{ steps.config.outputs.ready_url }}' > public-ready.json; then exit 0; fi
+          # A failed/cancelled deploy is never cleared by a public URL alone:
+          # the target document below takes the accepted-generation lock and
+          # determines the owned no-promotion/complete/rollback state.
+          if [ '${{ steps.deploy_ssm.outcome }}' = success ] && curl -fsS '${{ steps.config.outputs.health_url }}' > public-health.json && curl -fsS '${{ steps.config.outputs.ready_url }}' > public-ready.json; then exit 0; fi
           CONFIG_B64='${{ steps.config.outputs.encoded }}' EXPECTED_DIGEST='${{ steps.artifact_upload.outputs.digest }}' python3 - <<'PY'
           import json, os
           command = '''set -euo pipefail
@@ -429,15 +487,27 @@ jobs:
           original_status=1
           if "$run_dir/rollback.sh"; then rollback_status=0; else rollback_status=$?; fi
           status_tmp="$run_dir/public-rollback-status.$$.tmp"
-          printf '{"originalPublicStatus":%s,"rollbackStatus":%s,"sha":"%s","digest":"%s","runId":"%s","runAttempt":"%s","candidate":"%s","previous":"%s","runDir":"%s"}\n' "$original_status" "$rollback_status" "$sha" "$EXPECTED_DIGEST" "$run_id" "$run_attempt" "$candidate" "$previous" "$run_dir" > "$status_tmp"
+          accepted_generation=$(cat "$generation_file")
+          current_jar=$(readlink -f "$deploy_dir/current.jar")
+          main_pid=$(systemctl show --property MainPID --value "$service")
+          main_jar=$(tr '\000' '\n' < "/proc/$main_pid/cmdline" | awk 'seen { print; exit } $0 == "-jar" { seen=1 }')
+          case "$main_jar" in /*) ;; *) main_jar="$(readlink -f "/proc/$main_pid/cwd")/$main_jar";; esac
+          main_jar=$(readlink -f "$main_jar"); main_digest=$(sha256sum "$main_jar" | awk '{print $1}')
+          printf '{"originalPublicStatus":%s,"rollbackStatus":%s,"sha":"%s","digest":"%s","runId":"%s","runAttempt":"%s","acceptedGeneration":"%s","markerIdentity":"sha=%s,digest=%s,run=%s/%s","currentJar":"%s","mainPid":"%s","mainJar":"%s","mainDigest":"%s","action":"rollback","candidate":"%s","previous":"%s","runDir":"%s"}\n' "$original_status" "$rollback_status" "$sha" "$EXPECTED_DIGEST" "$run_id" "$run_attempt" "$accepted_generation" "$sha" "$EXPECTED_DIGEST" "$run_id" "$run_attempt" "$current_jar" "$main_pid" "$main_jar" "$main_digest" "$candidate" "$previous" "$run_dir" > "$status_tmp"
           mv "$status_tmp" "$run_dir/public-rollback-status.json"
           cat "$run_dir/public-rollback-status.json"
           test "$rollback_status" = 0'''
           with open('ssm-public-rollback.json', 'w', encoding='utf-8') as f:
               json.dump({'commands': ['CONFIG_B64=' + os.environ['CONFIG_B64'] + '\nEXPECTED_DIGEST=' + os.environ['EXPECTED_DIGEST'] + '\n' + command]}, f)
           PY
-          aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --comment 'bike-back public probe rollback' --parameters file://ssm-public-rollback.json --query Command.CommandId --output text > rollback-command-id.txt
-          rollback_id="$(cat rollback-command-id.txt)"; for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$rollback_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; if [ "$status" = Success ]; then for _ in $(seq 1 15); do curl -fsS '${{ steps.config.outputs.health_url }}' > rollback-health.json && curl -fsS '${{ steps.config.outputs.ready_url }}' > rollback-ready.json && exit 1; sleep 2; done; exit 1; fi; case "$status" in Pending|InProgress|Delayed) sleep 10;; *) exit 1;; esac; done; exit 1
+          aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --timeout-seconds 600 --comment 'bike-back public probe rollback' --parameters file://ssm-public-rollback.json --query Command.CommandId --output text > rollback-command-id.txt
+          rollback_id="$(cat rollback-command-id.txt)"; terminal_status=''
+          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$rollback_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; if [ "$status" = Success ]; then terminal_status=Success; break; fi; case "$status" in Pending|InProgress|Delayed|Cancelling) sleep 10;; *) terminal_status="$status"; break;; esac; done
+          if test -z "$terminal_status"; then aws ssm cancel-command --command-id "$rollback_id"; for _ in $(seq 1 15); do status="$(aws ssm get-command-invocation --command-id "$rollback_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; case "$status" in Cancelled|TimedOut|Failed|Success) terminal_status="$status"; break;; Pending|InProgress|Delayed|Cancelling) sleep 2;; *) exit 1;; esac; done; fi
+          test -n "$terminal_status"; aws ssm get-command-invocation --command-id "$rollback_id" --instance-id "$APP_INSTANCE_ID" > public-rollback-terminal.json
+          printf '{"commandId":"%s","terminalStatus":"%s"}\n' "$rollback_id" "$terminal_status" > public-rollback-control.json
+          test "$terminal_status" = Success
+          for _ in $(seq 1 15); do curl -fsS '${{ steps.config.outputs.health_url }}' > rollback-health.json && curl -fsS '${{ steps.config.outputs.ready_url }}' > rollback-ready.json && exit 1; sleep 2; done; exit 1
 
       - name: Preserve remote and runner evidence and final verdict
         if: always()
@@ -464,19 +534,39 @@ jobs:
           }
           capture preupload-db-gate '${{ steps.preupload_db_gate.outputs.command_id }}' deployment-evidence/preupload-db-gate.json
           capture deploy-state-machine '${{ steps.deploy_ssm.outputs.command_id }}' deployment-evidence/deploy-state-machine.json
+          reconcile_id="$(cat deploy-reconciliation-command-id.txt 2>/dev/null || true)"
+          capture deploy-reconciliation "$reconcile_id" deployment-evidence/deploy-reconciliation.json
           rollback_id="$(cat rollback-command-id.txt 2>/dev/null || true)"
           capture public-rollback "$rollback_id" deployment-evidence/public-rollback.json
+          cp -f deploy-state-machine-terminal.json deploy-reconciliation.json deploy-reconciliation-control.json public-rollback-terminal.json public-rollback-control.json deployment-evidence/ 2>/dev/null || true
           cp -f artifact-upload-manifest.json deployment-evidence/artifact-upload-manifest.json 2>/dev/null || true
           cp -f artifact-put.err deployment-evidence/artifact-put.err 2>/dev/null || true
           validate() {
             phase="$1"; source="$2"; required="$3"
-            if ! PHASE="$phase" SOURCE="$source" INCOMING_JOB_STATUS='${{ job.status }}' EXPECTED_SHA="$GITHUB_SHA" EXPECTED_DIGEST='${{ steps.artifact_upload.outputs.digest }}' EXPECTED_RUN_ID="$GITHUB_RUN_ID" EXPECTED_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" DEPLOY_DIR="$APP_DEPLOY_DIR" python3 -c 'import json,os,re; value=json.load(open(os.environ["SOURCE"])); state=value.get("state"); phase=os.environ["PHASE"]; incoming=os.environ["INCOMING_JOB_STATUS"]; allowed=state == "not-run" and (incoming != "success" or phase == "public-rollback"); lines=[line for line in value.get("StandardOutputContent","").splitlines() if line.strip()]; assert allowed or (value.get("Status") == "Success" and len(lines)==1); record={} if allowed else json.loads(lines[0]); sha=os.environ["EXPECTED_SHA"]; digest=os.environ["EXPECTED_DIGEST"]; run=os.environ["EXPECTED_RUN_ID"]; attempt=os.environ["EXPECTED_RUN_ATTEMPT"]; root=os.environ["DEPLOY_DIR"]; assert allowed or (record.get("sha")==sha and record.get("runId")==run and record.get("runAttempt")==attempt); canonical=r"^"+re.escape(root)+r"/[0-9a-f]{40}/[0-9a-f]{64}/app[.]jar$"; assert allowed or (phase != "preupload-db-gate" or (record.get("postgis") and record.get("failedRows")==0)); assert allowed or (phase != "deploy-state-machine" or (record.get("digest")==digest and record.get("failedRows")==0 and re.fullmatch(canonical,record.get("previous","")))); assert allowed or (phase != "public-rollback" or (record.get("digest")==digest and record.get("rollbackStatus")==0 and record.get("candidate")==root+"/"+sha+"/"+digest+"/app.jar" and re.fullmatch(canonical,record.get("previous",""))))'; then
+            if ! PHASE="$phase" SOURCE="$source" INCOMING_JOB_STATUS='${{ job.status }}' EXPECTED_SHA="$GITHUB_SHA" EXPECTED_DIGEST='${{ steps.artifact_upload.outputs.digest }}' EXPECTED_RUN_ID="$GITHUB_RUN_ID" EXPECTED_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" DEPLOY_DIR="$APP_DEPLOY_DIR" python3 -c 'import json,os,re; value=json.load(open(os.environ["SOURCE"])); state=value.get("state"); phase=os.environ["PHASE"]; incoming=os.environ["INCOMING_JOB_STATUS"]; allowed=state == "not-run" and (incoming != "success" or phase in ("public-rollback","deploy-reconciliation")); lines=[line for line in value.get("StandardOutputContent","").splitlines() if line.strip()]; assert allowed or (value.get("Status") == "Success" and len(lines)==1); record={} if allowed else json.loads(lines[0]); sha=os.environ["EXPECTED_SHA"]; digest=os.environ["EXPECTED_DIGEST"]; run=os.environ["EXPECTED_RUN_ID"]; attempt=os.environ["EXPECTED_RUN_ATTEMPT"]; root=os.environ["DEPLOY_DIR"]; assert allowed or (record.get("sha")==sha and record.get("runId")==run and record.get("runAttempt")==attempt); canonical=r"^"+re.escape(root)+r"/[0-9a-f]{40}/[0-9a-f]{64}/app[.]jar$"; structured=("acceptedGeneration","markerIdentity","currentJar","mainPid","mainJar","mainDigest","action","rollbackStatus"); assert allowed or (phase not in ("public-rollback","deploy-reconciliation") or all(key in record for key in structured)); assert allowed or (phase != "preupload-db-gate" or (record.get("postgis") and record.get("failedRows")==0)); assert allowed or (phase != "deploy-state-machine" or (record.get("digest")==digest and record.get("failedRows")==0 and re.fullmatch(canonical,record.get("previous","")))); assert allowed or (phase != "public-rollback" or (record.get("digest")==digest and record.get("rollbackStatus")==0 and record.get("acceptedGeneration")==run+" "+attempt and record.get("action")=="rollback" and record.get("candidate")==root+"/"+sha+"/"+digest+"/app.jar" and re.fullmatch(canonical,record.get("previous",""))))'; then
               failures="${failures}${failures:+,}${phase}:validation"
             fi
           }
           validate preupload-db-gate deployment-evidence/preupload-db-gate.json '"postgis","failedRows"'
           validate deploy-state-machine deployment-evidence/deploy-state-machine.json '"sha","digest","runId","runAttempt","previous","failedRows"'
+          validate deploy-reconciliation deployment-evidence/deploy-reconciliation.json '"acceptedGeneration","markerIdentity","currentJar","mainPid","mainJar","mainDigest","action","rollbackStatus"'
           validate public-rollback deployment-evidence/public-rollback.json '"sha","digest","runId","runAttempt","candidate","previous"'
+          validate_owned_transition() {
+            phase="$1"; source="$2"
+            if ! PHASE="$phase" SOURCE="$source" EXPECTED_SHA="$GITHUB_SHA" EXPECTED_DIGEST='${{ steps.artifact_upload.outputs.digest }}' EXPECTED_RUN_ID="$GITHUB_RUN_ID" EXPECTED_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" DEPLOY_DIR="$APP_DEPLOY_DIR" python3 -c 'import json,os,re; value=json.load(open(os.environ["SOURCE"])); allowed=value.get("state")=="not-run"; lines=[line for line in value.get("StandardOutputContent","").splitlines() if line.strip()]; record={} if allowed else json.loads(lines[0]); root=os.environ["DEPLOY_DIR"]; sha=os.environ["EXPECTED_SHA"]; digest=os.environ["EXPECTED_DIGEST"]; run=os.environ["EXPECTED_RUN_ID"]; attempt=os.environ["EXPECTED_RUN_ATTEMPT"]; canonical=r"^"+re.escape(root)+r"/[0-9a-f]{40}/[0-9a-f]{64}/app[.]jar$"; phase=os.environ["PHASE"]; assert allowed or (value.get("Status")=="Success" and len(lines)==1 and record["sha"]==sha and record["digest"]==digest and record["runId"]==run and record["runAttempt"]==attempt and record["acceptedGeneration"]==run+" "+attempt and re.fullmatch(canonical,record["currentJar"]) and record["mainJar"]==record["currentJar"] and record["mainPid"].isdigit() and int(record["mainPid"])>1 and record["mainDigest"]==record["mainJar"].split("/")[-2]); assert allowed or (phase!="deploy-reconciliation" or (record["candidate"]==root+"/"+sha+"/"+digest+"/app.jar" and record["markerIdentity"] in ("absent","owned") and record["action"] in ("no-promotion","complete","rollback") and record["rollbackStatus"]==0 and ((record["markerIdentity"]=="absent") == (record["action"]=="no-promotion")) and (record["markerIdentity"]=="absent" or (re.fullmatch(canonical,record["previous"]) and record["previousDigest"]==record["previous"].split("/")[-2] and record["currentJar"]==record["previous"])))); assert allowed or (phase!="public-rollback" or (record["markerIdentity"]=="sha="+sha+",digest="+digest+",run="+run+"/"+attempt and record["action"]=="rollback" and record["rollbackStatus"]==0 and record["candidate"]==root+"/"+sha+"/"+digest+"/app.jar" and re.fullmatch(canonical,record["previous"])))' ; then
+              failures="${failures}${failures:+,}${phase}:owned-transition"
+            fi
+          }
+          validate_owned_transition deploy-reconciliation deployment-evidence/deploy-reconciliation.json
+          validate_owned_transition public-rollback deployment-evidence/public-rollback.json
+          validate_control() {
+            phase="$1"; id_file="$2"; source="$3"
+            if test -s "$id_file" && test -f "$source" && ! PHASE="$phase" ID_FILE="$id_file" SOURCE="$source" python3 -c 'import json,os; command_id=open(os.environ["ID_FILE"]).read().strip(); value=json.load(open(os.environ["SOURCE"])); assert command_id and value["commandId"]==command_id and value["terminalStatus"] in ("Success","Cancelled","TimedOut","Failed")'; then
+              failures="${failures}${failures:+,}${phase}:control"
+            fi
+          }
+          validate_control deploy-reconciliation deploy-reconciliation-command-id.txt deployment-evidence/deploy-reconciliation-control.json
+          validate_control public-rollback rollback-command-id.txt deployment-evidence/public-rollback-control.json
           if ! EXPECTED_BUCKET="$DEPLOY_S3_BUCKET" EXPECTED_SHA="$GITHUB_SHA" EXPECTED_DIGEST='${{ steps.artifact_upload.outputs.digest }}' EXPECTED_VERSION='${{ steps.artifact_upload.outputs.version_id }}' python3 -c 'import json,os; value=json.load(open("deployment-evidence/artifact-upload-manifest.json")); digest=os.environ["EXPECTED_DIGEST"]; assert set(value)=={"bucket","key","versionId","disposition","digest"}; assert value["bucket"]==os.environ["EXPECTED_BUCKET"]; assert value["key"]=="bike-back/releases/"+os.environ["EXPECTED_SHA"]+"/"+digest+"/app.jar"; assert value["versionId"]==os.environ["EXPECTED_VERSION"]; assert value["digest"]==digest; assert value["disposition"]=="immutable-upload-or-verified-reuse"'; then failures="${failures:+$failures,}artifact-upload-manifest:validation"; fi
           cp -f public-health.json public-ready.json rollback-health.json rollback-ready.json rollback-command-id.txt deployment-evidence/ 2>/dev/null || true
           test -f deployment-evidence/artifact-upload-manifest.json && python3 -c 'import json; value=json.load(open("deployment-evidence/artifact-upload-manifest.json")); assert set(value)=={"bucket","key","versionId","disposition","digest"}; assert value["bucket"] and value["key"] and value["versionId"] and value["digest"]'
