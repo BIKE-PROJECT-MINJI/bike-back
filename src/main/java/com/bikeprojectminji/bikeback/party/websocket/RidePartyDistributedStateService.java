@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -39,10 +40,12 @@ public class RidePartyDistributedStateService {
     private final RidePartyDistributedEventPublisher publisher;
     private final String nodeId;
     private final Clock clock;
-    private final Map<String, OffsetDateTime> seen = new ConcurrentHashMap<>();
+    private final Map<String, OffsetDateTime> locallyPublishedEventIds = new ConcurrentHashMap<>();
+    private final Map<String, OffsetDateTime> remotelySeenEventIds = new ConcurrentHashMap<>();
     private final AtomicReference<RuntimeState> runtimeState =
-            new AtomicReference<>(new RuntimeState(RidePartySubscriberState.STARTING, true, null));
+            new AtomicReference<>(new RuntimeState(RidePartySubscriberState.STARTING, true, null, 0));
 
+    @Autowired
     public RidePartyDistributedStateService(ObjectMapper mapper, RidePartySocketSessionRegistry registry,
             RidePartyLocationAccessService access, RidePartyRedisPubSubEventBus publisher,
             @Value("${HOSTNAME:}") String ignoredHostName) {
@@ -58,11 +61,11 @@ public class RidePartyDistributedStateService {
 
     public void publishLocation(Long partyId, Long userId, Object payload) { publish(RidePartyDistributedEvent.EventType.LOCATION, partyId, userId, objectMapper.valueToTree(payload)); }
     public void publishMemberRevoked(Long partyId, Long userId) {
-        sessionRegistry.closeMemberBefore(partyId, userId, OffsetDateTime.now(clock));
+        revalidateMember(partyId, userId);
         publish(RidePartyDistributedEvent.EventType.MEMBER_REVOKED, partyId, userId, NullNode.instance);
     }
     public void publishPartyCanceled(Long partyId) {
-        sessionRegistry.closePartyBefore(partyId, OffsetDateTime.now(clock));
+        revalidateParty(partyId);
         publish(RidePartyDistributedEvent.EventType.PARTY_CANCELED, partyId, null, NullNode.instance);
     }
 
@@ -75,10 +78,10 @@ public class RidePartyDistributedStateService {
             RidePartyDistributedEvent event = objectMapper.treeToValue(root, RidePartyDistributedEvent.class);
             validate(event);
             if (nodeId.equals(event.sourceNodeId())) {
-                if (duplicate(event.eventId())) return;
+                if (isKnownLocalEvent(event.eventId())) return;
                 throw new IllegalArgumentException("Unknown same-source event.");
             }
-            if (duplicate(event.eventId())) return;
+            if (duplicateRemoteEvent(event.eventId())) return;
             apply(event);
         } catch (Exception exception) {
             degradeAndDrain("receive");
@@ -88,7 +91,7 @@ public class RidePartyDistributedStateService {
 
     public synchronized void onBusFailure(String operation) { degradeAndDrain(operation); }
     public synchronized void onSubscriptionStarting() {
-        transition(current -> current.withSubscriber(RidePartySubscriberState.RECOVERING, null));
+        transition(RuntimeState::beginRecovery);
     }
     public synchronized void onSubscriptionConfirmed() {
         if (revalidateAllSessions()) {
@@ -97,8 +100,18 @@ public class RidePartyDistributedStateService {
         }
     }
     public synchronized void onBusStopped() {
-        transition(current -> current.withSubscriber(RidePartySubscriberState.STOPPED, "stopped"));
+        transition(current -> current.closeAdmissions(RidePartySubscriberState.STOPPED, "stopped"));
         sessionRegistry.closeAll();
+    }
+    public synchronized boolean registerIfSubscriberHealthy(
+            Long partyId, Long userId, org.springframework.web.socket.WebSocketSession session
+    ) {
+        RuntimeState current = runtimeState.get();
+        if (current.subscriberState() != RidePartySubscriberState.HEALTHY) {
+            return false;
+        }
+        sessionRegistry.register(partyId, userId, session, current.admissionGeneration());
+        return true;
     }
     public boolean subscriberHealthy() { return runtimeState.get().subscriberState() == RidePartySubscriberState.HEALTHY; }
     public RidePartySubscriberState subscriberState() { return runtimeState.get().subscriberState(); }
@@ -110,7 +123,7 @@ public class RidePartyDistributedStateService {
     private void publish(RidePartyDistributedEvent.EventType type, Long partyId, Long userId, JsonNode payload) {
         RidePartyDistributedEvent event = new RidePartyDistributedEvent(1, UUID.randomUUID().toString(), nodeId, type, partyId, userId, payload, OffsetDateTime.now(clock));
         try {
-            rememberLocal(event.eventId());
+            rememberLocalEvent(event.eventId());
             publisher.publish(event);
             transition(current -> current.withPublish(true, subscriberHealthy() ? null : "subscriber"));
         } catch (RidePartyDistributedPublishException exception) {
@@ -123,20 +136,26 @@ public class RidePartyDistributedStateService {
     private void apply(RidePartyDistributedEvent event) throws Exception {
         switch (event.eventType()) {
             case LOCATION -> broadcast(event.partyId(), event.userId(), event.payload());
-            case MEMBER_REVOKED -> sessionRegistry.closeMemberBefore(event.partyId(), event.userId(), event.emittedAt());
-            case PARTY_CANCELED -> sessionRegistry.closePartyBefore(event.partyId(), event.emittedAt());
+            case MEMBER_REVOKED -> revalidateMember(event.partyId(), event.userId());
+            case PARTY_CANCELED -> revalidateParty(event.partyId());
         }
     }
     void revalidateMember(Long partyId, Long userId) {
         try {
-            for (RidePartySocketSessionRegistry.PartySocketSession entry : sessionRegistry.sessionsForParty(partyId))
-                if (entry.userId().equals(userId) && !locationAccessService.canShare(partyId, userId)) sessionRegistry.close(entry.session(), CloseStatus.POLICY_VIOLATION.withReason("member-left"));
+            for (RidePartySocketSessionRegistry.PartySocketSession entry : sessionRegistry.sessionsForParty(partyId)) {
+                if (entry.userId().equals(userId) && !locationAccessService.canShare(entry.partyId(), entry.userId())) {
+                    sessionRegistry.close(entry.session(), CloseStatus.POLICY_VIOLATION.withReason("member-left"));
+                }
+            }
         } catch (RuntimeException exception) { degradeAndDrain("revalidation"); throw exception; }
     }
     void revalidateParty(Long partyId) {
         try {
-            for (RidePartySocketSessionRegistry.PartySocketSession entry : sessionRegistry.sessionsForParty(partyId))
-                if (!locationAccessService.canShare(partyId, entry.userId())) sessionRegistry.close(entry.session(), CloseStatus.POLICY_VIOLATION.withReason("party-canceled"));
+            for (RidePartySocketSessionRegistry.PartySocketSession entry : sessionRegistry.sessionsForParty(partyId)) {
+                if (!locationAccessService.canShare(entry.partyId(), entry.userId())) {
+                    sessionRegistry.close(entry.session(), CloseStatus.POLICY_VIOLATION.withReason("party-canceled"));
+                }
+            }
         } catch (RuntimeException exception) { degradeAndDrain("revalidation"); throw exception; }
     }
     private void broadcast(Long partyId, Long senderUserId, JsonNode payload) throws Exception {
@@ -161,16 +180,30 @@ public class RidePartyDistributedStateService {
     }
     private synchronized void degradeAndDrain(String operation) {
         transition(current -> current.subscriberState() == RidePartySubscriberState.STOPPED
-                ? current : current.withSubscriber(RidePartySubscriberState.DEGRADED, operation));
+                ? current : current.closeAdmissions(RidePartySubscriberState.DEGRADED, operation));
         sessionRegistry.closeAll();
     }
-    private boolean duplicate(String id) {
-        OffsetDateTime now = OffsetDateTime.now(clock); seen.entrySet().removeIf(e -> e.getValue().plus(SEEN_EVENT_TTL).isBefore(now));
-        if (seen.putIfAbsent(id, now) != null) return true;
-        if (seen.size() > MAX_SEEN_EVENTS) seen.keySet().stream().limit(seen.size() - MAX_SEEN_EVENTS).forEach(seen::remove);
+    private boolean duplicateRemoteEvent(String id) {
+        return recordEvent(remotelySeenEventIds, id);
+    }
+    private boolean isKnownLocalEvent(String id) {
+        expireEvents(locallyPublishedEventIds);
+        return locallyPublishedEventIds.containsKey(id);
+    }
+    private void rememberLocalEvent(String id) {
+        recordEvent(locallyPublishedEventIds, id);
+    }
+    private boolean recordEvent(Map<String, OffsetDateTime> events, String id) {
+        OffsetDateTime now = OffsetDateTime.now(clock);
+        expireEvents(events);
+        if (events.putIfAbsent(id, now) != null) return true;
+        if (events.size() > MAX_SEEN_EVENTS) events.keySet().stream().limit(events.size() - MAX_SEEN_EVENTS).forEach(events::remove);
         return false;
     }
-    private void rememberLocal(String id) { duplicate(id); }
+    private void expireEvents(Map<String, OffsetDateTime> events) {
+        OffsetDateTime now = OffsetDateTime.now(clock);
+        events.entrySet().removeIf(e -> e.getValue().plus(SEEN_EVENT_TTL).isBefore(now));
+    }
     private void validate(RidePartyDistributedEvent e) throws Exception {
         if (e.eventType()==null || e.version()!=1 || e.eventId()==null || e.eventId().getBytes(java.nio.charset.StandardCharsets.UTF_8).length>MAX_EVENT_ID_BYTES || !isUuid(e.eventId())
                 || e.sourceNodeId()==null || e.sourceNodeId().getBytes(java.nio.charset.StandardCharsets.UTF_8).length>MAX_NODE_ID_BYTES || !e.sourceNodeId().matches("[A-Za-z0-9][A-Za-z0-9._:-]{2,159}")
@@ -219,8 +252,11 @@ public class RidePartyDistributedStateService {
         runtimeState.updateAndGet(transition);
     }
 
-    private record RuntimeState(RidePartySubscriberState subscriberState, boolean publishHealthy, String lastFailureOperation) {
-        RuntimeState withSubscriber(RidePartySubscriberState next, String failure) { return new RuntimeState(next, publishHealthy, failure); }
-        RuntimeState withPublish(boolean next, String failure) { return new RuntimeState(subscriberState, next, failure); }
+    private record RuntimeState(RidePartySubscriberState subscriberState, boolean publishHealthy, String lastFailureOperation,
+                                long admissionGeneration) {
+        RuntimeState beginRecovery() { return new RuntimeState(RidePartySubscriberState.RECOVERING, publishHealthy, null, admissionGeneration + 1); }
+        RuntimeState closeAdmissions(RidePartySubscriberState next, String failure) { return new RuntimeState(next, publishHealthy, failure, admissionGeneration + 1); }
+        RuntimeState withSubscriber(RidePartySubscriberState next, String failure) { return new RuntimeState(next, publishHealthy, failure, admissionGeneration); }
+        RuntimeState withPublish(boolean next, String failure) { return new RuntimeState(subscriberState, next, failure, admissionGeneration); }
     }
 }

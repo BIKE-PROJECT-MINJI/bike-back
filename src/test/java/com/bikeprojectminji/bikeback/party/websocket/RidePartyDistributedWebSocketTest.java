@@ -107,8 +107,8 @@ class RidePartyDistributedWebSocketTest {
         WebSocketSession canceled = openSession();
         nodeB.registry.register(20L, 2L, revoked);
         nodeB.registry.register(20L, 3L, canceled);
-        when(nodeB.access.canShare(20L, 2L)).thenReturn(true);
-        when(nodeB.access.canShare(20L, 3L)).thenReturn(true);
+        when(nodeB.access.canShare(20L, 2L)).thenReturn(false);
+        when(nodeB.access.canShare(20L, 3L)).thenReturn(false);
 
         nodeA.service.publishMemberRevoked(20L, 2L);
         nodeA.service.publishPartyCanceled(20L);
@@ -253,24 +253,34 @@ class RidePartyDistributedWebSocketTest {
         WebSocketSession session = openSession();
         registry.register(20L, 2L, session);
         RedisMessageListenerContainer container = mock(RedisMessageListenerContainer.class);
-        when(container.isRunning()).thenReturn(true);
-        when(container.isListening()).thenReturn(true, false, true);
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        when(redis.execute(org.mockito.ArgumentMatchers.<org.springframework.data.redis.core.RedisCallback<String>>any())).thenReturn("PONG")
+                .thenThrow(new IllegalStateException("redis disconnected"))
+                .thenReturn("PONG");
         RidePartyRedisPubSubEventBus bus = new RidePartyRedisPubSubEventBus(
-                mock(StringRedisTemplate.class), container, objectMapper, state::receive, state::onBusFailure,
+                redis, container, objectMapper, state::receive, state::onBusFailure,
                 state::onSubscriptionStarting, state::onSubscriptionConfirmed, state::onBusStopped);
 
         bus.start();
-        assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.RECOVERING);
-        bus.confirmSubscriptionOrFail();
+        org.mockito.ArgumentCaptor<org.springframework.data.redis.connection.MessageListener> listener =
+                org.mockito.ArgumentCaptor.forClass(org.springframework.data.redis.connection.MessageListener.class);
+        verify(container).addMessageListener(listener.capture(), org.mockito.ArgumentMatchers.any(Topic.class));
+        ((org.springframework.data.redis.connection.SubscriptionListener) listener.getValue())
+                .onChannelSubscribed(RidePartyRedisPubSubEventBus.TOPIC.getBytes(java.nio.charset.StandardCharsets.UTF_8), 1);
         assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.HEALTHY);
 
+        bus.confirmSubscriptionOrFail();
         bus.confirmSubscriptionOrFail();
         verify(session).close(CloseStatus.POLICY_VIOLATION.withReason("distributed-bus-unavailable"));
         assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.DEGRADED);
 
         bus.recoverIfNecessary();
-        assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.RECOVERING);
-        bus.confirmSubscriptionOrFail();
+        org.mockito.ArgumentCaptor<org.springframework.data.redis.connection.MessageListener> recoveredListener =
+                org.mockito.ArgumentCaptor.forClass(org.springframework.data.redis.connection.MessageListener.class);
+        verify(container, org.mockito.Mockito.times(2)).addMessageListener(
+                recoveredListener.capture(), org.mockito.ArgumentMatchers.any(Topic.class));
+        ((org.springframework.data.redis.connection.SubscriptionListener) recoveredListener.getAllValues().get(1))
+                .onChannelSubscribed(RidePartyRedisPubSubEventBus.TOPIC.getBytes(java.nio.charset.StandardCharsets.UTF_8), 1);
         assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.HEALTHY);
 
         bus.stop();
@@ -279,9 +289,6 @@ class RidePartyDistributedWebSocketTest {
 
         assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.STOPPED);
         assertThat(bus.isRunning()).isFalse();
-        verify(container, org.mockito.Mockito.times(2)).addMessageListener(
-                org.mockito.ArgumentMatchers.any(org.springframework.data.redis.connection.MessageListener.class),
-                org.mockito.ArgumentMatchers.any(Topic.class));
     }
 
     @Test
@@ -303,6 +310,62 @@ class RidePartyDistributedWebSocketTest {
         assertThat(bus.isRunning()).isTrue();
     }
 
+    @Test
+    @DisplayName("권한이 유지된 재가입 session은 revoke event timestamp 때문에 닫히지 않는다")
+    void preservesAuthorizedRejoinedSessionDuringRevoke() throws Exception {
+        FakeBus bus = new FakeBus();
+        Node nodeA = node("node-a", bus);
+        Node nodeB = node("node-b", bus);
+        WebSocketSession rejoined = openSession();
+        nodeB.registry.register(20L, 2L, rejoined);
+        when(nodeB.access.canShare(20L, 2L)).thenReturn(true);
+
+        nodeA.service.publishMemberRevoked(20L, 2L);
+
+        verify(rejoined, never()).close(org.mockito.ArgumentMatchers.any());
+        verify(nodeB.access).canShare(20L, 2L);
+    }
+
+    @Test
+    @DisplayName("remote eventId는 같은 local published ID여도 self echo로 무시하지 않는다")
+    void appliesRemoteEventWhoseIdMatchesLocalPublishedEvent() throws Exception {
+        RidePartyDistributedEvent[] published = new RidePartyDistributedEvent[1];
+        RidePartySocketSessionRegistry registry = new RidePartySocketSessionRegistry();
+        RidePartyLocationAccessService access = mock(RidePartyLocationAccessService.class);
+        RidePartyDistributedStateService state = new RidePartyDistributedStateService(
+                objectMapper, registry, access, event -> published[0] = event, "node-a", clock);
+        WebSocketSession rejoined = openSession();
+        registry.register(20L, 2L, rejoined);
+        when(access.canShare(20L, 2L)).thenReturn(true);
+
+        state.publishPartyCanceled(20L);
+        RidePartyDistributedEvent remote = new RidePartyDistributedEvent(
+                1, published[0].eventId(), "node-b", RidePartyDistributedEvent.EventType.PARTY_CANCELED,
+                20L, null, com.fasterxml.jackson.databind.node.NullNode.instance, java.time.OffsetDateTime.now(clock));
+        state.receive(objectMapper.writeValueAsString(remote));
+
+        verify(access, org.mockito.Mockito.times(2)).canShare(20L, 2L);
+        verify(rejoined, never()).close(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("admission lock은 HEALTHY register와 drain을 같은 generation에서 직렬화한다")
+    void atomicallyAdmitsOnlyHealthySessions() {
+        RidePartySocketSessionRegistry registry = new RidePartySocketSessionRegistry();
+        RidePartyDistributedStateService state = new RidePartyDistributedStateService(
+                objectMapper, registry, mock(RidePartyLocationAccessService.class),
+                RidePartyDistributedEventPublisher.noOp(), "node-a", clock);
+        WebSocketSession admitted = openSession();
+        WebSocketSession rejected = openSession();
+
+        state.onSubscriptionStarting();
+        state.onSubscriptionConfirmed();
+        assertThat(state.registerIfSubscriberHealthy(20L, 2L, admitted)).isTrue();
+        state.onBusFailure("ping");
+
+        assertThat(registry.sessionsForParty(20L)).isEmpty();
+        assertThat(state.registerIfSubscriberHealthy(20L, 3L, rejected)).isFalse();
+    }
     private Node node(String nodeId, FakeBus bus) {
         RidePartySocketSessionRegistry registry = new RidePartySocketSessionRegistry();
         RidePartyLocationAccessService access = mock(RidePartyLocationAccessService.class);

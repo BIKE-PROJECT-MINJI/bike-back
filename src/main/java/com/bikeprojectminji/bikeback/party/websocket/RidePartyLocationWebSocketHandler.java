@@ -61,10 +61,6 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         Long partyId = extractPartyId(session.getUri());
-        if (distributedStateService != null && !distributedStateService.subscriberHealthy()) {
-            sessionRegistry.close(session, CloseStatus.POLICY_VIOLATION.withReason("distributed subscriber unavailable"));
-            return;
-        }
         Optional<RidePartySocketTokenPayload> token = socketTokenService.consume(socketToken(session.getUri()), partyId);
         if (token.isEmpty()) {
             sessionRegistry.close(session, CloseStatus.POLICY_VIOLATION.withReason("invalid party socket token"));
@@ -76,7 +72,13 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
         }
         session.getAttributes().put(PARTY_ID_ATTRIBUTE, partyId);
         session.getAttributes().put(USER_ID_ATTRIBUTE, token.get().userId());
-        sessionRegistry.register(partyId, token.get().userId(), session);
+        boolean registered = distributedStateService == null
+                ? registerLocally(partyId, token.get().userId(), session)
+                : distributedStateService.registerIfSubscriberHealthy(partyId, token.get().userId(), session);
+        if (!registered) {
+            sessionRegistry.close(session, CloseStatus.POLICY_VIOLATION.withReason("distributed subscriber unavailable"));
+            return;
+        }
         sessionRegistry.sessionsForParty(partyId).stream().filter(entry -> entry.session().equals(session)).findFirst()
                 .ifPresent(entry -> sessionRegistry.send(entry, uncheckedMessage(Map.of("type", "connected", "partyId", partyId))));
     }
@@ -122,6 +124,10 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
         sessionRegistry.unregister(session);
     }
 
+    private boolean registerLocally(Long partyId, Long userId, WebSocketSession session) {
+        sessionRegistry.register(partyId, userId, session);
+        return true;
+    }
     private void broadcast(Long partyId, Object payload) throws Exception {
         TextMessage message = toMessage(payload);
         for (RidePartySocketSessionRegistry.PartySocketSession entry : sessionRegistry.sessionsForParty(partyId)) {

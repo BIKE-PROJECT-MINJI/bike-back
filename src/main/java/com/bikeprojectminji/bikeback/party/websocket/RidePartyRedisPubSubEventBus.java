@@ -2,14 +2,17 @@ package com.bikeprojectminji.bikeback.party.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
+import org.springframework.data.redis.connection.SubscriptionListener;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -32,10 +35,13 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
     private final Runnable stoppedConsumer;
     private volatile boolean running;
     private volatile long generation;
+    private volatile long confirmedGeneration = -1;
+    private volatile long subscriptionStartedAtNanos;
     private volatile MessageListener activeListener;
     private volatile boolean listenerRegistered;
     private volatile boolean recoveryAllowed = true;
 
+    @Autowired
     public RidePartyRedisPubSubEventBus(
             StringRedisTemplate redisTemplate,
             @Qualifier("ridePartyRedisMessageListenerContainer") RedisMessageListenerContainer listenerContainer,
@@ -84,6 +90,7 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
         this.recoveringConsumer = recoveringConsumer;
         this.readyConsumer = readyConsumer;
         this.stoppedConsumer = stoppedConsumer;
+        this.listenerContainer.setErrorHandler(error -> fail("listener"));
     }
 
     @Override
@@ -136,7 +143,9 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
                 listenerContainer.start();
             }
             long registeredGeneration = ++generation;
-            activeListener = (message, pattern) -> receive(registeredGeneration, message);
+            confirmedGeneration = -1;
+            subscriptionStartedAtNanos = System.nanoTime();
+            activeListener = new SubscriptionAwareListener(registeredGeneration);
             listenerContainer.addMessageListener(activeListener, new ChannelTopic(TOPIC));
             listenerRegistered = true;
             running = true;
@@ -176,17 +185,34 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
     @Scheduled(fixedDelay = 1_000)
     synchronized void confirmSubscriptionOrFail() {
         if (!running) return;
-        if (!listenerContainer.isRunning() || !listenerContainer.isListening()) {
-            fail("disconnect");
-            return;
+        try {
+            String response = redisTemplate.execute(
+                    (org.springframework.data.redis.core.RedisCallback<String>) connection -> connection.ping());
+            if (!"PONG".equalsIgnoreCase(response)) {
+                throw new IllegalStateException("Redis ping did not return PONG.");
+            }
+            if (confirmedGeneration != generation
+                    && System.nanoTime() - subscriptionStartedAtNanos >= java.util.concurrent.TimeUnit.SECONDS.toNanos(30)) {
+                fail("subscribe-timeout");
+            }
+        } catch (RuntimeException exception) {
+            fail("ping");
         }
-        readyConsumer.run();
     }
 
     @Override
     public void onMessage(Message message, byte[] pattern) {
         receive(generation, message);
     }
+
+    private synchronized void subscriptionConfirmed(long callbackGeneration) {
+        if (!running || callbackGeneration != generation) {
+            return;
+        }
+        confirmedGeneration = callbackGeneration;
+        readyConsumer.run();
+    }
+
     private void receive(long callbackGeneration, Message message) {
         if (!running || callbackGeneration != generation) {
             return;
@@ -195,6 +221,26 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
             inboundMessageConsumer.accept(new String(message.getBody(), StandardCharsets.UTF_8));
         } catch (RuntimeException exception) {
             fail("listener");
+        }
+    }
+
+    private final class SubscriptionAwareListener implements MessageListener, SubscriptionListener {
+        private final long callbackGeneration;
+
+        private SubscriptionAwareListener(long callbackGeneration) {
+            this.callbackGeneration = callbackGeneration;
+        }
+
+        @Override
+        public void onMessage(Message message, byte[] pattern) {
+            receive(callbackGeneration, message);
+        }
+
+        @Override
+        public void onChannelSubscribed(byte[] channel, long count) {
+            if (Arrays.equals(channel, TOPIC.getBytes(StandardCharsets.UTF_8))) {
+                subscriptionConfirmed(callbackGeneration);
+            }
         }
     }
 

@@ -19,7 +19,12 @@ public class RidePartySocketSessionRegistry {
     private final Set<WebSocketSession> closeStarted = ConcurrentHashMap.newKeySet();
 
     public void register(Long partyId, Long userId, WebSocketSession session) {
-        sessions.add(new PartySocketSession(partyId, userId, session, OffsetDateTime.now(), generations.incrementAndGet()));
+        register(partyId, userId, session, 0);
+    }
+
+    public void register(Long partyId, Long userId, WebSocketSession session, long admissionGeneration) {
+        sessions.add(new PartySocketSession(
+                partyId, userId, session, OffsetDateTime.now(), generations.incrementAndGet(), admissionGeneration));
     }
 
     public void unregister(WebSocketSession session) {
@@ -116,6 +121,6 @@ public class RidePartySocketSessionRegistry {
     }
 
     public record PartySocketSession(Long partyId, Long userId, WebSocketSession session,
-                                     OffsetDateTime connectedAt, long generation) {
+                                     OffsetDateTime connectedAt, long generation, long admissionGeneration) {
     }
 }
