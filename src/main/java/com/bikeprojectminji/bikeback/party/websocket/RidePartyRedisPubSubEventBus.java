@@ -3,7 +3,11 @@ package com.bikeprojectminji.bikeback.party.websocket;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +27,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPublisher, MessageListener, SmartLifecycle {
 
     public static final String TOPIC = "bike:party:websocket:v1";
+    public static final String HEALTH_TOPIC = TOPIC + ":health";
+    private static final long HEARTBEAT_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(30);
     private static final Logger log = LoggerFactory.getLogger(RidePartyRedisPubSubEventBus.class);
 
     private final StringRedisTemplate redisTemplate;
@@ -33,10 +39,15 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
     private final Runnable recoveringConsumer;
     private final Runnable readyConsumer;
     private final Runnable stoppedConsumer;
+    private final LongSupplier nanoTime;
+    private final long heartbeatTimeoutNanos;
     private volatile boolean running;
     private volatile long generation;
     private volatile long confirmedGeneration = -1;
+    private volatile long readyGeneration = -1;
     private volatile long subscriptionStartedAtNanos;
+    private volatile long lastHeartbeatEchoAtNanos;
+    private volatile String heartbeatNonce;
     private volatile MessageListener activeListener;
     private volatile boolean listenerRegistered;
     private volatile boolean recoveryAllowed = true;
@@ -81,7 +92,16 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
     }
 
     RidePartyRedisPubSubEventBus(StringRedisTemplate redisTemplate, RedisMessageListenerContainer listenerContainer,
-            ObjectMapper objectMapper, Consumer<String> inboundMessageConsumer, Consumer<String> failureConsumer, Runnable recoveringConsumer, Runnable readyConsumer, Runnable stoppedConsumer) {
+            ObjectMapper objectMapper, Consumer<String> inboundMessageConsumer, Consumer<String> failureConsumer,
+            Runnable recoveringConsumer, Runnable readyConsumer, Runnable stoppedConsumer) {
+        this(redisTemplate, listenerContainer, objectMapper, inboundMessageConsumer, failureConsumer,
+                recoveringConsumer, readyConsumer, stoppedConsumer, System::nanoTime, HEARTBEAT_TIMEOUT_NANOS);
+    }
+
+    RidePartyRedisPubSubEventBus(StringRedisTemplate redisTemplate, RedisMessageListenerContainer listenerContainer,
+            ObjectMapper objectMapper, Consumer<String> inboundMessageConsumer, Consumer<String> failureConsumer,
+            Runnable recoveringConsumer, Runnable readyConsumer, Runnable stoppedConsumer,
+            LongSupplier nanoTime, long heartbeatTimeoutNanos) {
         this.redisTemplate = redisTemplate;
         this.listenerContainer = listenerContainer;
         this.objectMapper = objectMapper;
@@ -90,6 +110,8 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
         this.recoveringConsumer = recoveringConsumer;
         this.readyConsumer = readyConsumer;
         this.stoppedConsumer = stoppedConsumer;
+        this.nanoTime = nanoTime;
+        this.heartbeatTimeoutNanos = heartbeatTimeoutNanos;
         this.listenerContainer.setErrorHandler(error -> fail("listener"));
     }
 
@@ -121,7 +143,7 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
         generation++;
         try {
             if (removeListener) {
-                listenerContainer.removeMessageListener(listenerToRemove, new ChannelTopic(TOPIC));
+                listenerContainer.removeMessageListener(listenerToRemove, topics());
             }
         } catch (RuntimeException exception) {
             log.warn("party websocket redis listener removal failed during stop", exception);
@@ -144,9 +166,12 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
             }
             long registeredGeneration = ++generation;
             confirmedGeneration = -1;
-            subscriptionStartedAtNanos = System.nanoTime();
+            readyGeneration = -1;
+            subscriptionStartedAtNanos = nanoTime.getAsLong();
+            lastHeartbeatEchoAtNanos = 0;
+            heartbeatNonce = UUID.randomUUID().toString();
             activeListener = new SubscriptionAwareListener(registeredGeneration);
-            listenerContainer.addMessageListener(activeListener, new ChannelTopic(TOPIC));
+            listenerContainer.addMessageListener(activeListener, topics());
             listenerRegistered = true;
             running = true;
             recoveringConsumer.run();
@@ -191,9 +216,15 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
             if (!"PONG".equalsIgnoreCase(response)) {
                 throw new IllegalStateException("Redis ping did not return PONG.");
             }
-            if (confirmedGeneration != generation
-                    && System.nanoTime() - subscriptionStartedAtNanos >= java.util.concurrent.TimeUnit.SECONDS.toNanos(30)) {
-                fail("subscribe-timeout");
+            Long recipients = redisTemplate.convertAndSend(HEALTH_TOPIC, heartbeatNonce);
+            if (recipients == null || recipients <= 0) {
+                throw new IllegalStateException("Redis Pub/Sub health channel has no active recipients.");
+            }
+            long now = nanoTime.getAsLong();
+            if (now - subscriptionStartedAtNanos >= heartbeatTimeoutNanos
+                    && (confirmedGeneration != generation || lastHeartbeatEchoAtNanos == 0
+                    || now - lastHeartbeatEchoAtNanos >= heartbeatTimeoutNanos)) {
+                fail("heartbeat");
             }
         } catch (RuntimeException exception) {
             fail("ping");
@@ -206,22 +237,47 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
     }
 
     private synchronized void subscriptionConfirmed(long callbackGeneration) {
-        if (!running || callbackGeneration != generation) {
+        if (!isCurrentGeneration(callbackGeneration)) {
             return;
         }
         confirmedGeneration = callbackGeneration;
-        readyConsumer.run();
+        completeReadiness(callbackGeneration);
     }
 
-    private void receive(long callbackGeneration, Message message) {
-        if (!running || callbackGeneration != generation) {
+    private synchronized void receive(long callbackGeneration, Message message) {
+        if (!isCurrentGeneration(callbackGeneration)) {
+            return;
+        }
+        if (Arrays.equals(message.getChannel(), HEALTH_TOPIC.getBytes(StandardCharsets.UTF_8))) {
+            if (heartbeatNonce.equals(new String(message.getBody(), StandardCharsets.UTF_8))) {
+                lastHeartbeatEchoAtNanos = nanoTime.getAsLong();
+                completeReadiness(callbackGeneration);
+            }
             return;
         }
         try {
             inboundMessageConsumer.accept(new String(message.getBody(), StandardCharsets.UTF_8));
         } catch (RuntimeException exception) {
-            fail("listener");
+            if (isCurrentGeneration(callbackGeneration)) {
+                fail("listener");
+            }
         }
+    }
+
+    private boolean isCurrentGeneration(long callbackGeneration) {
+        return running && callbackGeneration == generation;
+    }
+
+    private void completeReadiness(long callbackGeneration) {
+        if (confirmedGeneration == callbackGeneration && lastHeartbeatEchoAtNanos >= subscriptionStartedAtNanos
+                && readyGeneration != callbackGeneration) {
+            readyGeneration = callbackGeneration;
+            readyConsumer.run();
+        }
+    }
+
+    private List<ChannelTopic> topics() {
+        return List.of(new ChannelTopic(TOPIC), new ChannelTopic(HEALTH_TOPIC));
     }
 
     private final class SubscriptionAwareListener implements MessageListener, SubscriptionListener {
@@ -252,7 +308,7 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
         generation++;
         if (failedListener != null) {
             try {
-                listenerContainer.removeMessageListener(failedListener, new ChannelTopic(TOPIC));
+                listenerContainer.removeMessageListener(failedListener, topics());
             } catch (RuntimeException ignored) {
                 // Redis may already have discarded the failed registration.
             }

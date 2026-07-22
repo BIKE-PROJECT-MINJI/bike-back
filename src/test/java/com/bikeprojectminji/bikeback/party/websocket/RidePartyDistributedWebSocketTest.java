@@ -14,6 +14,10 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -216,14 +220,14 @@ class RidePartyDistributedWebSocketTest {
 
         bus.start();
         org.mockito.ArgumentCaptor<org.springframework.data.redis.connection.MessageListener> listener = org.mockito.ArgumentCaptor.forClass(org.springframework.data.redis.connection.MessageListener.class);
-        verify(container).addMessageListener(listener.capture(), org.mockito.ArgumentMatchers.any(Topic.class));
+        verify(container).addMessageListener(listener.capture(), anyTopics());
         listener.getValue().onMessage(mock(org.springframework.data.redis.connection.Message.class), null);
         bus.recoverIfNecessary();
 
         assertThat(failures).containsExactly("listener");
         assertThat(bus.isRunning()).isTrue();
-        verify(container).removeMessageListener(org.mockito.ArgumentMatchers.same(listener.getValue()), org.mockito.ArgumentMatchers.any(Topic.class));
-        verify(container, org.mockito.Mockito.times(2)).addMessageListener(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(Topic.class));
+        verify(container).removeMessageListener(org.mockito.ArgumentMatchers.same(listener.getValue()), anyTopics());
+        verify(container, org.mockito.Mockito.times(2)).addMessageListener(org.mockito.ArgumentMatchers.any(), anyTopics());
     }
 
     @Test
@@ -257,6 +261,8 @@ class RidePartyDistributedWebSocketTest {
         when(redis.execute(org.mockito.ArgumentMatchers.<org.springframework.data.redis.core.RedisCallback<String>>any())).thenReturn("PONG")
                 .thenThrow(new IllegalStateException("redis disconnected"))
                 .thenReturn("PONG");
+        when(redis.convertAndSend(org.mockito.ArgumentMatchers.eq(RidePartyRedisPubSubEventBus.HEALTH_TOPIC),
+                org.mockito.ArgumentMatchers.anyString())).thenReturn(1L);
         RidePartyRedisPubSubEventBus bus = new RidePartyRedisPubSubEventBus(
                 redis, container, objectMapper, state::receive, state::onBusFailure,
                 state::onSubscriptionStarting, state::onSubscriptionConfirmed, state::onBusStopped);
@@ -264,12 +270,15 @@ class RidePartyDistributedWebSocketTest {
         bus.start();
         org.mockito.ArgumentCaptor<org.springframework.data.redis.connection.MessageListener> listener =
                 org.mockito.ArgumentCaptor.forClass(org.springframework.data.redis.connection.MessageListener.class);
-        verify(container).addMessageListener(listener.capture(), org.mockito.ArgumentMatchers.any(Topic.class));
+        verify(container).addMessageListener(listener.capture(), anyTopics());
         ((org.springframework.data.redis.connection.SubscriptionListener) listener.getValue())
                 .onChannelSubscribed(RidePartyRedisPubSubEventBus.TOPIC.getBytes(java.nio.charset.StandardCharsets.UTF_8), 1);
+        bus.confirmSubscriptionOrFail();
+        org.mockito.ArgumentCaptor<String> nonce = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(redis).convertAndSend(org.mockito.ArgumentMatchers.eq(RidePartyRedisPubSubEventBus.HEALTH_TOPIC), nonce.capture());
+        echoHealth(listener.getValue(), nonce.getValue());
         assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.HEALTHY);
 
-        bus.confirmSubscriptionOrFail();
         bus.confirmSubscriptionOrFail();
         verify(session).close(CloseStatus.POLICY_VIOLATION.withReason("distributed-bus-unavailable"));
         assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.DEGRADED);
@@ -278,9 +287,13 @@ class RidePartyDistributedWebSocketTest {
         org.mockito.ArgumentCaptor<org.springframework.data.redis.connection.MessageListener> recoveredListener =
                 org.mockito.ArgumentCaptor.forClass(org.springframework.data.redis.connection.MessageListener.class);
         verify(container, org.mockito.Mockito.times(2)).addMessageListener(
-                recoveredListener.capture(), org.mockito.ArgumentMatchers.any(Topic.class));
+                recoveredListener.capture(), anyTopics());
         ((org.springframework.data.redis.connection.SubscriptionListener) recoveredListener.getAllValues().get(1))
                 .onChannelSubscribed(RidePartyRedisPubSubEventBus.TOPIC.getBytes(java.nio.charset.StandardCharsets.UTF_8), 1);
+        bus.confirmSubscriptionOrFail();
+        verify(redis, org.mockito.Mockito.times(2)).convertAndSend(
+                org.mockito.ArgumentMatchers.eq(RidePartyRedisPubSubEventBus.HEALTH_TOPIC), nonce.capture());
+        echoHealth(recoveredListener.getAllValues().get(1), nonce.getAllValues().get(nonce.getAllValues().size() - 1));
         assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.HEALTHY);
 
         bus.stop();
@@ -304,9 +317,9 @@ class RidePartyDistributedWebSocketTest {
         bus.start();
 
         verify(container, org.mockito.Mockito.times(2)).addMessageListener(
-                org.mockito.ArgumentMatchers.any(org.springframework.data.redis.connection.MessageListener.class), org.mockito.ArgumentMatchers.any(Topic.class));
+                org.mockito.ArgumentMatchers.any(org.springframework.data.redis.connection.MessageListener.class), anyTopics());
         verify(container).removeMessageListener(
-                org.mockito.ArgumentMatchers.any(org.springframework.data.redis.connection.MessageListener.class), org.mockito.ArgumentMatchers.any(Topic.class));
+                org.mockito.ArgumentMatchers.any(org.springframework.data.redis.connection.MessageListener.class), anyTopics());
         assertThat(bus.isRunning()).isTrue();
     }
 
@@ -365,6 +378,130 @@ class RidePartyDistributedWebSocketTest {
 
         assertThat(registry.sessionsForParty(20L)).isEmpty();
         assertThat(state.registerIfSubscriberHealthy(20L, 3L, rejected)).isFalse();
+    }
+    @Test
+    @DisplayName("subscription callback만으로는 ready가 아니며 self heartbeat echo가 admission을 연다")
+    void requiresHeartbeatEchoAfterSubscriptionCallback() {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        RedisMessageListenerContainer container = mock(RedisMessageListenerContainer.class);
+        AtomicInteger ready = new AtomicInteger();
+        when(redis.execute(org.mockito.ArgumentMatchers.<org.springframework.data.redis.core.RedisCallback<String>>any())).thenReturn("PONG");
+        when(redis.convertAndSend(org.mockito.ArgumentMatchers.eq(RidePartyRedisPubSubEventBus.HEALTH_TOPIC),
+                org.mockito.ArgumentMatchers.anyString())).thenReturn(1L);
+        RidePartyRedisPubSubEventBus bus = new RidePartyRedisPubSubEventBus(
+                redis, container, objectMapper, raw -> { }, ignored -> { }, () -> { }, ready::incrementAndGet, () -> { });
+
+        bus.start();
+        org.mockito.ArgumentCaptor<org.springframework.data.redis.connection.MessageListener> listener =
+                org.mockito.ArgumentCaptor.forClass(org.springframework.data.redis.connection.MessageListener.class);
+        verify(container).addMessageListener(listener.capture(), anyTopics());
+        ((org.springframework.data.redis.connection.SubscriptionListener) listener.getValue())
+                .onChannelSubscribed(RidePartyRedisPubSubEventBus.TOPIC.getBytes(java.nio.charset.StandardCharsets.UTF_8), 1);
+        assertThat(ready.get()).isZero();
+
+        bus.confirmSubscriptionOrFail();
+        org.mockito.ArgumentCaptor<String> nonce = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(redis).convertAndSend(org.mockito.ArgumentMatchers.eq(RidePartyRedisPubSubEventBus.HEALTH_TOPIC), nonce.capture());
+        echoHealth(listener.getValue(), nonce.getValue());
+
+        assertThat(ready.get()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("PING이 PONG이어도 Pub/Sub heartbeat echo가 사라지면 drain하고 새 generation을 등록한다")
+    void drainsAndRecoversWhenPubSubHeartbeatIsLostWhilePingSucceeds() throws Exception {
+        AtomicLong now = new AtomicLong(1);
+        RidePartySocketSessionRegistry registry = new RidePartySocketSessionRegistry();
+        RidePartyLocationAccessService access = mock(RidePartyLocationAccessService.class);
+        RidePartyDistributedStateService state = new RidePartyDistributedStateService(
+                objectMapper, registry, access, RidePartyDistributedEventPublisher.noOp(), "node-a", clock);
+        when(access.canShare(20L, 2L)).thenReturn(true);
+        WebSocketSession session = openSession();
+        registry.register(20L, 2L, session);
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        RedisMessageListenerContainer container = mock(RedisMessageListenerContainer.class);
+        when(redis.execute(org.mockito.ArgumentMatchers.<org.springframework.data.redis.core.RedisCallback<String>>any())).thenReturn("PONG");
+        when(redis.convertAndSend(org.mockito.ArgumentMatchers.eq(RidePartyRedisPubSubEventBus.HEALTH_TOPIC),
+                org.mockito.ArgumentMatchers.anyString())).thenReturn(1L);
+        RidePartyRedisPubSubEventBus bus = new RidePartyRedisPubSubEventBus(
+                redis, container, objectMapper, state::receive, state::onBusFailure, state::onSubscriptionStarting,
+                state::onSubscriptionConfirmed, state::onBusStopped, now::get, TimeUnit.SECONDS.toNanos(30));
+
+        bus.start();
+        org.mockito.ArgumentCaptor<org.springframework.data.redis.connection.MessageListener> listener =
+                org.mockito.ArgumentCaptor.forClass(org.springframework.data.redis.connection.MessageListener.class);
+        verify(container).addMessageListener(listener.capture(), anyTopics());
+        ((org.springframework.data.redis.connection.SubscriptionListener) listener.getValue())
+                .onChannelSubscribed(RidePartyRedisPubSubEventBus.TOPIC.getBytes(java.nio.charset.StandardCharsets.UTF_8), 1);
+        bus.confirmSubscriptionOrFail();
+        org.mockito.ArgumentCaptor<String> nonce = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(redis).convertAndSend(org.mockito.ArgumentMatchers.eq(RidePartyRedisPubSubEventBus.HEALTH_TOPIC), nonce.capture());
+        echoHealth(listener.getValue(), nonce.getValue());
+        assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.HEALTHY);
+
+        now.addAndGet(TimeUnit.SECONDS.toNanos(31));
+        bus.confirmSubscriptionOrFail();
+
+        verify(session).close(CloseStatus.POLICY_VIOLATION.withReason("distributed-bus-unavailable"));
+        assertThat(state.subscriberState()).isEqualTo(RidePartySubscriberState.DEGRADED);
+        bus.recoverIfNecessary();
+        verify(container, org.mockito.Mockito.times(2)).addMessageListener(
+                org.mockito.ArgumentMatchers.any(org.springframework.data.redis.connection.MessageListener.class),
+                anyTopics());
+    }
+
+    @Test
+    @DisplayName("in-flight old generation callback은 ping failure와 restart를 교차 처리하지 않는다")
+    void fencesInFlightOldGenerationCallbackAcrossRestart() throws Exception {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        RedisMessageListenerContainer container = mock(RedisMessageListenerContainer.class);
+        List<String> failures = new ArrayList<>();
+        CountDownLatch inboundStarted = new CountDownLatch(1);
+        CountDownLatch releaseInbound = new CountDownLatch(1);
+        RidePartyRedisPubSubEventBus bus = new RidePartyRedisPubSubEventBus(
+                redis, container, objectMapper, raw -> {
+                    inboundStarted.countDown();
+                    try {
+                        releaseInbound.await(2, TimeUnit.SECONDS);
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                    }
+                    throw new IllegalStateException("old callback failure");
+                }, failures::add, () -> { }, () -> { }, () -> { });
+
+        bus.start();
+        org.mockito.ArgumentCaptor<org.springframework.data.redis.connection.MessageListener> listener =
+                org.mockito.ArgumentCaptor.forClass(org.springframework.data.redis.connection.MessageListener.class);
+        verify(container).addMessageListener(listener.capture(), anyTopics());
+        org.springframework.data.redis.connection.Message data = mock(org.springframework.data.redis.connection.Message.class);
+        when(data.getChannel()).thenReturn(RidePartyRedisPubSubEventBus.TOPIC.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(data.getBody()).thenReturn("location".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Thread oldCallback = new Thread(() -> listener.getValue().onMessage(data, null));
+        oldCallback.start();
+        assertThat(inboundStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+        Thread ping = new Thread(bus::confirmSubscriptionOrFail);
+        ping.start();
+        releaseInbound.countDown();
+        oldCallback.join(2_000);
+        ping.join(2_000);
+        bus.recoverIfNecessary();
+        listener.getValue().onMessage(data, null);
+
+        assertThat(failures).containsExactly("listener");
+        assertThat(bus.isRunning()).isTrue();
+        verify(container, org.mockito.Mockito.times(2)).addMessageListener(
+                org.mockito.ArgumentMatchers.any(org.springframework.data.redis.connection.MessageListener.class),
+                anyTopics());
+    }
+    private java.util.Collection<? extends Topic> anyTopics() {
+        return org.mockito.ArgumentMatchers.any();
+    }
+    private void echoHealth(org.springframework.data.redis.connection.MessageListener listener, String nonce) {
+        org.springframework.data.redis.connection.Message healthMessage = mock(org.springframework.data.redis.connection.Message.class);
+        when(healthMessage.getChannel()).thenReturn(RidePartyRedisPubSubEventBus.HEALTH_TOPIC.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(healthMessage.getBody()).thenReturn(nonce.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        listener.onMessage(healthMessage, null);
     }
     private Node node(String nodeId, FakeBus bus) {
         RidePartySocketSessionRegistry registry = new RidePartySocketSessionRegistry();
