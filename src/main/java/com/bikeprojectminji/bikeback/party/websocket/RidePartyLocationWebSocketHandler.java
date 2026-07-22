@@ -13,6 +13,7 @@ import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -32,6 +33,7 @@ public class RidePartyLocationWebSocketHandler extends TextWebSocketHandler {
     private final RidePartySocketSessionRegistry sessionRegistry;
     private final RidePartyDistributedStateService distributedStateService;
 
+    @Autowired
     public RidePartyLocationWebSocketHandler(
             ObjectMapper objectMapper,
             RidePartySocketTokenService socketTokenService,

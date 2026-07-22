@@ -25,5 +25,8 @@ auth:
 
 bike:
   app-role: api
+  party:
+    redis:
+      auto-start: false
   rate-limit:
     store: memory
