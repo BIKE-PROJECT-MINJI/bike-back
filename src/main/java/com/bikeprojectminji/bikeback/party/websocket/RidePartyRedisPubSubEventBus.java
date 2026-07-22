@@ -47,7 +47,8 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
     private volatile long readyGeneration = -1;
     private volatile long subscriptionStartedAtNanos;
     private volatile long lastHeartbeatEchoAtNanos;
-    private volatile String heartbeatNonce;
+    private volatile String pendingHeartbeatNonce;
+    private volatile long pendingHeartbeatSentAtNanos;
     private volatile MessageListener activeListener;
     private volatile boolean listenerRegistered;
     private volatile boolean recoveryAllowed = true;
@@ -139,6 +140,7 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
         boolean removeListener = listenerRegistered;
         listenerRegistered = false;
         activeListener = null;
+        pendingHeartbeatNonce = null;
         running = false;
         generation++;
         try {
@@ -169,11 +171,12 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
             readyGeneration = -1;
             subscriptionStartedAtNanos = nanoTime.getAsLong();
             lastHeartbeatEchoAtNanos = 0;
-            heartbeatNonce = UUID.randomUUID().toString();
+            pendingHeartbeatNonce = null;
+            pendingHeartbeatSentAtNanos = 0;
             activeListener = new SubscriptionAwareListener(registeredGeneration);
-            listenerContainer.addMessageListener(activeListener, topics());
             listenerRegistered = true;
             running = true;
+            listenerContainer.addMessageListener(activeListener, topics());
             recoveringConsumer.run();
         } catch (RuntimeException exception) {
             fail("subscribe");
@@ -210,24 +213,36 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
     @Scheduled(fixedDelay = 1_000)
     synchronized void confirmSubscriptionOrFail() {
         if (!running) return;
+        long now = nanoTime.getAsLong();
+        if ((pendingHeartbeatNonce != null && now - pendingHeartbeatSentAtNanos >= heartbeatTimeoutNanos)
+                || (lastHeartbeatEchoAtNanos != 0 && now - lastHeartbeatEchoAtNanos >= heartbeatTimeoutNanos)) {
+            fail("heartbeat");
+            return;
+        }
         try {
             String response = redisTemplate.execute(
                     (org.springframework.data.redis.core.RedisCallback<String>) connection -> connection.ping());
             if (!"PONG".equalsIgnoreCase(response)) {
                 throw new IllegalStateException("Redis ping did not return PONG.");
             }
-            Long recipients = redisTemplate.convertAndSend(HEALTH_TOPIC, heartbeatNonce);
+        } catch (RuntimeException exception) {
+            fail("ping");
+            return;
+        }
+        if (pendingHeartbeatNonce != null) {
+            return;
+        }
+        String nonce = UUID.randomUUID().toString();
+        pendingHeartbeatNonce = nonce;
+        pendingHeartbeatSentAtNanos = now;
+        try {
+            Long recipients = redisTemplate.convertAndSend(HEALTH_TOPIC, nonce);
             if (recipients == null || recipients <= 0) {
                 throw new IllegalStateException("Redis Pub/Sub health channel has no active recipients.");
             }
-            long now = nanoTime.getAsLong();
-            if (now - subscriptionStartedAtNanos >= heartbeatTimeoutNanos
-                    && (confirmedGeneration != generation || lastHeartbeatEchoAtNanos == 0
-                    || now - lastHeartbeatEchoAtNanos >= heartbeatTimeoutNanos)) {
-                fail("heartbeat");
-            }
         } catch (RuntimeException exception) {
-            fail("ping");
+            pendingHeartbeatNonce = null;
+            fail("heartbeat-publish");
         }
     }
 
@@ -249,7 +264,9 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
             return;
         }
         if (Arrays.equals(message.getChannel(), HEALTH_TOPIC.getBytes(StandardCharsets.UTF_8))) {
-            if (heartbeatNonce.equals(new String(message.getBody(), StandardCharsets.UTF_8))) {
+            String receivedNonce = new String(message.getBody(), StandardCharsets.UTF_8);
+            if (receivedNonce.equals(pendingHeartbeatNonce)) {
+                pendingHeartbeatNonce = null;
                 lastHeartbeatEchoAtNanos = nanoTime.getAsLong();
                 completeReadiness(callbackGeneration);
             }
@@ -304,6 +321,7 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
         MessageListener failedListener = activeListener;
         listenerRegistered = false;
         activeListener = null;
+        pendingHeartbeatNonce = null;
         running = false;
         generation++;
         if (failedListener != null) {
