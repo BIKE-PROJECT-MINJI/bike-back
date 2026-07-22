@@ -398,15 +398,64 @@ jobs:
           set -euo pipefail
           command_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --timeout-seconds 600 --comment "bike-back deploy ${GITHUB_SHA}" --parameters file://ssm-deploy.json --query Command.CommandId --output text)"
           printf 'command_id=%s\n' "$command_id" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$command_id" > deploy-state-machine-command-id.txt
           terminal_status=''
-          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; [ "$status" = Success ] && exit 0; case "$status" in Pending|InProgress|Delayed|Cancelling) sleep 10;; *) terminal_status="$status"; break;; esac; done
-          if test -z "$terminal_status"; then aws ssm cancel-command --command-id "$command_id"; for _ in $(seq 1 15); do status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; case "$status" in Cancelled|TimedOut|Failed|Success) terminal_status="$status"; break;; Pending|InProgress|Delayed|Cancelling) sleep 2;; *) exit 1;; esac; done; fi
-          test -n "$terminal_status"; aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" > deploy-state-machine-terminal.json
-          reconcile_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --timeout-seconds 600 --comment 'bike-back deploy terminal reconciliation' --parameters file://ssm-reconcile.json --query Command.CommandId --output text)"; printf '%s\n' "$reconcile_id" > deploy-reconciliation-command-id.txt
-          reconcile_terminal=''
-          for _ in $(seq 1 60); do status="$(aws ssm get-command-invocation --command-id "$reconcile_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; case "$status" in Pending|InProgress|Delayed|Cancelling) sleep 10;; *) reconcile_terminal="$status"; break;; esac; done
-          if test -z "$reconcile_terminal"; then aws ssm cancel-command --command-id "$reconcile_id"; for _ in $(seq 1 15); do status="$(aws ssm get-command-invocation --command-id "$reconcile_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"; case "$status" in Cancelled|TimedOut|Failed|Success) reconcile_terminal="$status"; break;; Pending|InProgress|Delayed|Cancelling) sleep 2;; *) exit 1;; esac; done; fi
-          test -n "$reconcile_terminal"; aws ssm get-command-invocation --command-id "$reconcile_id" --instance-id "$APP_INSTANCE_ID" > deploy-reconciliation.json; printf '{"commandId":"%s","terminalStatus":"%s"}\n' "$reconcile_id" "$reconcile_terminal" > deploy-reconciliation-control.json
+          cancel_status='not-needed'
+          poll_terminal() {
+            command_id="$1"; attempts="$2"; pause="$3"; terminal_status=''
+            for _ in $(seq 1 "$attempts"); do
+              status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" --query Status --output text || true)"
+              case "$status" in
+                Success|Cancelled|TimedOut|Failed) terminal_status="$status"; break ;;
+                Pending|InProgress|Delayed|Cancelling) sleep "$pause" ;;
+                *) terminal_status=Unconfirmed; break ;;
+              esac
+            done
+          }
+          poll_terminal "$command_id" 60 10
+          if test -z "$terminal_status"; then
+            if aws ssm cancel-command --command-id "$command_id"; then
+              cancel_status=issued
+            else
+              cancel_status=failed
+            fi
+            # Cancellation failure and a still-running target are both ambiguous:
+            # finish the bounded terminal wait before reconciliation owns the lock.
+            poll_terminal "$command_id" 15 2
+          fi
+          primary_terminal_status="${terminal_status:-Unconfirmed}"
+          if ! aws ssm get-command-invocation --command-id "$command_id" --instance-id "$APP_INSTANCE_ID" > deploy-state-machine-terminal.json; then
+            printf '{"commandId":"%s","state":"retrieval-error"}\n' "$command_id" > deploy-state-machine-terminal.json
+          fi
+          reconciliation_required=false
+          reconcile_id=''
+          reconcile_terminal='not-run'
+          reconcile_cancel_status='not-needed'
+          reconciliation_outcome='not-run'
+          final_outcome=success
+          if test "$primary_terminal_status" != Success; then
+            reconciliation_required=true
+            final_outcome=failure
+            reconcile_id="$(aws ssm send-command --instance-ids "$APP_INSTANCE_ID" --document-name AWS-RunShellScript --timeout-seconds 600 --comment 'bike-back deploy terminal reconciliation' --parameters file://ssm-reconcile.json --query Command.CommandId --output text)"
+            printf '%s\n' "$reconcile_id" > deploy-reconciliation-command-id.txt
+            poll_terminal "$reconcile_id" 60 10
+            if test -z "$terminal_status"; then
+              if aws ssm cancel-command --command-id "$reconcile_id"; then
+                reconcile_cancel_status=issued
+              else
+                reconcile_cancel_status=failed
+              fi
+              poll_terminal "$reconcile_id" 15 2
+            fi
+            reconcile_terminal="${terminal_status:-Unconfirmed}"
+            if test "$reconcile_terminal" = Success; then reconciliation_outcome=success; else reconciliation_outcome=failure; fi
+            if ! aws ssm get-command-invocation --command-id "$reconcile_id" --instance-id "$APP_INSTANCE_ID" > deploy-reconciliation.json; then
+              printf '{"commandId":"%s","state":"retrieval-error"}\n' "$reconcile_id" > deploy-reconciliation.json
+            fi
+            printf '{"commandId":"%s","terminalStatus":"%s","cancelCommandStatus":"%s","finalOutcome":"%s"}\n' "$reconcile_id" "$reconcile_terminal" "$reconcile_cancel_status" "$reconciliation_outcome" > deploy-reconciliation-control.json
+          fi
+          printf '{"commandId":"%s","terminalStatus":"%s","cancelCommandStatus":"%s","reconciliationRequired":%s,"reconciliationCommandId":"%s","reconciliationTerminalStatus":"%s","reconciliationCancelCommandStatus":"%s","finalOutcome":"%s"}\n' "$command_id" "$primary_terminal_status" "$cancel_status" "$reconciliation_required" "$reconcile_id" "$reconcile_terminal" "$reconcile_cancel_status" "$final_outcome" > deploy-state-machine-control.json
+          test "$primary_terminal_status" = Success && exit 0
           test "$reconcile_terminal" = Success; exit 1
 
       - name: Verify public health and readiness with compensation
@@ -592,7 +641,7 @@ jobs:
           capture public-rollback "$rollback_id" deployment-evidence/public-rollback.json
           public_reconcile_id="$(cat public-rollback-reconciliation-command-id.txt 2>/dev/null || true)"
           capture public-rollback-reconciliation "$public_reconcile_id" deployment-evidence/public-rollback-reconciliation.json
-          cp -f deploy-state-machine-terminal.json deploy-reconciliation.json deploy-reconciliation-control.json public-rollback-terminal.json public-rollback-control.json public-rollback-reconciliation.json public-rollback-reconciliation-control.json deployment-evidence/ 2>/dev/null || true
+          cp -f deploy-state-machine-command-id.txt deploy-state-machine-terminal.json deploy-state-machine-control.json deploy-reconciliation.json deploy-reconciliation-control.json public-rollback-terminal.json public-rollback-control.json public-rollback-reconciliation.json public-rollback-reconciliation-control.json deployment-evidence/ 2>/dev/null || true
           cp -f artifact-upload-manifest.json deployment-evidence/artifact-upload-manifest.json 2>/dev/null || true
           cp -f artifact-put.err deployment-evidence/artifact-put.err 2>/dev/null || true
           validate() {
@@ -616,16 +665,22 @@ jobs:
           validate_owned_transition public-rollback deployment-evidence/public-rollback.json
           validate_owned_transition public-rollback-reconciliation deployment-evidence/public-rollback-reconciliation.json
           validate_control() {
-            phase="$1"; id_file="$2"; source="$3"
-            if test -s "$id_file" && test -f "$source" && ! PHASE="$phase" ID_FILE="$id_file" SOURCE="$source" python3 -c 'import json,os; command_id=open(os.environ["ID_FILE"]).read().strip(); value=json.load(open(os.environ["SOURCE"])); phase=os.environ["PHASE"]; assert command_id and value["commandId"]==command_id and value["terminalStatus"] in ("Success","Cancelled","TimedOut","Failed","Unconfirmed"); assert phase != "public-rollback" or (value.get("cancelCommandStatus") in ("not-needed","issued","failed") and isinstance(value.get("reconciliationRequired"),bool) and value.get("reconciliationTerminalStatus") in ("not-run","Success","Cancelled","TimedOut","Failed","Unconfirmed") and ((value["reconciliationRequired"] and value.get("reconciliationCommandId")) or (not value["reconciliationRequired"] and value.get("reconciliationCommandId")==""))); assert phase != "public-rollback-reconciliation" or value.get("cancelCommandStatus") in ("not-needed","issued","failed")'; then
-              failures="${failures}${failures:+,}${phase}:control"
+            phase="$1"; id_file="$2"; source="$3"; phase_evidence="$4"
+            control_required="$(SOURCE="$phase_evidence" python3 -c 'import json,os; print("yes" if json.load(open(os.environ["SOURCE"])).get("state") != "not-run" else "no")')"
+            if test "$control_required" = yes || test -s "$id_file" || test -f "$source"; then
+              if ! test -s "$id_file" || ! test -f "$source"; then
+                failures="${failures}${failures:+,}${phase}:control"
+              elif ! PHASE="$phase" ID_FILE="$id_file" SOURCE="$source" python3 -c 'import json,os; command_id=open(os.environ["ID_FILE"]).read().strip(); value=json.load(open(os.environ["SOURCE"])); phase=os.environ["PHASE"]; terminal=("Success","Cancelled","TimedOut","Failed","Unconfirmed"); cancel=("not-needed","issued","failed"); assert command_id and value["commandId"]==command_id and value["terminalStatus"] in terminal; assert phase != "deploy-state-machine" or (value.get("cancelCommandStatus") in cancel and isinstance(value.get("reconciliationRequired"),bool) and value.get("reconciliationTerminalStatus") in ("not-run",)+terminal and value.get("reconciliationCancelCommandStatus") in cancel and value.get("finalOutcome") in ("success","failure") and ((value["reconciliationRequired"] and value.get("reconciliationCommandId")) or (not value["reconciliationRequired"] and value.get("reconciliationCommandId")==""))); assert phase != "deploy-reconciliation" or (value.get("cancelCommandStatus") in cancel and value.get("finalOutcome") in ("success","failure")); assert phase != "public-rollback" or (value.get("cancelCommandStatus") in cancel and isinstance(value.get("reconciliationRequired"),bool) and value.get("reconciliationTerminalStatus") in ("not-run",)+terminal and ((value["reconciliationRequired"] and value.get("reconciliationCommandId")) or (not value["reconciliationRequired"] and value.get("reconciliationCommandId")==""))); assert phase != "public-rollback-reconciliation" or value.get("cancelCommandStatus") in cancel'; then
+                failures="${failures}${failures:+,}${phase}:control"
+              fi
             fi
           }
-          validate_control deploy-reconciliation deploy-reconciliation-command-id.txt deployment-evidence/deploy-reconciliation-control.json
-          validate_control public-rollback rollback-command-id.txt deployment-evidence/public-rollback-control.json
-          validate_control public-rollback-reconciliation public-rollback-reconciliation-command-id.txt deployment-evidence/public-rollback-reconciliation-control.json
+          validate_control deploy-state-machine deploy-state-machine-command-id.txt deployment-evidence/deploy-state-machine-control.json deployment-evidence/deploy-state-machine.json
+          validate_control deploy-reconciliation deploy-reconciliation-command-id.txt deployment-evidence/deploy-reconciliation-control.json deployment-evidence/deploy-reconciliation.json
+          validate_control public-rollback rollback-command-id.txt deployment-evidence/public-rollback-control.json deployment-evidence/public-rollback.json
+          validate_control public-rollback-reconciliation public-rollback-reconciliation-command-id.txt deployment-evidence/public-rollback-reconciliation-control.json deployment-evidence/public-rollback-reconciliation.json
           if ! EXPECTED_BUCKET="$DEPLOY_S3_BUCKET" EXPECTED_SHA="$GITHUB_SHA" EXPECTED_DIGEST='${{ steps.artifact_upload.outputs.digest }}' EXPECTED_VERSION='${{ steps.artifact_upload.outputs.version_id }}' python3 -c 'import json,os; value=json.load(open("deployment-evidence/artifact-upload-manifest.json")); digest=os.environ["EXPECTED_DIGEST"]; assert set(value)=={"bucket","key","versionId","disposition","digest"}; assert value["bucket"]==os.environ["EXPECTED_BUCKET"]; assert value["key"]=="bike-back/releases/"+os.environ["EXPECTED_SHA"]+"/"+digest+"/app.jar"; assert value["versionId"]==os.environ["EXPECTED_VERSION"]; assert value["digest"]==digest; assert value["disposition"]=="immutable-upload-or-verified-reuse"'; then failures="${failures:+$failures,}artifact-upload-manifest:validation"; fi
-          cp -f public-health.json public-ready.json rollback-health.json rollback-ready.json rollback-command-id.txt public-rollback-reconciliation-command-id.txt deployment-evidence/ 2>/dev/null || true
+          cp -f deploy-state-machine-command-id.txt public-health.json public-ready.json rollback-health.json rollback-ready.json rollback-command-id.txt public-rollback-reconciliation-command-id.txt deployment-evidence/ 2>/dev/null || true
           test -f deployment-evidence/artifact-upload-manifest.json && python3 -c 'import json; value=json.load(open("deployment-evidence/artifact-upload-manifest.json")); assert set(value)=={"bucket","key","versionId","disposition","digest"}; assert value["bucket"] and value["key"] and value["versionId"] and value["digest"]'
           final_verdict="$(FAILURES="$failures" INCOMING_JOB_STATUS='${{ job.status }}' python3 -c 'import json,os; failures=[value for value in os.environ["FAILURES"].split(",") if value]; incoming=os.environ["INCOMING_JOB_STATUS"]; verdict="success" if incoming == "success" and not failures else "failure"; print(json.dumps({"incomingJobStatus":incoming,"finalVerdict":verdict,"evidenceValidationErrors":failures,"evidenceValid":not failures},separators=(",",":")))')"
           printf '%s\n' "$final_verdict" > deployment-evidence/final-verdict.json
