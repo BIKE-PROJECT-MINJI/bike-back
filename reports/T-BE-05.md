@@ -1,0 +1,13 @@
+# T-BE-05 결과
+- A-T-BE-05-01: 두 Party WebSocket 컴포넌트의 public 런타임 생성자에 `@Autowired`를 추가했다.
+- Handler 컨텍스트 회귀 테스트는 Handler와 RevocationListener를 모두 생성한다.
+- A-T-BE-05-02: Redis Pub/Sub lifecycle auto-start를 `bike.party.redis.auto-start` 설정으로 주입했다.
+- 운영 기본값은 `true`이며 test profile은 명시적으로 `false`여서 외부 Redis 없이 컨텍스트가 기동한다.
+- 회귀 테스트는 기본값 true와 test 설정 false가 `isAutoStartup()`에 반영됨을 확인한다.
+- 직접 `start()`하는 Pub/Sub 단위 계약은 기존 Party WebSocket 집중 시험으로 보존·검증했다.
+- 집중 검증: 관련 5개 테스트 클래스를 실행해 BUILD SUCCESSFUL (2m 37s)을 확인했다.
+- 전체 검증: `./gradlew --rerun-tasks --no-daemon test --console=plain` BUILD SUCCESSFUL (12m 26s).
+- 최종 XML: `build/test-results/test/` 132개, tests 652 / failures 0 / errors 0 / skipped 0.
+- `git diff --check`: 통과.
+- 후보 SHA/PR: initial pushed candidate `4bf91f001c9779ca4464c2375aa8c1ed76e64b1d`; Draft PR https://github.com/BIKE-PROJECT-MINJI/bike-back/pull/88.
+- 남은 위험: test profile에서만 auto-start를 비활성화하며 운영 fail-closed 기본값은 유지한다.

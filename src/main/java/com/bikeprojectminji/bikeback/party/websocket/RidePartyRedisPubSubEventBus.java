@@ -11,6 +11,7 @@ import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.ObjectProvider;
@@ -41,6 +42,7 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
     private final Runnable stoppedConsumer;
     private final LongSupplier nanoTime;
     private final long heartbeatTimeoutNanos;
+    private final boolean autoStartup;
     private volatile boolean running;
     private volatile long generation;
     private volatile long confirmedGeneration = -1;
@@ -58,14 +60,15 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
             StringRedisTemplate redisTemplate,
             @Qualifier("ridePartyRedisMessageListenerContainer") RedisMessageListenerContainer listenerContainer,
             ObjectMapper objectMapper,
-            ObjectProvider<RidePartyDistributedStateService> distributedStateService
+            ObjectProvider<RidePartyDistributedStateService> distributedStateService,
+            @Value("${bike.party.redis.auto-start:true}") boolean autoStartup
     ) {
         this(redisTemplate, listenerContainer, objectMapper,
                 rawMessage -> distributedStateService.getObject().receive(rawMessage),
                 operation -> distributedStateService.getObject().onBusFailure(operation),
                 () -> distributedStateService.getObject().onSubscriptionStarting(),
                 () -> distributedStateService.getObject().onSubscriptionConfirmed(),
-                () -> distributedStateService.getObject().onBusStopped());
+                () -> distributedStateService.getObject().onBusStopped(), autoStartup);
     }
 
     RidePartyRedisPubSubEventBus(
@@ -101,8 +104,23 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
 
     RidePartyRedisPubSubEventBus(StringRedisTemplate redisTemplate, RedisMessageListenerContainer listenerContainer,
             ObjectMapper objectMapper, Consumer<String> inboundMessageConsumer, Consumer<String> failureConsumer,
+            Runnable recoveringConsumer, Runnable readyConsumer, Runnable stoppedConsumer, boolean autoStartup) {
+        this(redisTemplate, listenerContainer, objectMapper, inboundMessageConsumer, failureConsumer,
+                recoveringConsumer, readyConsumer, stoppedConsumer, System::nanoTime, HEARTBEAT_TIMEOUT_NANOS, autoStartup);
+    }
+
+    RidePartyRedisPubSubEventBus(StringRedisTemplate redisTemplate, RedisMessageListenerContainer listenerContainer,
+            ObjectMapper objectMapper, Consumer<String> inboundMessageConsumer, Consumer<String> failureConsumer,
             Runnable recoveringConsumer, Runnable readyConsumer, Runnable stoppedConsumer,
             LongSupplier nanoTime, long heartbeatTimeoutNanos) {
+        this(redisTemplate, listenerContainer, objectMapper, inboundMessageConsumer, failureConsumer,
+                recoveringConsumer, readyConsumer, stoppedConsumer, nanoTime, heartbeatTimeoutNanos, true);
+    }
+
+    RidePartyRedisPubSubEventBus(StringRedisTemplate redisTemplate, RedisMessageListenerContainer listenerContainer,
+            ObjectMapper objectMapper, Consumer<String> inboundMessageConsumer, Consumer<String> failureConsumer,
+            Runnable recoveringConsumer, Runnable readyConsumer, Runnable stoppedConsumer,
+            LongSupplier nanoTime, long heartbeatTimeoutNanos, boolean autoStartup) {
         this.redisTemplate = redisTemplate;
         this.listenerContainer = listenerContainer;
         this.objectMapper = objectMapper;
@@ -113,6 +131,7 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
         this.stoppedConsumer = stoppedConsumer;
         this.nanoTime = nanoTime;
         this.heartbeatTimeoutNanos = heartbeatTimeoutNanos;
+        this.autoStartup = autoStartup;
         this.listenerContainer.setErrorHandler(error -> fail("listener"));
     }
 
@@ -191,7 +210,7 @@ public class RidePartyRedisPubSubEventBus implements RidePartyDistributedEventPu
 
     @Override
     public boolean isAutoStartup() {
-        return true;
+        return autoStartup;
     }
 
     @Override

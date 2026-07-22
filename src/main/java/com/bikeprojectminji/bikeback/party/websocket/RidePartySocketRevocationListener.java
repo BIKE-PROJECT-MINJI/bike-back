@@ -2,6 +2,7 @@ package com.bikeprojectminji.bikeback.party.websocket;
 
 import com.bikeprojectminji.bikeback.party.event.RidePartyCanceledEvent;
 import com.bikeprojectminji.bikeback.party.event.RidePartyMemberLeftEvent;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -12,6 +13,7 @@ public class RidePartySocketRevocationListener {
     private final RidePartySocketSessionRegistry sessionRegistry;
     private final RidePartyDistributedStateService distributedStateService;
 
+    @Autowired
     public RidePartySocketRevocationListener(
             RidePartySocketSessionRegistry sessionRegistry,
             RidePartyDistributedStateService distributedStateService
