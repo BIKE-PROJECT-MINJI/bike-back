@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "failure": [
+    {
+      "id": "db-pool-exhaustion",
+      "precondition": "isolated non-production target; baseline /health=200 and /ready=200; DB assertions captured",
+      "injection": "temporarily apply approved low pool/connection timeout environment to one test app target",
+      "expected": "bounded 503 with Retry-After; /health remains 200; /ready reports unavailable without dependency details",
+      "forbidden": "raw 500, unbounded wait, committed partial write",
+      "stop": "stop immediately on raw 500, SLO breach, partial write, or unknown restore/cleanup evidence",
+      "evidence": "health/readiness samples, sanitized response summary, Hikari pending/timeout counters, DB before/after assertions",
+      "restore": "restore immutable environment and restart only the isolated test target",
+      "cleanup": "confirm original pool settings, /ready=200, no residual test rows or sessions"
+    },
+    {
+      "id": "redis-connect-command-failure",
+      "precondition": "isolated non-production target; Redis baseline and job/lock counts captured",
+      "injection": "apply approved unreachable Redis endpoint or bounded command timeout to one test target; never alter shared Redis",
+      "expected": "dependency-bound paths return bounded 503/Retry-After or documented DB/idempotency fallback",
+      "forbidden": "raw 500, duplicate job, lost idempotency, leaked Redis endpoint",
+      "stop": "stop immediately on raw 500, duplicate/orphan job, data loss, or unknown Redis restoration",
+      "evidence": "sanitized status/latency, retry metric, job and lock assertions, /health and /ready samples",
+      "restore": "restore immutable Redis configuration and restart isolated target",
+      "cleanup": "verify readiness, duplicate/orphan counts zero, residual injected configuration absent"
+    },
+    {
+      "id": "graphhopper-timeout",
+      "precondition": "test traffic uses synthetic route and approved timeout override; provider call budget recorded",
+      "injection": "route isolated target to deterministic timeout stub or bounded client timeout",
+      "expected": "documented fallback or bounded 503 with Retry-After and provider failure reason",
+      "forbidden": "raw 500, request beyond SLO, live provider mutation, location trace in evidence",
+      "stop": "stop immediately on raw 500, SLO breach, live call, unsafe evidence, or unknown cleanup",
+      "evidence": "redacted request alias, status/latency, fallback marker, provider failure counter",
+      "restore": "restore immutable GraphHopper endpoint/timeout and restart isolated target",
+      "cleanup": "verify normal synthetic route, /ready=200, timeout stub has no residual allocation"
+    },
+    {
+      "id": "ai-kakao-failure",
+      "precondition": "fake provider or approved failure stub; zero live-cost expectation; baseline fallback captured",
+      "injection": "select deterministic 429/timeout/error mode on fake AI or Kakao provider",
+      "expected": "feature-specific fallback/stale response, bounded retry, 429 or 503 according to API contract",
+      "forbidden": "raw 500, retry storm, token/credential URL, live billable call",
+      "stop": "stop immediately on raw 500, retry storm, live cost, secret exposure, or unknown cleanup",
+      "evidence": "fake-provider marker, sanitized status, retry count, fallback reason, cost counter zero",
+      "restore": "return fake provider to success mode and restore immutable endpoint",
+      "cleanup": "verify success probe, retry queue drained, no provider resource remains"
+    },
+    {
+      "id": "worker-stop",
+      "precondition": "test job IDs and RUNNING lease snapshot captured; backlog and TTL budget approved",
+      "injection": "stop only the isolated worker process through approved service command",
+      "expected": "app remains live; jobs stay recoverable; bounded backlog; retry after worker restart",
+      "forbidden": "raw 500, duplicate/orphan job, job/data loss, lease without expiry",
+      "stop": "stop immediately on raw 500, duplicate/orphan job, data loss, expired recovery SLO, or unknown lease",
+      "evidence": "job state timeline, lease owner/expiry aliases, backlog metric, app health/readiness",
+      "restore": "restart the same immutable worker artifact",
+      "cleanup": "assert each test job converges once, RUNNING lease recovered, backlog returns to baseline"
+    },
+    {
+      "id": "app-restart-failure",
+      "precondition": "isolated app target, immutable artifact SHA, target drain and rollback plan recorded",
+      "injection": "restart only the drained test app target",
+      "expected": "other target serves traffic; restarted target becomes ready before registration",
+      "forbidden": "raw 500, ALB unhealthy capacity, duplicate processing, data loss",
+      "stop": "stop immediately on raw 500, ALB unhealthy, duplicate/orphan work, data loss, or unknown target state",
+      "evidence": "target state timeline, /health and /ready, artifact checksum, request result summary",
+      "restore": "return original desired state and register only after readiness passes",
+      "cleanup": "all approved targets healthy, no drain residue, job/data assertions unchanged"
+    }
+  ],
+  "recoveryDeployment": [
+    {
+      "id": "app-worker-restart-lease-recovery",
+      "precondition": "test jobs, lease TTL, app/worker artifact SHAs and baseline assertions captured",
+      "injection": "drain app then restart app/worker one at a time using approved service command",
+      "expected": "expired RUNNING lease is reclaimed once and each job converges exactly once",
+      "forbidden": "duplicate/orphan job, data loss, stale RUNNING lease, artifact mismatch",
+      "stop": "stop immediately on duplicate/orphan job, data loss, stale lease, artifact mismatch, or unknown cleanup",
+      "evidence": "restart timeline, lease transition, job counts, artifact checksums, health/readiness",
+      "restore": "restore original process counts and immutable artifacts",
+      "cleanup": "zero orphan/duplicate jobs, no stale lease, backlog baseline, all targets ready"
+    },
+    {
+      "id": "target-drain",
+      "precondition": "at least two healthy test targets; connection and SLO budget approved",
+      "injection": "deregister one explicitly named test target and wait for drain",
+      "expected": "in-flight requests finish within drain budget and remaining target stays healthy",
+      "forbidden": "ALB unhealthy, dropped write, raw 500, unknown target identity",
+      "stop": "stop immediately on ALB unhealthy/unknown, raw 500, dropped write, or unknown target/cleanup state",
+      "evidence": "target health transitions, in-flight result summary, ALB healthy count, cleanup receipt",
+      "restore": "register original target only after /health and /ready pass",
+      "cleanup": "target set equals baseline and every target is healthy"
+    },
+    {
+      "id": "jar-switch-rollback",
+      "precondition": "current and previous jar paths are immutable, checksummed, and old artifact compatibility is proven",
+      "injection": "atomically switch current symlink to approved candidate; rollback switches to checksummed previous jar",
+      "expected": "candidate or previous artifact becomes ready within SLO without schema repair",
+      "forbidden": "checksum mismatch, rollback incompatibility, Flyway repair, raw 500, data loss",
+      "stop": "stop immediately on checksum/compatibility uncertainty, raw 500, data loss, failed readiness, or unknown cleanup",
+      "evidence": "before/after symlink target aliases, SHA-256, process status, health/readiness, DB assertions",
+      "restore": "switch to recorded known-good artifact and restart after explicit approval",
+      "cleanup": "one active process, known-good checksum active, temporary candidate removed by owner"
+    },
+    {
+      "id": "flyway-expand-contract-old-jar",
+      "precondition": "production-like disposable DB snapshot; migration and old/new jar SHAs recorded; backup receipt exists",
+      "injection": "print-only sequence: validate -> migrate expand-only schema -> new jar probe -> old jar compatibility probe",
+      "expected": "both artifacts operate against expanded schema; contract migration deferred until old artifact retirement",
+      "forbidden": "repair/reset, destructive contract before retirement, checksum mismatch, rollback incompatibility, data loss",
+      "stop": "stop immediately on repair/reset, checksum/compatibility uncertainty, data mismatch, or cleanup unknown",
+      "evidence": "Flyway info summary without URL, migration checksum, old/new probe results, row-count/hash assertions",
+      "restore": "discard disposable DB; production restoration requires separate approved backup/restore runbook",
+      "cleanup": "disposable resources removed with receipt; migration history and data assertions retained redacted"
+    }
+  ]
+}
